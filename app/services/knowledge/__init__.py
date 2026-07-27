@@ -1,3 +1,3 @@
-from app.services.knowledge.service import KnowledgeIndexService
+from app.services.knowledge.service import IndexSummary, KnowledgeIndexService
 
-__all__ = ["KnowledgeIndexService"]
+__all__ = ["IndexSummary", "KnowledgeIndexService"]
