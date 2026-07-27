@@ -5,11 +5,24 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import select, text
 
+from app.core.config import get_settings
 from app.core.database import SessionLocal, engine
-from app.models import DataSource
-from app.models.enums import AuthenticityType, DataType
+from app.models import (
+    DataSource,
+    EvaluationSample,
+    Penalty,
+    ProductDocument,
+    Regulation,
+)
+from app.models.enums import (
+    AuthenticityType,
+    DatasetSplit,
+    DataType,
+    ReviewStatus,
+    SampleCategory,
+)
 from app.repositories import DocumentRepository
-from app.services.collection import LocalDirectoryCollector, WebPageCollector
+from app.services.collection import FileCollector, LocalDirectoryCollector, WebPageCollector
 from app.services.knowledge import KnowledgeIndexService
 from app.services.parsing import ParsingService
 from app.services.review import ReviewService
@@ -173,10 +186,102 @@ def health_check() -> None:
 
 @app.command("seed")
 def seed() -> None:
-    """Print seed guidance; demo files are collected with collect-directory."""
+    """Load explicitly labeled demo documents and constructed evaluation samples."""
+    samples_dir = get_settings().data_dir.resolve() / "samples"
+    document_specs = [
+        (
+            samples_dir / "demo_regulation.html",
+            DataType.REGULATION.value,
+            "本演示规则不具有法律效力",
+        ),
+        (
+            samples_dir / "demo_penalty.txt",
+            DataType.PENALTY.value,
+            "本演示处罚事实不对应任何真实机构或个人",
+        ),
+        (
+            samples_dir / "demo_product.txt",
+            DataType.PRODUCT_DOCUMENT.value,
+            "本演示产品条款不对应任何真实保险产品",
+        ),
+    ]
+    collector = FileCollector()
     with SessionLocal() as session:
-        count = len(list(session.scalars(select(DataSource))))
-    typer.echo(f"registered_sources={count}; demo files are in data/samples")
+        documents = {}
+        for path, data_type, _ in document_specs:
+            document, _ = collector.persist(
+                session,
+                collector.collect(path),
+                data_type,
+                authenticity_type=AuthenticityType.DEMO_ONLY.value,
+            )
+            if document.parse_status == "pending":
+                ParsingService().parse_document(session, document)
+            documents[data_type] = document
+        regulation = documents[DataType.REGULATION.value]
+        if not session.scalar(select(Regulation).where(Regulation.document_id == regulation.id)):
+            session.add(
+                Regulation(
+                    document_id=regulation.id,
+                    title="演示监管规则",
+                    article_text="本演示规则不具有法律效力",
+                    source_quote="本演示规则不具有法律效力",
+                    validity_status="demo_only",
+                    final_review_status=ReviewStatus.PARSED.value,
+                )
+            )
+        penalty_doc = documents[DataType.PENALTY.value]
+        if not session.scalar(select(Penalty).where(Penalty.document_id == penalty_doc.id)):
+            session.add(
+                Penalty(
+                    document_id=penalty_doc.id,
+                    illegal_facts="虚构情景：演示材料信息披露不完整。",
+                    original_sales_wording_disclosed=False,
+                    original_sales_wording=None,
+                    source_quote="本演示处罚事实不对应任何真实机构或个人",
+                    final_review_status=ReviewStatus.PARSED.value,
+                )
+            )
+        product_doc = documents[DataType.PRODUCT_DOCUMENT.value]
+        if not session.scalar(
+            select(ProductDocument).where(ProductDocument.document_id == product_doc.id)
+        ):
+            session.add(
+                ProductDocument(
+                    document_id=product_doc.id,
+                    product_name="演示产品（非真实产品）",
+                    waiting_period="演示等待期：三十日",
+                    exclusions="演示除外责任",
+                    source_quote="本演示产品条款不对应任何真实保险产品",
+                    final_review_status=ReviewStatus.PARSED.value,
+                )
+            )
+        session.commit()
+        ValidationService().validate_pending(session)
+        if not list(session.scalars(select(EvaluationSample))):
+            categories = [
+                SampleCategory.COMPLIANT,
+                SampleCategory.BOUNDARY,
+                SampleCategory.RISKY,
+                SampleCategory.ADVERSARIAL,
+                SampleCategory.MULTI_RISK,
+            ]
+            for index, category in enumerate(categories, 1):
+                session.add(
+                    EvaluationSample(
+                        sample_text=f"人工构造演示样本 {index}，不代表真实销售记录。",
+                        sample_category=category.value,
+                        risk_labels=["demo"],
+                        expected_evidence={"required": "人工审核"},
+                        construction_basis="为验证确定性流程人工构造",
+                        authenticity_type=AuthenticityType.CONSTRUCTED_FOR_EVALUATION.value,
+                        split=DatasetSplit.TRAIN.value,
+                        final_review_status=ReviewStatus.PENDING_REVIEW.value,
+                    )
+                )
+            session.commit()
+        count = len(list(session.scalars(select(EvaluationSample))))
+    typer.echo(f"demo_documents=3 evaluation_samples={count}")
 
 
 if __name__ == "__main__":

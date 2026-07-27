@@ -1,3 +1,5 @@
+from typing import Any
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -67,7 +69,7 @@ class ValidationService:
 
     @staticmethod
     def _structured_record(session: Session, document: SourceDocument) -> object | None:
-        model = {
+        model: Any = {
             DataType.REGULATION.value: Regulation,
             DataType.PENALTY.value: Penalty,
             DataType.PRODUCT_DOCUMENT.value: ProductDocument,

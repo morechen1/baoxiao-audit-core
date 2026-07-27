@@ -7,7 +7,7 @@ from app.services.parsing.base import DocumentParser, ParsedDocument, ParsedPage
 
 class DocxParser(DocumentParser):
     def parse(self, path: Path) -> ParsedDocument:
-        document = Document(path)
+        document = Document(str(path))
         paragraphs: list[str] = []
         headings: list[dict[str, str | int]] = []
         title = path.stem

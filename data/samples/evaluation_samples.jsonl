@@ -1,0 +1,5 @@
+{"sample_text":"人工构造演示样本 1，不代表真实销售记录。","sample_category":"compliant","risk_labels":["demo"],"construction_basis":"为验证确定性流程人工构造","authenticity_type":"constructed_for_evaluation","split":"train"}
+{"sample_text":"人工构造演示样本 2，不代表真实销售记录。","sample_category":"boundary","risk_labels":["demo"],"construction_basis":"为验证确定性流程人工构造","authenticity_type":"constructed_for_evaluation","split":"train"}
+{"sample_text":"人工构造演示样本 3，不代表真实销售记录。","sample_category":"risky","risk_labels":["demo"],"construction_basis":"为验证确定性流程人工构造","authenticity_type":"constructed_for_evaluation","split":"train"}
+{"sample_text":"人工构造演示样本 4，不代表真实销售记录。","sample_category":"adversarial","risk_labels":["demo"],"construction_basis":"为验证确定性流程人工构造","authenticity_type":"constructed_for_evaluation","split":"validation"}
+{"sample_text":"人工构造演示样本 5，不代表真实销售记录。","sample_category":"multi_risk","risk_labels":["demo"],"construction_basis":"为验证确定性流程人工构造","authenticity_type":"constructed_for_evaluation","split":"sealed_test"}

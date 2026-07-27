@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.models import (
+    EvaluationSample,
     Penalty,
     ProductDocument,
     Regulation,
@@ -37,14 +38,29 @@ class ReviewService:
     def export_batch(self, session: Session, data_type: str, file_format: str) -> ReviewBatch:
         if file_format not in {"jsonl", "xlsx"}:
             raise ValueError("format must be jsonl or xlsx")
-        records = DocumentRepository(session).list(
-            status=ReviewStatus.PENDING_REVIEW.value, data_type=data_type
-        )
+        records: list[Any]
+        if data_type == DataType.EVALUATION_SAMPLE.value:
+            records = list(
+                session.scalars(
+                    select(EvaluationSample).where(
+                        EvaluationSample.final_review_status == ReviewStatus.PENDING_REVIEW.value
+                    )
+                )
+            )
+        else:
+            records = DocumentRepository(session).list(
+                status=ReviewStatus.PENDING_REVIEW.value, data_type=data_type
+            )
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         output_dir = self.settings.data_dir.resolve() / "review_batches"
         output_dir.mkdir(parents=True, exist_ok=True)
         path = output_dir / f"{data_type}-{timestamp}.{file_format}"
-        rows = [self._review_row(item) for item in records]
+        rows = [
+            self._evaluation_review_row(item)
+            if isinstance(item, EvaluationSample)
+            else self._review_row(item)
+            for item in records
+        ]
         if file_format == "jsonl":
             path.write_text(
                 "".join(json.dumps(row, ensure_ascii=False, default=str) + "\n" for row in rows),
@@ -107,9 +123,6 @@ class ReviewService:
             record_id = int(payload["record_id"])
         except (TypeError, ValueError) as exc:
             raise ValueError("record_id must be an integer") from exc
-        document = DocumentRepository(session).get(record_id)
-        if not document or document.data_type != payload["record_type"]:
-            raise ValueError("record_id and record_type do not identify a document")
         final_status = str(payload["final_status"])
         if final_status not in LEGAL_REVIEW_STATUSES:
             raise ValueError(f"Illegal final_status: {final_status}")
@@ -121,6 +134,13 @@ class ReviewService:
             raise ValueError("approved_with_revision requires corrections")
         if not isinstance(corrections, dict):
             raise TypeError("corrections must be an object")
+        if payload["record_type"] == DataType.EVALUATION_SAMPLE.value:
+            return self._apply_evaluation_decision(
+                session, record_id, payload, final_status, corrections, quality, batch_id
+            )
+        document = DocumentRepository(session).get(record_id)
+        if not document or document.data_type != payload["record_type"]:
+            raise ValueError("record_id and record_type do not identify a document")
         document.corrected_fields_json = {**document.corrected_fields_json, **corrections}
         self._apply_structured_corrections(session, document, corrections)
         DocumentRepository(session).transition(document, final_status, "human review")
@@ -157,10 +177,78 @@ class ReviewService:
         }
 
     @staticmethod
+    def _evaluation_review_row(sample: EvaluationSample) -> dict[str, Any]:
+        return {
+            "record_id": sample.id,
+            "record_type": DataType.EVALUATION_SAMPLE.value,
+            "source_url": None,
+            "source_title": "人工构造评测样本",
+            "publisher": None,
+            "published_at": None,
+            "raw_text_summary": sample.sample_text[:500],
+            "parsed_fields": {
+                "sample_category": sample.sample_category,
+                "risk_labels": sample.risk_labels,
+                "expected_evidence": sample.expected_evidence,
+                "construction_basis": sample.construction_basis,
+                "split": sample.split,
+            },
+            "source_quotes": [],
+            "automatic_validation": {"valid": True, "issues": []},
+            "current_status": sample.final_review_status,
+        }
+
+    @staticmethod
+    def _apply_evaluation_decision(
+        session: Session,
+        record_id: int,
+        payload: dict[str, Any],
+        final_status: str,
+        corrections: dict[str, Any],
+        quality: str,
+        batch_id: int | None,
+    ) -> ReviewDecision:
+        sample = session.get(EvaluationSample, record_id)
+        if not sample:
+            raise ValueError("record_id and record_type do not identify an evaluation sample")
+        protected = {"id", "authenticity_type", "created_at"}
+        for key, value in corrections.items():
+            if key not in protected and hasattr(sample, key):
+                setattr(sample, key, value)
+        old_status = sample.final_review_status
+        sample.final_review_status = final_status
+        from app.models import StatusHistory
+
+        session.add(
+            StatusHistory(
+                record_type=DataType.EVALUATION_SAMPLE.value,
+                record_id=sample.id,
+                from_status=old_status,
+                to_status=final_status,
+                reason="human review",
+            )
+        )
+        decision = ReviewDecision(
+            batch_id=batch_id,
+            record_type=DataType.EVALUATION_SAMPLE.value,
+            record_id=sample.id,
+            decision=final_status,
+            field_reviews_json=payload.get("field_reviews") or {},
+            corrections_json=corrections,
+            evidence_quality=quality,
+            review_comment=payload.get("review_comment"),
+            reviewer=str(payload["reviewer"]),
+        )
+        session.add(decision)
+        session.commit()
+        session.refresh(decision)
+        return decision
+
+    @staticmethod
     def _apply_structured_corrections(
         session: Session, document: SourceDocument, corrections: dict[str, Any]
     ) -> None:
-        model = {
+        model: Any = {
             DataType.REGULATION.value: Regulation,
             DataType.PENALTY.value: Penalty,
             DataType.PRODUCT_DOCUMENT.value: ProductDocument,
