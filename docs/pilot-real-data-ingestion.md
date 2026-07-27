@@ -18,12 +18,38 @@ Pilot 用 3 份核心监管规则、10 条行政处罚、5 条监管典型案例
 
 1. 项目规划者确认发布机构、具体官方栏目、使用条款和 robots 政策；
 2. 明确基础 URL、允许域名、是否允许子域和最多文件数；
-3. 在 `confirmed_by` 记录确认角色或人员标识；
-4. 最后才将 `enabled` 改为 `true`。
+3. 在 `robots_review` 和 `terms_review` 中分别记录枚举状态、检查日期、检查人、
+   参考地址和说明；
+4. 在 `approval` 中记录批准人、带时区批准时间和审批引用；
+5. 在 `confirmed_by` 记录确认角色或人员标识；
+6. 最后才将 `enabled` 改为 `true`。
 
 未经确认的来源必须保持禁用。`allow_subdomains=false` 时，子域即使与基础域同根也会被
 拒绝；显式允许的其他域名仍须写入 `allowed_domains`。网络采集继续执行 DNS、私网、
 云元数据、连接对端和逐跳重定向检查。
+
+允许的 robots 状态为 `allowed` 或经人工确认网站未单独发布规则的
+`not_published_manual_review`；允许的条款状态为 `public_access_allowed` 或
+`not_published_manual_review`。`prohibited` 不能启用采集。示例：
+
+```yaml
+robots_review:
+  status: allowed
+  checked_at: "2026-07-27"
+  checked_by: project_planner
+  reference_url: "https://<确认的官方域名>/robots.txt"
+  notes: "允许访问明确公开文件"
+terms_review:
+  status: public_access_allowed
+  checked_at: "2026-07-27"
+  checked_by: project_planner
+  reference_url: "https://<确认的官方域名>/terms"
+  notes: "仅下载公开原件，不进行栏目遍历"
+approval:
+  approved_by: project_planner
+  approved_at: "2026-07-27T12:00:00+08:00"
+  approval_reference: "pilot-source-review-001"
+```
 
 ## Manifest 审批
 
@@ -43,7 +69,8 @@ rejected
 
 新条目先使用 `draft`。项目规划者核对明确 URL、来源类型和用途后填写
 `confirmed_by`，再改为 `approved_for_collection`。只有该状态会发起网络请求；其他
-状态由采集命令跳过。`pilot_id` 在所有 Manifest 中必须唯一。
+状态由采集命令跳过。批准项还必须填写 `approved_at` 和
+`approval_reference`。`pilot_id` 在所有 Manifest 和数据库账本中必须全局唯一。
 
 先运行：
 
@@ -53,7 +80,9 @@ python -m app.cli.main pilot-validate-manifests \
 ```
 
 校验会检查 JSONL/Pydantic 格式、来源登记和启用状态、类型一致性、域名白名单、
-`pilot_id` 唯一性、审批信息和静态网络安全边界。
+`pilot_id` 唯一性、审批信息和静态网络安全边界。`pilot-collect` 会再次对全部来源文件
+和全部 Manifest 执行相同的全局校验；任何配置错误都会在网络或数据库操作前返回
+`pilot_configuration_invalid`。
 
 ## 采集与解析
 
@@ -68,10 +97,22 @@ python -m app.cli.main pilot-collect \
   --manifest pilot/manifests/product_documents.jsonl
 ```
 
-采集调用现有安全采集器并保留 `DocumentOccurrence`。每项输出独立 JSON 结果；一个下载
+配置通过后系统先创建 `PilotCollectionRun`，并为每个已审批项目固化
+`PilotCollectionItem`。采集调用现有安全采集器并保留 `DocumentOccurrence`。每项输出
+独立 JSON 结果；一个下载
 失败不会终止其余条目。新文档和重复文档都不能由采集参数声明
 `verified_public`，初始真实性固定为 `pending_verification`。采集不会自动解析、生成
 结构化字段、审核或索引。
+
+Pilot Item 保存 Manifest 条目哈希、来源登记哈希、审批快照、来源版本、文档 ID 和
+Occurrence ID。Occurrence 只表达来源出现事实，不保存或覆盖 Pilot 身份。多个 Pilot
+可以引用同一 Occurrence。来源 YAML 的名称、publisher、基础 URL、类型或允许域变化
+时，完整审批通过后创建新的 `PilotSourceRegistration` 版本和新的 `DataSource`；
+旧版本和旧 Item 不变。
+
+每个来源版本的 `max_documents`、`last_request_at` 和请求时隙都在数据库事务及行锁下
+累计执行。成功 Item 与正在请求的 Item 共同占用上限；网络失败也会更新时间槽。已经
+成功的 `pilot_id` 再次执行返回 `already_collected`，不会再次发起请求。
 
 后续命令必须由操作者显式运行：
 
@@ -81,6 +122,7 @@ python -m app.cli.main import-structured-drafts \
   --file <人工准备并核对证据的JSONL>
 python -m app.cli.main validate-pending
 python -m app.cli.main pilot-status
+python -m app.cli.main pilot-status --run-id 1
 ```
 
 扫描 PDF 只进入 `requires_ocr`，等待独立 OCR/人工流程。本阶段不得用猜测文本替代。
@@ -158,6 +200,11 @@ python -m app.cli.main pilot-quality-report \
 命令同时生成 Markdown，汇总来源/文件数、下载与解析成功率、重复率、扫描 PDF 比例、
 字段完整率、字段证据覆盖率、自动校验通过率、待审数量和按来源错误类型。报告目录已被
 Git 忽略，只保留 `.gitkeep`。
+
+状态和质量报告的事实来源仅为 `PilotCollectionRun`、`PilotCollectionItem`、来源版本、
+文档、Occurrence、结构化记录和审核/索引状态。支持累计范围和 `--run-id`；删除或清空
+Manifest 不会删除历史。运行 JSONL 只是带 `run_id`/`collection_item_id` 的可选导出，
+不会被报告重新读入。
 
 ## 失败处理
 

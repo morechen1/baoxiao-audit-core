@@ -11,6 +11,11 @@
   哈希、解析器版本和时间；重新解析不会覆盖历史版本。
 - `document_occurrences`：同一内容在不同来源出现的来源 ID、URL、发布方、HTTP 状态和
   元数据；真实性决定引用具体 occurrence。
+- `pilot_source_registrations`：经 robots、使用条款和人工审批的来源登记不可变版本，
+  包含稳定哈希、累计请求时间、单版本采集上限及对应 `data_source`。
+- `pilot_collection_runs`：一次受控试采集的配置集合哈希、操作者、运行状态和结果计数。
+- `pilot_collection_items`：全局唯一 `pilot_id`、Manifest/来源哈希、审批快照、明确的
+  document/occurrence 绑定、尝试次数和固定错误码；它是 Pilot 历史报告的事实来源。
 - `regulations`、`penalties`、`product_documents`：三类公开文档的结构化字段、
   兼容展示引用和正式校验用的 `field_evidence_json`。
 - `structured_draft_revisions`：预审字段/证据的前后值、动作、原因、操作人和时间。
@@ -42,3 +47,7 @@
 
 `final_review_status` 只保存人工审核结果。`knowledge_index_status` 独立取值
 `not_indexed | indexed | index_failed`，`indexed_at` 记录索引时间。
+
+Pilot 来源登记发生名称、发布机构、URL、类型或抓取策略变化时创建新版本，不修改旧
+`data_sources` 或旧 PilotItem。`max_documents` 和 `last_request_at` 均按来源版本在
+数据库事务内锁定与累计；JSONL 只是带 run/item ID 的可选导出，不参与历史指标计算。

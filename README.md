@@ -62,8 +62,11 @@ python -m app.cli.main pilot-validate-manifests --path pilot/manifests
 python -m app.cli.main pilot-collect \
   --manifest pilot/manifests/regulations.jsonl
 python -m app.cli.main pilot-status
+python -m app.cli.main pilot-status --run-id 1
 python -m app.cli.main pilot-quality-report \
   --output pilot/reports/pilot-quality-report.json
+python -m app.cli.main pilot-quality-report \
+  --run-id 1 --output pilot/reports/pilot-run-1-quality.json
 python -m app.cli.main parse-pending
 python -m app.cli.main import-structured-drafts \
   --file ./data/parsed/structured_drafts.jsonl
@@ -165,7 +168,8 @@ make test
 - 不包含权限、前端、向量、RAG、LLM 推断或自动法律结论。
 - API 当前只适合受控网络环境，不包含生产级身份认证。
 - LLM、Embedding 和 OCR 保持完全禁用；接口预留不代表已接入这些能力。
-- 来源请求间隔已建模，当前单 URL 命令不负责跨任务全局限速。
+- 受控 Pilot 采集按不可变来源版本在数据库中累计上限并跨进程执行请求间隔；通用
+  `collect-url` 命令不属于 Pilot 账本流程。
 - 尚未建立法规修订、废止及替代关系库；`validity_status` 仅允许 `NULL/unknown`，
   API 统一展示“效力状态待核验”，不得解释为现行有效。
 
