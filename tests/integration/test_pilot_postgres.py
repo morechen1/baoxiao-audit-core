@@ -4,6 +4,7 @@ import json
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -177,6 +178,7 @@ def _run_concurrently(
                     settings, calls, lock
                 ),
                 sleep=lambda seconds: sleeps.append(seconds),
+                clock=lambda: datetime(2026, 7, 27, 12, tzinfo=UTC),
             )
             barrier.wait()
             return service.collect_manifest(
