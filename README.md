@@ -58,6 +58,12 @@ python -m app.cli.main collect-directory --path ./data/incoming \
   --source-type regulation
 python -m app.cli.main collect-local-manifest \
   --file ./data/import/local_import_manifest.jsonl
+python -m app.cli.main pilot-validate-manifests --path pilot/manifests
+python -m app.cli.main pilot-collect \
+  --manifest pilot/manifests/regulations.jsonl
+python -m app.cli.main pilot-status
+python -m app.cli.main pilot-quality-report \
+  --output pilot/reports/pilot-quality-report.json
 python -m app.cli.main parse-pending
 python -m app.cli.main import-structured-drafts \
   --file ./data/parsed/structured_drafts.jsonl
@@ -132,6 +138,8 @@ curl 'http://localhost:8000/records?status=pending_review'
    结构化记录和父文档状态一致且引用可在完整原文定位的数据才能被标记为 `indexed`。
 
 完整状态与审核格式见 [审核工作流](docs/review-workflow.md)。
+首批小规模真实公开数据的来源审批、Manifest、采集、质量报告与 Bundle 协作见
+[试采集流程](docs/pilot-real-data-ingestion.md)。
 
 ## LLM 后续接入
 
