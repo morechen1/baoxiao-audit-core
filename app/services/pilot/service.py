@@ -45,6 +45,7 @@ SUPPORTED_DOCUMENT_TYPES = frozenset(
         PilotSourceType.REGULATION,
         PilotSourceType.PENALTY,
         PilotSourceType.PRODUCT_DOCUMENT,
+        PilotSourceType.REGULATORY_CASE,
     }
 )
 ALLOWED_ROBOTS_STATUSES = frozenset(
@@ -372,12 +373,6 @@ class PilotService:
                 error_code="already_collected",
             )
         session.refresh(item)
-
-        if entry.source_type == PilotSourceType.REGULATORY_CASE:
-            item.status = "blocked_not_implemented"
-            item.last_error_code = "regulatory_case_model_not_implemented"
-            session.commit()
-            return self._outcome(item, run.id)
 
         limit_error, wait_seconds = self._reserve_request_slot(session, item, source_registration)
         if limit_error:

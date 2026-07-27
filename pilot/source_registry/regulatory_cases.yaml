@@ -1,2 +1,2 @@
-# 该类型仅作为 external_test_candidate；当前不会写入行政处罚表。
+# 初始用途为 external_test_candidate；独立建模且不会写入行政处罚表。
 sources: []
