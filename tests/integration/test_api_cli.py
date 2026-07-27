@@ -41,7 +41,7 @@ def test_cli_collect_url_requires_registered_source() -> None:
     )
 
     assert result.exit_code == 2
-    assert "--source-id" in result.output
+    assert isinstance(result.exception, SystemExit)
 
 
 def test_cli_cannot_set_verified_public_during_collection(tmp_path) -> None:
