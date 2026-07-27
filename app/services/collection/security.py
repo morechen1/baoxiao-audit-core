@@ -76,10 +76,16 @@ class SafeUrlPolicy:
         return frozenset(allowed)
 
     @staticmethod
-    def host_allowed_for_hosts(url: str, allowed_hosts: frozenset[str]) -> bool:
+    def host_allowed_for_hosts(
+        url: str,
+        allowed_hosts: frozenset[str],
+        *,
+        allow_subdomains: bool = True,
+    ) -> bool:
         target = (urlparse(url).hostname or "").rstrip(".").lower()
         return bool(target) and any(
-            target == host or target.endswith(f".{host}") for host in allowed_hosts
+            target == host or (allow_subdomains and target.endswith(f".{host}"))
+            for host in allowed_hosts
         )
 
     @classmethod

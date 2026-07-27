@@ -1,0 +1,7 @@
+{
+  "importable": false,
+  "source_type": "regulatory_case",
+  "case_usage": "external_test_candidate",
+  "design_status": "dedicated_model_required",
+  "note": "当前不得写入 penalties；项目规划者确认模型后再实现结构化导入。"
+}

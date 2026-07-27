@@ -32,6 +32,12 @@ from app.services.collection import (
 )
 from app.services.knowledge import KnowledgeIndexService
 from app.services.parsing import ParsingService
+from app.services.pilot.reporting import PilotReportService
+from app.services.pilot.service import (
+    PilotService,
+    append_collection_outcomes,
+    collection_outcomes_jsonl,
+)
 from app.services.review import ReviewService
 from app.services.state_machine import StateMachineService
 from app.services.structured_records import StructuredRecordService
@@ -187,6 +193,93 @@ def collect_local_manifest(
     typer.echo(f"imported={imported} failed={len(errors)}")
     for error in errors:
         typer.echo(error, err=True)
+
+
+@app.command("pilot-validate-manifests")
+def pilot_validate_manifests(
+    path: Path = typer.Option(
+        Path("pilot/manifests"),
+        exists=True,
+        help="Pilot JSONL manifest 文件或目录",
+    ),
+) -> None:
+    """Validate controlled Pilot manifests without collecting any data."""
+    entries, issues = PilotService().validate_manifests(path)
+    for issue in issues:
+        typer.echo(
+            f"{issue.location}: {issue.code}: {issue.message}",
+            err=True,
+        )
+    typer.echo(f"valid={len(entries)} failed={len(issues)}")
+    if issues:
+        raise typer.Exit(code=1)
+
+
+@app.command("pilot-collect")
+def pilot_collect(
+    manifest: Path = typer.Option(
+        ...,
+        exists=True,
+        dir_okay=False,
+        help="已审批的 Pilot JSONL manifest",
+    ),
+) -> None:
+    """Collect only approved Pilot entries through the existing safe collector."""
+    with SessionLocal() as session:
+        outcomes = PilotService().collect_manifest(session, manifest)
+    append_collection_outcomes(
+        manifest.resolve().parent.parent / "reports" / "pilot-collection-results.jsonl",
+        outcomes,
+    )
+    typer.echo(collection_outcomes_jsonl(outcomes), nl=False)
+    failed = sum(outcome.status == "failed" for outcome in outcomes)
+    typer.echo(
+        f"collected={sum(outcome.status == 'collected' for outcome in outcomes)} "
+        f"skipped={sum(outcome.status == 'skipped' for outcome in outcomes)} "
+        f"failed={failed}"
+    )
+    if failed:
+        raise typer.Exit(code=1)
+
+
+@app.command("pilot-status")
+def pilot_status(
+    path: Path = typer.Option(
+        Path("pilot/manifests"),
+        exists=True,
+        file_okay=False,
+        help="Pilot manifest 目录",
+    ),
+) -> None:
+    """Summarize Pilot progress by source type."""
+    with SessionLocal() as session:
+        status = PilotReportService().status(session, path)
+    for source_type, counts in status.items():
+        typer.echo(f"{source_type}: " + " ".join(f"{key}={value}" for key, value in counts.items()))
+
+
+@app.command("pilot-quality-report")
+def pilot_quality_report(
+    output: Path = typer.Option(
+        Path("pilot/reports/pilot-quality-report.json"),
+        dir_okay=False,
+        help="JSON 质量报告输出路径",
+    ),
+    manifests: Path = typer.Option(
+        Path("pilot/manifests"),
+        exists=True,
+        file_okay=False,
+        help="Pilot manifest 目录",
+    ),
+) -> None:
+    """Write portable JSON and Markdown Pilot quality reports."""
+    with SessionLocal() as session:
+        json_path, markdown_path = PilotReportService().write_quality_report(
+            session,
+            manifests,
+            output,
+        )
+    typer.echo(f"json={json_path.name} markdown={markdown_path.name}")
 
 
 @app.command("import-review-results")

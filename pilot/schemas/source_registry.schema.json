@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://baoxiao-audit.local/schemas/pilot-source-registry.json",
+  "title": "Pilot source registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sources"],
+  "properties": {
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_key",
+          "name",
+          "publisher",
+          "base_url",
+          "source_type",
+          "allowed_domains",
+          "enabled",
+          "crawl_policy",
+          "notes"
+        ],
+        "properties": {
+          "source_key": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{2,63}$"
+          },
+          "name": {"type": "string", "minLength": 1},
+          "publisher": {"type": "string", "minLength": 1},
+          "base_url": {"type": "string", "format": "uri", "pattern": "^https?://"},
+          "source_type": {
+            "enum": [
+              "regulation",
+              "penalty",
+              "regulatory_case",
+              "product_document"
+            ]
+          },
+          "allowed_domains": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "minLength": 1}
+          },
+          "enabled": {"type": "boolean"},
+          "confirmed_by": {"type": ["string", "null"]},
+          "crawl_policy": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "rate_limit_seconds",
+              "max_documents",
+              "allow_subdomains"
+            ],
+            "properties": {
+              "rate_limit_seconds": {"type": "number", "minimum": 0},
+              "max_documents": {"type": "integer", "minimum": 1},
+              "allow_subdomains": {"type": "boolean"}
+            }
+          },
+          "notes": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

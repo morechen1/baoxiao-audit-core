@@ -1,0 +1,19 @@
+{
+  "document_id": null,
+  "record_type": "product_document",
+  "fields": {
+    "company_name": null,
+    "product_name": null,
+    "product_type": null,
+    "waiting_period": null,
+    "cooling_off_period": null,
+    "insurance_responsibility": null,
+    "exclusions": null,
+    "cash_value_description": null,
+    "guaranteed_benefit": null,
+    "non_guaranteed_benefit": null,
+    "surrender_risk": null,
+    "source_quote": null
+  },
+  "field_evidence": {}
+}

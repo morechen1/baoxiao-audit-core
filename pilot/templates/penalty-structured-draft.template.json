@@ -1,0 +1,17 @@
+{
+  "document_id": null,
+  "record_type": "penalty",
+  "fields": {
+    "punished_entity": null,
+    "authority": null,
+    "document_number": null,
+    "decision_date": null,
+    "illegal_facts": null,
+    "legal_basis": null,
+    "penalty_result": null,
+    "original_sales_wording_disclosed": false,
+    "original_sales_wording": null,
+    "source_quote": null
+  },
+  "field_evidence": {}
+}

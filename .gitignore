@@ -23,3 +23,5 @@ data/review_results/*
 !data/parsed/.gitkeep
 !data/review_batches/.gitkeep
 !data/review_results/.gitkeep
+pilot/reports/*
+!pilot/reports/.gitkeep
