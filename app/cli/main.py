@@ -32,6 +32,13 @@ from app.services.collection import (
 )
 from app.services.knowledge import KnowledgeIndexService
 from app.services.parsing import ParsingService
+from app.services.pilot.reporting import PilotReportService
+from app.services.pilot.service import (
+    PilotConfigurationError,
+    PilotService,
+    collection_outcomes_jsonl,
+    write_collection_outcomes,
+)
 from app.services.review import ReviewService
 from app.services.state_machine import StateMachineService
 from app.services.structured_records import StructuredRecordService
@@ -187,6 +194,102 @@ def collect_local_manifest(
     typer.echo(f"imported={imported} failed={len(errors)}")
     for error in errors:
         typer.echo(error, err=True)
+
+
+@app.command("pilot-validate-manifests")
+def pilot_validate_manifests(
+    path: Path = typer.Option(
+        Path("pilot/manifests"),
+        exists=True,
+        help="Pilot JSONL manifest 文件或目录",
+    ),
+) -> None:
+    """Validate controlled Pilot manifests without collecting any data."""
+    entries, issues = PilotService().validate_manifests(path)
+    for issue in issues:
+        typer.echo(
+            f"{issue.location}: {issue.code}: {issue.message}",
+            err=True,
+        )
+    typer.echo(f"valid={len(entries)} failed={len(issues)}")
+    if issues:
+        raise typer.Exit(code=1)
+
+
+@app.command("pilot-collect")
+def pilot_collect(
+    manifest: Path = typer.Option(
+        ...,
+        exists=True,
+        dir_okay=False,
+        help="已审批的 Pilot JSONL manifest",
+    ),
+    requested_by: str = typer.Option("cli_operator", help="请求采集的操作者"),
+) -> None:
+    """Collect only approved Pilot entries through the existing safe collector."""
+    try:
+        with SessionLocal() as session:
+            result = PilotService().collect_manifest(
+                session,
+                manifest,
+                requested_by=requested_by,
+            )
+    except PilotConfigurationError as exc:
+        typer.echo("pilot_configuration_invalid", err=True)
+        for issue in exc.issues:
+            typer.echo(
+                f"{issue.location}: {issue.code}: {issue.message}",
+                err=True,
+            )
+        raise typer.Exit(code=1) from None
+    output_path = (
+        manifest.resolve().parent.parent / "reports" / f"pilot-collection-run-{result.run_id}.jsonl"
+    )
+    write_collection_outcomes(output_path, result.outcomes)
+    typer.echo(collection_outcomes_jsonl(result.outcomes), nl=False)
+    failed = sum(outcome.status == "failed" for outcome in result.outcomes)
+    typer.echo(
+        f"run_id={result.run_id} "
+        f"collected={sum(outcome.status == 'collected' for outcome in result.outcomes)} "
+        f"skipped={sum(outcome.status == 'skipped' for outcome in result.outcomes)} "
+        f"failed={failed} export={output_path.name}"
+    )
+    if failed:
+        raise typer.Exit(code=1)
+
+
+@app.command("pilot-status")
+def pilot_status(
+    run_id: int | None = typer.Option(None, min=1, help="仅统计指定采集 Run"),
+    scope: str = typer.Option("cumulative", help="统计范围：cumulative"),
+) -> None:
+    """Summarize Pilot progress by source type."""
+    with SessionLocal() as session:
+        status = PilotReportService().status(session, run_id=run_id, scope=scope)
+    typer.echo("totals: " + " ".join(f"{key}={value}" for key, value in status["totals"].items()))
+    for source_type, counts in status["by_type"].items():
+        typer.echo(f"{source_type}: " + " ".join(f"{key}={value}" for key, value in counts.items()))
+
+
+@app.command("pilot-quality-report")
+def pilot_quality_report(
+    output: Path = typer.Option(
+        Path("pilot/reports/pilot-quality-report.json"),
+        dir_okay=False,
+        help="JSON 质量报告输出路径",
+    ),
+    run_id: int | None = typer.Option(None, min=1, help="仅统计指定采集 Run"),
+    scope: str = typer.Option("cumulative", help="统计范围：cumulative"),
+) -> None:
+    """Write portable JSON and Markdown Pilot quality reports."""
+    with SessionLocal() as session:
+        json_path, markdown_path = PilotReportService().write_quality_report(
+            session,
+            output,
+            run_id=run_id,
+            scope=scope,
+        )
+    typer.echo(f"json={json_path.name} markdown={markdown_path.name}")
 
 
 @app.command("import-review-results")

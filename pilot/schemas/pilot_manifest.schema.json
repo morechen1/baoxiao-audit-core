@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://baoxiao-audit.local/schemas/pilot-manifest.json",
+  "title": "Controlled Pilot manifest entry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "pilot_id",
+    "source_key",
+    "source_type",
+    "source_url",
+    "collection_method",
+    "evaluation_usage",
+    "status"
+  ],
+  "properties": {
+    "pilot_id": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_-]{2,63}$"
+    },
+    "source_key": {"type": "string", "minLength": 1},
+    "source_type": {
+      "enum": [
+        "regulation",
+        "penalty",
+        "regulatory_case",
+        "product_document"
+      ]
+    },
+    "source_url": {"type": "string", "format": "uri", "pattern": "^https?://"},
+    "expected_title": {"type": ["string", "null"]},
+    "collection_method": {"const": "url"},
+    "evaluation_usage": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "confirmed_by": {"type": ["string", "null"]},
+    "approved_at": {"type": ["string", "null"], "format": "date-time"},
+    "approval_reference": {"type": ["string", "null"]},
+    "status": {
+      "enum": [
+        "draft",
+        "approved_for_collection",
+        "collected",
+        "parsed",
+        "structured",
+        "pending_review",
+        "reviewed",
+        "rejected"
+      ]
+    },
+    "case_usage": {
+      "type": ["string", "null"],
+      "enum": ["external_test_candidate", null]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {"const": "approved_for_collection"}
+        }
+      },
+      "then": {
+        "required": [
+          "confirmed_by",
+          "approved_at",
+          "approval_reference"
+        ]
+      }
+    }
+  ]
+}

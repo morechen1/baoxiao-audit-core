@@ -467,6 +467,155 @@ class DocumentOccurrence(Base):
     document: Mapped[SourceDocument] = relationship(back_populates="occurrences")
 
 
+class PilotSourceRegistration(Base):
+    __tablename__ = "pilot_source_registrations"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_key",
+            "entry_sha256",
+            name="uq_pilot_source_registrations_key_hash",
+        ),
+        UniqueConstraint(
+            "source_key",
+            "version",
+            name="uq_pilot_source_registrations_key_version",
+        ),
+        CheckConstraint(
+            "length(entry_sha256) = 64",
+            name="ck_pilot_source_registrations_hash",
+        ),
+        CheckConstraint(
+            "source_type IN ('regulation', 'penalty', 'regulatory_case', 'product_document')",
+            name="ck_pilot_source_registrations_type",
+        ),
+        CheckConstraint(
+            "robots_review_status IN ('allowed', 'not_published_manual_review', 'prohibited')",
+            name="ck_pilot_source_registrations_robots_status",
+        ),
+        CheckConstraint(
+            "terms_review_status IN ('public_access_allowed', "
+            "'not_published_manual_review', 'prohibited')",
+            name="ck_pilot_source_registrations_terms_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    data_source_id: Mapped[int | None] = mapped_column(
+        ForeignKey("data_sources.id", ondelete="RESTRICT"), unique=True
+    )
+    source_key: Mapped[str] = mapped_column(String(64), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    entry_sha256: Mapped[str] = mapped_column(String(64), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    publisher: Mapped[str] = mapped_column(String(255))
+    base_url: Mapped[str] = mapped_column(String(2048))
+    source_type: Mapped[str] = mapped_column(String(50))
+    allowed_domains_json: Mapped[list[str]] = mapped_column(JSON, default=list)
+    allow_subdomains: Mapped[bool] = mapped_column(Boolean)
+    rate_limit_seconds: Mapped[float] = mapped_column(Float)
+    max_documents: Mapped[int] = mapped_column(Integer)
+    confirmed_by: Mapped[str] = mapped_column(String(255))
+    approved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    approval_reference: Mapped[str] = mapped_column(String(500))
+    robots_review_status: Mapped[str] = mapped_column(String(50))
+    robots_checked_at: Mapped[date] = mapped_column(Date)
+    robots_checked_by: Mapped[str] = mapped_column(String(255))
+    robots_reference_url: Mapped[str | None] = mapped_column(String(2048))
+    robots_notes: Mapped[str] = mapped_column(Text)
+    terms_review_status: Mapped[str] = mapped_column(String(50))
+    terms_checked_at: Mapped[date] = mapped_column(Date)
+    terms_checked_by: Mapped[str] = mapped_column(String(255))
+    terms_reference_url: Mapped[str | None] = mapped_column(String(2048))
+    terms_notes: Mapped[str] = mapped_column(Text)
+    notes: Mapped[str] = mapped_column(Text)
+    last_request_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PilotCollectionRun(Base):
+    __tablename__ = "pilot_collection_runs"
+    __table_args__ = (
+        UniqueConstraint("run_uuid", name="uq_pilot_collection_runs_uuid"),
+        CheckConstraint(
+            "status IN ('validated', 'running', 'completed', "
+            "'completed_with_errors', 'failed_configuration', 'cancelled')",
+            name="ck_pilot_collection_runs_status",
+        ),
+        CheckConstraint(
+            "length(manifest_set_sha256) = 64",
+            name="ck_pilot_collection_runs_manifest_hash",
+        ),
+        CheckConstraint(
+            "length(source_registry_set_sha256) = 64",
+            name="ck_pilot_collection_runs_registry_hash",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_uuid: Mapped[str] = mapped_column(String(36))
+    selected_manifest: Mapped[str] = mapped_column(String(255))
+    manifest_set_sha256: Mapped[str] = mapped_column(String(64))
+    source_registry_set_sha256: Mapped[str] = mapped_column(String(64))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(50))
+    requested_by: Mapped[str] = mapped_column(String(255))
+    planned_count: Mapped[int] = mapped_column(Integer, default=0)
+    success_count: Mapped[int] = mapped_column(Integer, default=0)
+    failure_count: Mapped[int] = mapped_column(Integer, default=0)
+    skipped_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class PilotCollectionItem(TimestampMixin, Base):
+    __tablename__ = "pilot_collection_items"
+    __table_args__ = (
+        UniqueConstraint("pilot_id", name="uq_pilot_collection_items_pilot_id"),
+        CheckConstraint(
+            "length(manifest_entry_sha256) = 64",
+            name="ck_pilot_collection_items_manifest_hash",
+        ),
+        CheckConstraint(
+            "length(source_registry_entry_sha256) = 64",
+            name="ck_pilot_collection_items_registry_hash",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'attempting', 'collected', 'failed', 'blocked_not_implemented')",
+            name="ck_pilot_collection_items_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("pilot_collection_runs.id", ondelete="RESTRICT"), index=True
+    )
+    source_registration_id: Mapped[int] = mapped_column(
+        ForeignKey("pilot_source_registrations.id", ondelete="RESTRICT"), index=True
+    )
+    pilot_id: Mapped[str] = mapped_column(String(64), index=True)
+    source_key: Mapped[str] = mapped_column(String(64))
+    source_type: Mapped[str] = mapped_column(String(50))
+    source_url: Mapped[str] = mapped_column(String(4096))
+    expected_title: Mapped[str | None] = mapped_column(String(1000))
+    evaluation_usage_json: Mapped[list[str]] = mapped_column(JSON, default=list)
+    confirmed_by: Mapped[str] = mapped_column(String(255))
+    approval_reference: Mapped[str] = mapped_column(String(500))
+    approved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    manifest_entry_sha256: Mapped[str] = mapped_column(String(64))
+    source_registry_entry_sha256: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(50))
+    document_id: Mapped[int | None] = mapped_column(
+        ForeignKey("source_documents.id", ondelete="RESTRICT"), index=True
+    )
+    occurrence_id: Mapped[int | None] = mapped_column(
+        ForeignKey("document_occurrences.id", ondelete="RESTRICT"), index=True
+    )
+    document_created: Mapped[bool | None] = mapped_column(Boolean)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_error_code: Mapped[str | None] = mapped_column(String(120))
+    collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class AuthenticityDecisionLog(Base):
     __tablename__ = "authenticity_decision_logs"
     __table_args__ = (

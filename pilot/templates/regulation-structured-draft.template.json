@@ -1,0 +1,16 @@
+{
+  "document_id": null,
+  "record_type": "regulation",
+  "fields": {
+    "title": null,
+    "document_number": null,
+    "issuing_authority": null,
+    "effective_date": null,
+    "expiry_date": null,
+    "validity_status": "unknown",
+    "article_number": null,
+    "article_text": null,
+    "source_quote": null
+  },
+  "field_evidence": {}
+}

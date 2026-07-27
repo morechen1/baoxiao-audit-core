@@ -16,6 +16,7 @@ class WebPageCollector(BaseCollector):
         settings: Settings | None = None,
         *,
         allowed_hosts: frozenset[str],
+        allow_subdomains: bool = True,
         transport: httpx.BaseTransport | None = None,
         url_policy: SafeUrlPolicy | None = None,
     ) -> None:
@@ -23,6 +24,7 @@ class WebPageCollector(BaseCollector):
         self.transport = transport
         self.url_policy = url_policy or SafeUrlPolicy()
         self.allowed_hosts = allowed_hosts
+        self.allow_subdomains = allow_subdomains
 
     @retry(
         retry=retry_if_exception_type(httpx.TransportError),
@@ -88,6 +90,10 @@ class WebPageCollector(BaseCollector):
             )
 
     def _require_allowed_host(self, url: str, *, redirect: bool) -> None:
-        if not self.url_policy.host_allowed_for_hosts(url, self.allowed_hosts):
+        if not self.url_policy.host_allowed_for_hosts(
+            url,
+            self.allowed_hosts,
+            allow_subdomains=self.allow_subdomains,
+        ):
             code = "redirect_host_not_allowed" if redirect else "source_host_not_allowed"
             raise UnsafeUrlError(code)

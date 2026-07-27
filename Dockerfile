@@ -10,6 +10,7 @@ WORKDIR /app
 RUN pip install "uv==0.11.32"
 COPY pyproject.toml uv.lock README.md ./
 COPY app ./app
+COPY pilot ./pilot
 RUN uv sync --frozen --no-install-project \
     && uv sync --frozen
 
