@@ -421,6 +421,7 @@ class PilotService:
         locked = session.scalar(
             select(PilotSourceRegistration)
             .where(PilotSourceRegistration.id == registration.id)
+            .execution_options(populate_existing=True)
             .with_for_update()
         )
         if locked is None:
