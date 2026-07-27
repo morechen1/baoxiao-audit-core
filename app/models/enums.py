@@ -8,6 +8,12 @@ class DataType(StrEnum):
     EVALUATION_SAMPLE = "evaluation_sample"
 
 
+class DocumentDataType(StrEnum):
+    REGULATION = "regulation"
+    PENALTY = "penalty"
+    PRODUCT_DOCUMENT = "product_document"
+
+
 class AuthenticityType(StrEnum):
     VERIFIED_PUBLIC = "verified_public"
     CONSTRUCTED_FOR_EVALUATION = "constructed_for_evaluation"
@@ -28,7 +34,12 @@ class ReviewStatus(StrEnum):
     REJECTED_DUPLICATE = "rejected_duplicate"
     REJECTED_OUTDATED = "rejected_outdated"
     REQUIRES_EXPERT_REVIEW = "requires_expert_review"
+
+
+class KnowledgeIndexStatus(StrEnum):
+    NOT_INDEXED = "not_indexed"
     INDEXED = "indexed"
+    INDEX_FAILED = "index_failed"
 
 
 class SampleCategory(StrEnum):
@@ -49,3 +60,19 @@ APPROVABLE_STATUSES = {
     ReviewStatus.APPROVED.value,
     ReviewStatus.APPROVED_WITH_REVISION.value,
 }
+
+REVIEW_STATUS_VALUES = tuple(status.value for status in ReviewStatus)
+HUMAN_REVIEW_STATUS_VALUES = tuple(
+    status.value
+    for status in ReviewStatus
+    if status
+    not in {
+        ReviewStatus.COLLECTED,
+        ReviewStatus.PARSED,
+        ReviewStatus.AUTO_VALIDATION_FAILED,
+        ReviewStatus.PENDING_REVIEW,
+    }
+)
+AUTHENTICITY_TYPE_VALUES = tuple(value.value for value in AuthenticityType)
+KNOWLEDGE_INDEX_STATUS_VALUES = tuple(value.value for value in KnowledgeIndexStatus)
+DOCUMENT_DATA_TYPE_VALUES = tuple(value.value for value in DocumentDataType)

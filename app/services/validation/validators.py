@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Protocol
@@ -39,11 +40,16 @@ class Validator(Protocol):
 
 class RequiredFieldValidator:
     def validate(self, context: ValidationContext, session: Session) -> list[ValidationIssue]:
-        return [
-            ValidationIssue(type(self).__name__, "required", f"{name} is required", name)
-            for name in context.required_fields
-            if not getattr(context.record, name, None) and not getattr(context.document, name, None)
-        ]
+        issues: list[ValidationIssue] = []
+        for name in context.required_fields:
+            value = getattr(context.record, name, None)
+            if value is None:
+                value = getattr(context.document, name, None)
+            if value is None or isinstance(value, str) and not value.strip():
+                issues.append(
+                    ValidationIssue(type(self).__name__, "required", f"{name} is required", name)
+                )
+        return issues
 
 
 class SourceUrlValidator:
@@ -163,4 +169,33 @@ class OriginalWordingValidator:
                         "original_sales_wording",
                     )
                 ]
+            if (
+                record.original_sales_wording_disclosed
+                and record.original_sales_wording
+                and context.document
+                and record.original_sales_wording not in (context.document.raw_text or "")
+            ):
+                return [
+                    ValidationIssue(
+                        type(self).__name__,
+                        "wording_not_found",
+                        "disclosed original wording must be located in immutable raw text",
+                        "original_sales_wording",
+                    )
+                ]
+        return []
+
+
+class Sha256Validator:
+    def validate(self, context: ValidationContext, session: Session) -> list[ValidationIssue]:
+        document = context.document
+        if document and not re.fullmatch(r"[0-9a-f]{64}", document.sha256 or ""):
+            return [
+                ValidationIssue(
+                    type(self).__name__,
+                    "invalid_sha256",
+                    "sha256 must be 64 lowercase hexadecimal characters",
+                    "sha256",
+                )
+            ]
         return []

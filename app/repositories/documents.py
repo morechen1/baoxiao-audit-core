@@ -1,7 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import SourceDocument, StatusHistory
+from app.models import SourceDocument
 
 
 class DocumentRepository:
@@ -28,15 +28,11 @@ class DocumentRepository:
         return document
 
     def transition(self, document: SourceDocument, status: str, reason: str | None = None) -> None:
-        old_status = document.final_review_status
-        document.final_review_status = status
-        self.session.add(
-            StatusHistory(
-                record_type=document.data_type,
-                record_id=document.id,
-                from_status=old_status,
-                to_status=status,
-                reason=reason,
-            )
+        from app.services.state_machine import StateMachineService
+
+        StateMachineService.transition_document(
+            self.session,
+            document,
+            status,
+            reason or "status transition",
         )
-        self.session.flush()

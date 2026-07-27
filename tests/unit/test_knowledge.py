@@ -1,48 +1,152 @@
-from app.models import SourceDocument
-from app.models.enums import AuthenticityType, DataType, ReviewStatus
+import hashlib
+
+from app.core.config import Settings
+from app.models import ProductDocument, SourceDocument
+from app.models.enums import (
+    AuthenticityType,
+    DataType,
+    KnowledgeIndexStatus,
+    ReviewStatus,
+)
 from app.services.knowledge import KnowledgeIndexService
+from app.services.parsed_artifacts import ParsedArtifactService
+from app.services.parsing.base import ParsedDocument, ParsedPage
 
 
-def make_document(status: str, authenticity: str = AuthenticityType.VERIFIED_PUBLIC.value):
-    return SourceDocument(
-        data_type=DataType.REGULATION.value,
-        source_url="https://example.test/rule",
-        raw_file_path="/tmp/rule.txt",
-        raw_text="public rule",
-        sha256=status.encode().hex().ljust(64, "0")[:64],
+def make_document(
+    status: str,
+    *,
+    authenticity: str = AuthenticityType.VERIFIED_PUBLIC.value,
+) -> tuple[SourceDocument, ProductDocument]:
+    raw_text = "演示产品名称，等待期三十日。"
+    document = SourceDocument(
+        data_type=DataType.PRODUCT_DOCUMENT.value,
+        source_url="https://example.test/product",
+        raw_file_path="/tmp/product.txt",
+        raw_text=raw_text,
+        sha256="a" * 64,
         authenticity_type=authenticity,
+        parse_status="parsed",
+        final_review_status=status,
+        metadata_json={"automatic_validation": {"valid": True, "issues": []}},
+    )
+    product = ProductDocument(
+        document_id=0,
+        product_name="演示产品",
+        source_quote="演示产品名称",
         final_review_status=status,
     )
+    return document, product
+
+
+def persist_pair(session, status: str, *, authenticity: str):
+    document, product = make_document(status, authenticity=authenticity)
+    session.add(document)
+    session.flush()
+    raw_dir = session.info["data_dir"] / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    content = f"{document.raw_text}\nartifact-id={document.id}".encode()
+    digest = hashlib.sha256(content).hexdigest()
+    raw_path = raw_dir / f"{digest}.txt"
+    raw_path.write_bytes(content)
+    document.raw_file_path = str(raw_path)
+    document.sha256 = digest
+    ParsedArtifactService(Settings(data_dir=session.info["data_dir"])).persist(
+        session,
+        document,
+        ParsedDocument(
+            title="演示产品",
+            plain_text=document.raw_text or "",
+            pages=[ParsedPage(page_number=1, text=document.raw_text or "")],
+        ),
+        parser_name="TestParser",
+    )
+    start = (document.raw_text or "").find(product.product_name)
+    product.field_evidence_json = {
+        "product_name": [
+            {
+                "quote": product.product_name,
+                "page_number": 1,
+                "start_offset": start,
+                "end_offset": start + len(product.product_name),
+                "mode": "verbatim",
+            }
+        ]
+    }
+    product.document_id = document.id
+    session.add(product)
+    session.commit()
+    return document, product
+
+
+def knowledge_service(session) -> KnowledgeIndexService:
+    return KnowledgeIndexService(Settings(data_dir=session.info["data_dir"]))
 
 
 def test_unreviewed_data_cannot_be_indexed(session) -> None:
-    document = make_document(ReviewStatus.PENDING_REVIEW.value)
-    session.add(document)
-    session.commit()
+    document, _ = persist_pair(
+        session,
+        ReviewStatus.PENDING_REVIEW.value,
+        authenticity=AuthenticityType.VERIFIED_PUBLIC.value,
+    )
 
-    count = KnowledgeIndexService().index_approved(session)
+    summary = knowledge_service(session).index_approved(session)
 
-    assert count == 0
-    assert document.knowledge_index_status == "not_indexed"
+    assert summary.indexed == 0
+    assert "review_status_not_approved" in summary.rejected[document.id]
 
 
-def test_approved_data_can_be_indexed(session) -> None:
-    document = make_document(ReviewStatus.APPROVED.value)
-    session.add(document)
-    session.commit()
+def test_indexing_keeps_review_status_and_sets_index_fields(session) -> None:
+    document, _ = persist_pair(
+        session,
+        ReviewStatus.APPROVED.value,
+        authenticity=AuthenticityType.VERIFIED_PUBLIC.value,
+    )
 
-    count = KnowledgeIndexService().index_approved(session)
+    summary = knowledge_service(session).index_approved(session)
 
-    assert count == 1
-    assert document.knowledge_index_status == "indexed"
+    assert summary.indexed == 1
+    assert document.final_review_status == ReviewStatus.APPROVED.value
+    assert document.knowledge_index_status == KnowledgeIndexStatus.INDEXED.value
     assert document.indexed_at is not None
 
 
-def test_demo_data_cannot_be_indexed_even_if_approved(session) -> None:
-    document = make_document(
-        ReviewStatus.APPROVED.value, authenticity=AuthenticityType.DEMO_ONLY.value
+def test_only_verified_public_can_be_indexed(session) -> None:
+    document, _ = persist_pair(
+        session,
+        ReviewStatus.APPROVED.value,
+        authenticity=AuthenticityType.DEMO_ONLY.value,
     )
-    session.add(document)
+
+    summary = knowledge_service(session).index_approved(session)
+
+    assert summary.indexed == 0
+    assert summary.rejected[document.id] == ["authenticity_not_verified_public"]
+
+
+def test_constructed_document_cannot_be_indexed(session) -> None:
+    document, _ = persist_pair(
+        session,
+        ReviewStatus.APPROVED.value,
+        authenticity=AuthenticityType.CONSTRUCTED_FOR_EVALUATION.value,
+    )
+
+    summary = knowledge_service(session).index_approved(session)
+
+    assert summary.indexed == 0
+    assert "authenticity_not_verified_public" in summary.rejected[document.id]
+
+
+def test_structured_status_mismatch_blocks_indexing(session) -> None:
+    document, product = persist_pair(
+        session,
+        ReviewStatus.APPROVED.value,
+        authenticity=AuthenticityType.VERIFIED_PUBLIC.value,
+    )
+    product.final_review_status = ReviewStatus.PENDING_REVIEW.value
     session.commit()
 
-    assert KnowledgeIndexService().index_approved(session) == 0
+    summary = knowledge_service(session).index_approved(session)
+
+    assert summary.indexed == 0
+    assert "structured_status_mismatch" in summary.rejected[document.id]

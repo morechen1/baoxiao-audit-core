@@ -6,10 +6,11 @@
 |---|---|---|
 | GET | `/health` | 数据库与可选提供者状态 |
 | POST/GET | `/sources` | 注册/列出来源 |
-| POST | `/collection/url` | 采集公开 URL |
+| POST | `/collection/url` | 使用已登记来源采集公开 URL |
 | POST | `/collection/local` | 采集 `DATA_DIR` 内文件 |
 | POST | `/parsing/run` | 解析待处理文档 |
 | POST | `/validation/run` | 执行确定性校验 |
+| POST | `/structured-drafts/import` | 导入 `DATA_DIR/parsed` 下 JSONL 草稿 |
 | POST | `/review/batches` | 导出审核包 |
 | POST | `/review/results/import` | 导入 `review_results` 下 JSONL |
 | GET | `/records` | 按状态/类型列出文档 |
@@ -18,3 +19,14 @@
 
 未捕获异常返回 `{"error":{"code","message","details"}}`。FastAPI 自身的输入错误返回
 标准 422 结构；下一阶段可统一转换为同一错误信封。
+
+网络采集必须提供启用的 `source_id`，并在所有重定向上匹配来源类型和允许域名；网络与
+本地公开资料真实性始终从 `pending_verification` 开始。审核结果必须提供有效
+`batch_id`、`batch_item_id`、`reviewed_payload_hash` 和 `schema_version`。真实性升级
+必须作为批准决定中的独立 `authenticity_decision` 提交。
+
+监管记录查询额外返回 `regulation_validity_status=unknown` 和
+`regulation_validity_display=效力状态待核验`。当前系统没有独立法规效力确认流程，
+因此不得把该值展示或解释为“现行有效”。
+
+本 API 当前只适用于受控环境，不包含生产级身份认证、权限系统或自动法律结论。

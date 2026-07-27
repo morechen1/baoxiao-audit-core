@@ -6,6 +6,8 @@
 - `services/collection`：网页、文件与本地目录采集，原件哈希存储。
 - `services/parsing`：统一解析结果、页码、切片及 OCR 警告。
 - `services/validation`：无模型、可重复的确定性规则。
+- `services/structured_records`：导入 Pydantic 校验后的人工结构化草稿。
+- `services/state_machine`：集中管理审核状态转换和结构化状态同步。
 - `services/review`：审核包、决定、修订和状态历史。
 - `services/knowledge`：可信数据索引资格闸门。
 - `repositories`：持久化访问与状态变更。
@@ -18,13 +20,18 @@
 2. PostgreSQL 16 为生产数据库；SQLite 只用于快速本地开发和测试。
 3. 原件和 `raw_text` 不被审核修订覆盖。修订进入结构化表和
    `corrected_fields_json`，决定写入 `review_decisions`。
-4. SHA-256 唯一约束提供并发下最终去重；采集前查询提供友好快速路径。
-5. `indexed` 是可信索引状态标记，不表示已生成向量。
+4. SHA-256 唯一约束只去重内容 Blob；`document_occurrences` 保留每个来源 URL。
+5. 人工审核状态与知识索引状态完全分离；索引永不改写人工决定。
 6. 评测样本是独立表，不冒充来源文档；允许进入人工审核包，但不进入正式知识索引。
-7. API 的本地路径限定在 `DATA_DIR` 下，下载最大 50 MiB，防止目录穿越与无界写入。
+7. API 的本地路径限定在 `DATA_DIR` 下；网络采集对初始、逐跳和最终 URL 同时执行
+   登记来源白名单与 SSRF 安全策略。
+8. 审核批次绑定导出文件 SHA-256，项目绑定完整 payload hash；决定携带相同 hash 和
+   schema 版本。结构化修订按 ID 原子执行并保存修订后校验。
+9. `verified_public` 只能来自已批准决定中的独立真实性确认，并写不可变审计日志。
 
 ## 数据流
 
 `source → collect → immutable raw → parse/chunk → validate → human review → trusted marker`
 
-任何自动处理只能到 `pending_review`。索引前再次检查审核状态和真实性标识。
+任何自动处理只能到 `pending_review`。索引使用严格白名单，同时检查解析、自动校验、
+结构化记录、状态一致性、原文、哈希和证据引用。

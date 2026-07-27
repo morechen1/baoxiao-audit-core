@@ -7,6 +7,11 @@
 最终跳转 URL、HTTP 状态、内容类型、时间、原件和 SHA-256。失败写结构化日志且不终止
 同批其他文件。
 
+网络采集执行 `SafeUrlPolicy`：仅允许无用户名/密码的 HTTP(S)，DNS 解析后拒绝 loopback、
+私网、链路本地、multicast、reserved、unspecified 和云元数据地址；每次重定向重新检查，
+并校验实际连接 peer 与已验证 DNS 结果一致。API 必须提供已登记且启用的 `source_id`，
+URL 域名和类型必须与来源登记匹配。
+
 真实性：
 
 - `verified_public`：来源与内容已人工核对；
@@ -15,3 +20,7 @@
 - `demo_only`：仅用于演示。
 
 后两类及待核验数据不得进入正式知识库。
+
+API 网络采集结果固定为 `pending_verification`，不能由请求者直接声明
+`verified_public`。内容 Blob 按 SHA-256 去重，但每个不同来源保存在
+`document_occurrences`。

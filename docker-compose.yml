@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: baoxiao
       POSTGRES_USER: baoxiao
-      POSTGRES_PASSWORD: baoxiao
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-baoxiao_local_only}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -14,8 +14,14 @@ services:
       retries: 10
 
   api:
-    build: .
-    env_file: .env
+    build:
+      context: .
+      target: runtime
+    environment:
+      DATABASE_URL: postgresql+psycopg://baoxiao:${POSTGRES_PASSWORD:-baoxiao_local_only}@postgres:5432/baoxiao
+      LLM_ENABLED: "false"
+      EMBEDDING_ENABLED: "false"
+      OCR_ENABLED: "false"
     ports:
       - "8000:8000"
     volumes:

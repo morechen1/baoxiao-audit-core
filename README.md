@@ -16,7 +16,8 @@
 ## 当前范围与架构
 
 FastAPI 和 Typer CLI 共用 service/repository 层。PostgreSQL 保存来源、文档、切片、四类
-结构化记录、审核批次/决定和状态历史；`data/raw` 保存按 SHA-256 命名的原件。索引服务
+结构化记录、解析版本、字段证据、审核预留/决定和状态历史；`data/raw` 保存按 SHA-256
+命名的原件，`data/parsed_artifacts` 保存按内容哈希命名的不可变解析 JSON。索引服务
 当前只写入可信状态，不做 RAG、全文搜索、向量生成或法律结论。
 
 详细设计见 [架构](docs/architecture.md) 和 [数据模型](docs/data-model.md)。
@@ -29,7 +30,8 @@ FastAPI 和 Typer CLI 共用 service/repository 层。PostgreSQL 保存来源、
 cp .env.example .env
 docker compose up -d --build
 docker compose exec api alembic upgrade head
-docker compose exec api pytest
+docker build --target test -t baoxiao-audit-core:test .
+docker run --rm baoxiao-audit-core:test
 curl http://localhost:8000/health
 ```
 
@@ -51,22 +53,43 @@ python -m app.cli.main init-db
 python -m app.cli.main register-source --name "示例来源" \
   --base-url "https://example.com" --source-type regulation
 python -m app.cli.main collect-url --url "https://example.com/document.pdf" \
+  --source-type regulation --source-id 1
+python -m app.cli.main collect-directory --path ./data/incoming \
   --source-type regulation
-python -m app.cli.main collect-directory --path ./data/samples \
-  --source-type regulation --authenticity-type demo_only
+python -m app.cli.main collect-local-manifest \
+  --file ./data/import/local_import_manifest.jsonl
 python -m app.cli.main parse-pending
+python -m app.cli.main import-structured-drafts \
+  --file ./data/parsed/structured_drafts.jsonl
+python -m app.cli.main revise-structured-draft \
+  --file ./data/parsed/structured_draft_revision.jsonl \
+  --reason "修正错误的原文引用" --actor "operator"
 python -m app.cli.main validate-pending
 python -m app.cli.main export-review-batch --data-type penalty --format jsonl
+python -m app.cli.main export-review-bundle --data-type penalty
+python -m app.cli.main cancel-review-batch \
+  --batch-id 1 --reason "审核任务重新分配"
+python -m app.cli.main create-review-result-template --batch-id 1
 python -m app.cli.main import-review-results \
-  --file ./data/review_results/review_result.jsonl
+  --file ./data/review_results/review_result.jsonl --batch-id 1
 python -m app.cli.main list-records --status pending_review
 python -m app.cli.main index-approved
+python -m app.cli.main repair-status-consistency --dry-run
+python -m app.cli.main resubmit-for-review --record-type product_document \
+  --record-id 123 --reason "已补充可核验官方来源"
+python -m app.cli.main reparse-document \
+  --document-id 123 --reason "解析器版本升级"
 python -m app.cli.main health-check
 ```
 
-采集器使用明确 User-Agent、跳转跟随、20 秒超时、三次温和重试及 50 MiB 限制；不会
-绕过验证码、登录或访问控制。来源级请求间隔保存在 `data_sources`，批量调度器下一阶段
-使用该值。PDF 离线样例位于 `tests/fixtures/demo.pdf`。
+采集器使用明确 User-Agent、逐跳安全验证、20 秒超时、三次温和重试及 50 MiB 限制；
+拒绝 localhost、私网、链路本地、云元数据和 DNS 重绑定目标；初始 URL、每次重定向及
+最终 URL 都必须匹配登记来源主机或显式允许域名。CLI/API 网络采集与本地官方清单必须
+使用已登记、启用且域名/类型匹配的来源。普通目录采集明确标记为“无官方来源声明”；
+官方清单会同时保留本地导入信息和可核验 URL occurrence，但两者的初始真实性都固定为
+`pending_verification`，不能通过采集参数直接指定 `verified_public`。文档采集接口只
+接受监管、处罚和产品资料，评测样本必须走独立导入路径。PDF 离线样例位于
+`tests/fixtures/demo.pdf`。
 
 ## API
 
@@ -87,13 +110,26 @@ curl 'http://localhost:8000/records?status=pending_review'
 ## 审核闭环
 
 1. 采集后状态为 `collected`，原件由 SHA-256 去重。
-2. 解析生成不可变 `raw_text`、页码切片、offset 和警告，状态为 `parsed`。
-3. 确定性校验只会进入 `pending_review` 或 `auto_validation_failed`，绝不会自动批准。
-4. 待审记录导出 JSONL/XLSX；人工结果以 JSONL 导入。
-5. `approved_with_revision` 必须带 corrections；修订写入结构化字段及单独 JSON，
-   不覆盖原始采集文本。
-6. 仅 `approved` / `approved_with_revision` 且真实性为 `verified_public` 的非重复数据
-   可被 `index-approved` 标记为已索引。
+2. 解析前重新流式核对原件 SHA-256；解析后固化包含页码/offset 的 JSON，同时绑定
+   原件哈希、解析 JSON 哈希和 `plain_text` 哈希。校验、审核导出/导入、真实性确认和
+   索引均验证受管路径、解析产物、数据库 `raw_text` 和 document chunks。
+3. 人工导入经 Pydantic 验证的结构化草稿；正式草稿的每个非空业务字段必须携带
+   `field_evidence`。仅 `parsed`/`auto_validation_failed` 可导入或经专用命令修订，
+   修订字段与证据原子写入并留审计；进入待审或人工终态后锁定草稿入口。
+   监管标题和处罚对象同样属于强制证据字段，不能依赖兼容展示用的 `source_quote`。
+4. 确定性校验只会进入 `pending_review` 或 `auto_validation_failed`，绝不会自动批准。
+5. 待审记录以数据库唯一约束取得排他预留；已进入开放批次的记录会被跳过，取消批次
+   后才释放。可移植 ZIP bundle 内含 manifest、哈希绑定的决定模板、
+   `sources/<sha256>.<ext>` 原件及 `parsed/<sha256>.json` 解析产物。
+6. 只有 `approved_with_revision` 可以携带 corrections；证据型字段变更必须同步提供
+   同名证据，禁止单独替换未修改字段的证据。文档修订按 `structured_record_id` 精确
+   定位，完整候选值、offset、页码和确定性转换全部通过后才原子写入，并保存独立
+   `post_review_validation` 审计结果。
+7. `authenticity_decision` 必须指定一个属于当前文档的合格官方 occurrence、理由和
+   `verified_public` 新值，并随已批准的哈希绑定决定提交。待核实文档缺少该决定时不得
+   批准，应选择 `pending_source_verification`，补齐来源后再显式重新送审。
+8. 索引不修改 `final_review_status`。只有已批准、`verified_public`、解析/校验通过、
+   结构化记录和父文档状态一致且引用可在完整原文定位的数据才能被标记为 `indexed`。
 
 完整状态与审核格式见 [审核工作流](docs/review-workflow.md)。
 
@@ -119,7 +155,11 @@ make test
 - DOCX 文件格式本身不提供可靠页码，因此保留段落和标题、页码统一为 1 并产生警告。
 - 不执行 JavaScript，不处理登录后页面，不提供大规模调度。
 - 不包含权限、前端、向量、RAG、LLM 推断或自动法律结论。
+- API 当前只适合受控网络环境，不包含生产级身份认证。
+- LLM、Embedding 和 OCR 保持完全禁用；接口预留不代表已接入这些能力。
 - 来源请求间隔已建模，当前单 URL 命令不负责跨任务全局限速。
+- 尚未建立法规修订、废止及替代关系库；`validity_status` 仅允许 `NULL/unknown`，
+  API 统一展示“效力状态待核验”，不得解释为现行有效。
 
 ## 下一阶段
 
