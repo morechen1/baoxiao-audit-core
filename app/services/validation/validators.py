@@ -9,8 +9,13 @@ from urllib.parse import urlparse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import EvaluationSample, Penalty, SourceDocument
-from app.models.enums import AuthenticityType, DataType
+from app.models import EvaluationSample, Penalty, RegulatoryCase, SourceDocument
+from app.models.enums import (
+    REGULATORY_CASE_CATEGORY_VALUES,
+    REGULATORY_CASE_USAGE_VALUES,
+    AuthenticityType,
+    DataType,
+)
 
 
 @dataclass
@@ -183,7 +188,53 @@ class OriginalWordingValidator:
                         "original_sales_wording",
                     )
                 ]
+        if isinstance(record, RegulatoryCase):
+            if not record.marketing_wording_disclosed and record.marketing_wording:
+                return [
+                    ValidationIssue(
+                        type(self).__name__,
+                        "fabricated_wording",
+                        "marketing_wording must be empty when the source did not disclose it",
+                        "marketing_wording",
+                    )
+                ]
         return []
+
+
+class RegulatoryCaseValidator:
+    def validate(self, context: ValidationContext, session: Session) -> list[ValidationIssue]:
+        record = context.record
+        if not isinstance(record, RegulatoryCase):
+            return []
+        issues: list[ValidationIssue] = []
+        if record.case_category not in REGULATORY_CASE_CATEGORY_VALUES:
+            issues.append(
+                ValidationIssue(
+                    type(self).__name__,
+                    "invalid_case_category",
+                    "case_category is not allowed",
+                    "case_category",
+                )
+            )
+        if record.case_usage not in REGULATORY_CASE_USAGE_VALUES:
+            issues.append(
+                ValidationIssue(
+                    type(self).__name__,
+                    "invalid_case_usage",
+                    "case_usage is not allowed",
+                    "case_usage",
+                )
+            )
+        if record.marketing_wording_disclosed != bool(record.marketing_wording):
+            issues.append(
+                ValidationIssue(
+                    type(self).__name__,
+                    "marketing_wording_disclosure_mismatch",
+                    "marketing_wording must match its disclosure flag",
+                    "marketing_wording",
+                )
+            )
+        return issues
 
 
 class Sha256Validator:

@@ -111,6 +111,8 @@ class StructuredDraftRevisionService:
         changed_fields = set(envelope.fields)
         if not changed_fields.issubset(draft_model.model_fields):
             raise StructuredRecordError("revision_field_not_allowed")
+        if document.data_type == DataType.REGULATORY_CASE.value and "case_usage" in changed_fields:
+            raise StructuredRecordError("case_usage_requires_human_review")
         changed_evidence_fields = {
             field
             for field in changed_fields & EVIDENCE_FIELDS[document.data_type]
@@ -118,6 +120,9 @@ class StructuredDraftRevisionService:
         }
         if set(envelope.field_evidence) != changed_evidence_fields:
             raise StructuredRecordError("revision_evidence_must_match_fields")
+        for field in changed_fields & EVIDENCE_FIELDS[document.data_type]:
+            if candidate.get(field) is None or not str(candidate[field]).strip():
+                evidence.pop(field, None)
         try:
             validated_draft = draft_model.model_validate(candidate).model_dump()
             validated_evidence = FieldEvidenceService(self.settings).validate(

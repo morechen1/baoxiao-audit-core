@@ -11,6 +11,7 @@ from app.models import (
     Penalty,
     ProductDocument,
     Regulation,
+    RegulatoryCase,
     SourceDocument,
     StatusHistory,
 )
@@ -106,6 +107,7 @@ class StateMachineService:
             DataType.REGULATION.value: Regulation,
             DataType.PENALTY.value: Penalty,
             DataType.PRODUCT_DOCUMENT.value: ProductDocument,
+            DataType.REGULATORY_CASE.value: RegulatoryCase,
         }.get(document.data_type)
         if model is None:
             return []
