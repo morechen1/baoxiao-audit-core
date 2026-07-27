@@ -29,7 +29,8 @@ FastAPI 和 Typer CLI 共用 service/repository 层。PostgreSQL 保存来源、
 cp .env.example .env
 docker compose up -d --build
 docker compose exec api alembic upgrade head
-docker compose exec api pytest
+docker build --target test -t baoxiao-audit-core:test .
+docker run --rm baoxiao-audit-core:test
 curl http://localhost:8000/health
 ```
 
@@ -55,18 +56,22 @@ python -m app.cli.main collect-url --url "https://example.com/document.pdf" \
 python -m app.cli.main collect-directory --path ./data/samples \
   --source-type regulation --authenticity-type demo_only
 python -m app.cli.main parse-pending
+python -m app.cli.main import-structured-drafts \
+  --file ./data/parsed/structured_drafts.jsonl
 python -m app.cli.main validate-pending
 python -m app.cli.main export-review-batch --data-type penalty --format jsonl
 python -m app.cli.main import-review-results \
   --file ./data/review_results/review_result.jsonl
 python -m app.cli.main list-records --status pending_review
 python -m app.cli.main index-approved
+python -m app.cli.main repair-status-consistency --dry-run
 python -m app.cli.main health-check
 ```
 
-采集器使用明确 User-Agent、跳转跟随、20 秒超时、三次温和重试及 50 MiB 限制；不会
-绕过验证码、登录或访问控制。来源级请求间隔保存在 `data_sources`，批量调度器下一阶段
-使用该值。PDF 离线样例位于 `tests/fixtures/demo.pdf`。
+采集器使用明确 User-Agent、逐跳安全验证、20 秒超时、三次温和重试及 50 MiB 限制；
+拒绝 localhost、私网、链路本地、云元数据和 DNS 重绑定目标，不会绕过验证码、登录或
+访问控制。API 网络采集必须使用已登记、启用且域名/类型匹配的来源，采集真实性固定为
+`pending_verification`。PDF 离线样例位于 `tests/fixtures/demo.pdf`。
 
 ## API
 
@@ -88,12 +93,13 @@ curl 'http://localhost:8000/records?status=pending_review'
 
 1. 采集后状态为 `collected`，原件由 SHA-256 去重。
 2. 解析生成不可变 `raw_text`、页码切片、offset 和警告，状态为 `parsed`。
-3. 确定性校验只会进入 `pending_review` 或 `auto_validation_failed`，绝不会自动批准。
-4. 待审记录导出 JSONL/XLSX；人工结果以 JSONL 导入。
-5. `approved_with_revision` 必须带 corrections；修订写入结构化字段及单独 JSON，
+3. 人工导入经 Pydantic 验证的结构化草稿；缺失或空草稿无法通过校验。
+4. 确定性校验只会进入 `pending_review` 或 `auto_validation_failed`，绝不会自动批准。
+5. 待审记录导出 JSONL/XLSX；批次项目保存 payload hash，结果以 JSONL 导入。
+6. `approved_with_revision` 必须带白名单内 corrections；修订写入结构化字段及单独 JSON，
    不覆盖原始采集文本。
-6. 仅 `approved` / `approved_with_revision` 且真实性为 `verified_public` 的非重复数据
-   可被 `index-approved` 标记为已索引。
+7. 索引不修改 `final_review_status`。只有已批准、`verified_public`、解析/校验通过、
+   结构化记录和父文档状态一致且引用可在完整原文定位的数据才能被标记为 `indexed`。
 
 完整状态与审核格式见 [审核工作流](docs/review-workflow.md)。
 
@@ -119,6 +125,8 @@ make test
 - DOCX 文件格式本身不提供可靠页码，因此保留段落和标题、页码统一为 1 并产生警告。
 - 不执行 JavaScript，不处理登录后页面，不提供大规模调度。
 - 不包含权限、前端、向量、RAG、LLM 推断或自动法律结论。
+- API 当前只适合受控网络环境，不包含生产级身份认证。
+- LLM、Embedding 和 OCR 保持完全禁用；接口预留不代表已接入这些能力。
 - 来源请求间隔已建模，当前单 URL 命令不负责跨任务全局限速。
 
 ## 下一阶段
