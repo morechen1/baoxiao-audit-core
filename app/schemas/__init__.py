@@ -5,6 +5,13 @@ from app.schemas.requests import (
     ReviewBatchRequest,
     ReviewImportRequest,
     SourceCreate,
+    StructuredImportRequest,
+)
+from app.schemas.structured import (
+    PenaltyDraft,
+    ProductDocumentDraft,
+    RegulationDraft,
+    StructuredDraftEnvelope,
 )
 
 __all__ = [
@@ -13,7 +20,12 @@ __all__ = [
     "ErrorDetail",
     "ErrorResponse",
     "MessageResponse",
+    "PenaltyDraft",
+    "ProductDocumentDraft",
+    "RegulationDraft",
     "ReviewBatchRequest",
     "ReviewImportRequest",
     "SourceCreate",
+    "StructuredImportRequest",
+    "StructuredDraftEnvelope",
 ]
