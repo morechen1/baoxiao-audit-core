@@ -27,7 +27,10 @@ from app.models.enums import (
     ReviewStatus,
     SampleCategory,
 )
+from app.services.field_evidence import EVIDENCE_FIELDS
 from app.services.knowledge import KnowledgeIndexService
+from app.services.parsed_artifacts import ParsedArtifactService
+from app.services.parsing.base import ParsedDocument, ParsedPage
 from app.services.review import ReviewService
 from app.services.review.service import payload_hash
 
@@ -53,7 +56,7 @@ def setup_product(session, *, suffix: str = "a"):
     product = ProductDocument(
         document_id=document.id,
         product_name="演示产品",
-        waiting_period="待确认",
+        waiting_period=None,
         source_quote="演示产品",
         final_review_status=ReviewStatus.PENDING_REVIEW.value,
     )
@@ -89,7 +92,7 @@ def setup_penalty(session):
     return document, penalty
 
 
-def export_one(session, tmp_path: Path, data_type: str):
+def materialize_documents(session, data_type: str) -> ReviewService:
     data_dir = session.info["data_dir"]
     raw_dir = data_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
@@ -100,11 +103,79 @@ def export_one(session, tmp_path: Path, data_type: str):
         path.write_bytes(content)
         document.sha256 = digest
         document.raw_file_path = str(path)
+        parsed = ParsedDocument(
+            title=document.source_title or "测试解析产物",
+            plain_text=document.raw_text or "",
+            pages=[ParsedPage(page_number=1, text=document.raw_text or "")],
+        )
+        ParsedArtifactService(Settings(database_url="sqlite://", data_dir=data_dir)).persist(
+            session,
+            document,
+            parsed,
+            parser_name="TestParser",
+        )
+        for record in document_records(session, document):
+            record.field_evidence_json = evidence_for_record(document, record)
     session.commit()
-    service = ReviewService(Settings(database_url="sqlite://", data_dir=data_dir))
+    return ReviewService(Settings(database_url="sqlite://", data_dir=data_dir))
+
+
+def export_one(session, tmp_path: Path, data_type: str):
+    service = materialize_documents(session, data_type)
     batch = service.export_batch(session, data_type, "jsonl")
     row = json.loads(Path(batch.export_path).read_text(encoding="utf-8").splitlines()[0])
     return service, batch, row
+
+
+def document_records(session, document):
+    model = {
+        DataType.REGULATION.value: Regulation,
+        DataType.PENALTY.value: Penalty,
+        DataType.PRODUCT_DOCUMENT.value: ProductDocument,
+    }.get(document.data_type)
+    return list(session.query(model).filter_by(document_id=document.id)) if model else []
+
+
+def evidence_for_record(document, record):
+    evidence = {}
+    raw_text = document.raw_text or ""
+    for field_name in EVIDENCE_FIELDS[document.data_type]:
+        value = getattr(record, field_name)
+        if value is None or not str(value).strip():
+            continue
+        rendered = value.isoformat() if isinstance(value, date) else str(value)
+        start = raw_text.find(rendered)
+        if start >= 0:
+            evidence[field_name] = [
+                {
+                    "quote": rendered,
+                    "page_number": 1,
+                    "start_offset": start,
+                    "end_offset": start + len(rendered),
+                    "mode": "verbatim",
+                }
+            ]
+    return evidence
+
+
+def correction_evidence(
+    document: SourceDocument,
+    quote: str,
+    *,
+    mode: str = "verbatim",
+    note: str | None = None,
+) -> list[dict[str, object]]:
+    start = (document.raw_text or "").index(quote)
+    item: dict[str, object] = {
+        "quote": quote,
+        "page_number": 1,
+        "start_offset": start,
+        "end_offset": start + len(quote),
+        "mode": mode,
+    }
+    if note:
+        item["transformation_note"] = note
+    return [item]
 
 
 def decision_payload(row, *, status=ReviewStatus.APPROVED.value, corrections=None):
@@ -363,7 +434,7 @@ def test_non_revision_decisions_cannot_have_corrections(
 
 
 def setup_regulation(session, *, suffix: str = "r"):
-    raw_text = "第一条 原文甲。第二条 原文乙。"
+    raw_text = "第一条 原文甲。第二条 原文乙。修订甲 第二条（修订） 本应回滚 生效日期：2026-01-01"
     document = SourceDocument(
         data_type=DataType.REGULATION.value,
         source_url=f"https://example.test/rule/{suffix}",
@@ -407,10 +478,14 @@ def test_multiple_regulations_are_revised_by_structured_id(session, tmp_path: Pa
             {
                 "structured_record_id": first.id,
                 "fields": {"article_text": "修订甲"},
+                "field_evidence": {"article_text": correction_evidence(document, "修订甲")},
             },
             {
                 "structured_record_id": second.id,
                 "fields": {"article_number": "第二条（修订）"},
+                "field_evidence": {
+                    "article_number": correction_evidence(document, "第二条（修订）")
+                },
             },
         ]
     }
@@ -453,7 +528,7 @@ def test_cannot_modify_structured_record_from_other_document(session, tmp_path: 
 
 
 def test_multiple_regulation_revisions_roll_back_together(session, tmp_path: Path) -> None:
-    _, first, second = setup_regulation(session)
+    document, first, second = setup_regulation(session)
     service, batch, row = export_one(session, tmp_path, DataType.REGULATION.value)
 
     with pytest.raises(ReviewDecisionError, match="invalid_correction_value"):
@@ -467,6 +542,9 @@ def test_multiple_regulation_revisions_roll_back_together(session, tmp_path: Pat
                         {
                             "structured_record_id": first.id,
                             "fields": {"article_text": "本应回滚"},
+                            "field_evidence": {
+                                "article_text": correction_evidence(document, "本应回滚")
+                            },
                         },
                         {
                             "structured_record_id": second.id,
@@ -793,7 +871,7 @@ def test_non_boolean_penalty_correction_is_rejected(session, tmp_path: Path) -> 
 
 
 def test_iso_date_correction_is_saved_as_date(session, tmp_path: Path) -> None:
-    _, regulation, _ = setup_regulation(session)
+    document, regulation, _ = setup_regulation(session)
     service, batch, row = export_one(session, tmp_path, DataType.REGULATION.value)
 
     service.apply_decision(
@@ -806,6 +884,12 @@ def test_iso_date_correction_is_saved_as_date(session, tmp_path: Path) -> None:
                     {
                         "structured_record_id": regulation.id,
                         "fields": {"effective_date": "2026-01-01"},
+                        "field_evidence": {
+                            "effective_date": correction_evidence(
+                                document,
+                                "2026-01-01",
+                            )
+                        },
                     }
                 ]
             },
@@ -888,7 +972,7 @@ def test_authenticity_log_binds_verified_occurrence_and_source(session, tmp_path
 
 def test_portable_review_bundle_contains_source_and_relative_paths(session, tmp_path: Path) -> None:
     document, _ = setup_product(session)
-    service, _, _ = export_one(session, tmp_path, DataType.PRODUCT_DOCUMENT.value)
+    service = materialize_documents(session, DataType.PRODUCT_DOCUMENT.value)
 
     batch, bundle_path = service.export_bundle(session, DataType.PRODUCT_DOCUMENT.value)
 
@@ -897,15 +981,21 @@ def test_portable_review_bundle_contains_source_and_relative_paths(session, tmp_
         manifest = json.loads(bundle.read("manifest.json"))
         review = json.loads(bundle.read("review.jsonl"))
         source_name = f"sources/{document.sha256}.txt"
+        parsed_name = f"parsed/{document.parsed_artifact_sha256}.json"
         assert {
             "manifest.json",
             "review.jsonl",
             "review-results-template.jsonl",
             source_name,
+            parsed_name,
         } <= names
         assert review["raw_file_path"] == source_name
+        assert review["parsed_artifact_path"] == parsed_name
         assert not review["raw_file_path"].startswith("/")
         assert hashlib.sha256(bundle.read(source_name)).hexdigest() == document.sha256
+        assert (
+            hashlib.sha256(bundle.read(parsed_name)).hexdigest() == document.parsed_artifact_sha256
+        )
         assert manifest["items"][0]["payload_hash"] == payload_hash(review)
         assert manifest["package_sha256"]
     assert batch.bundle_sha256 == hashlib.sha256(bundle_path.read_bytes()).hexdigest()
@@ -913,15 +1003,20 @@ def test_portable_review_bundle_contains_source_and_relative_paths(session, tmp_
 
 @pytest.mark.parametrize(
     "member_name",
-    ["manifest.json", "review.jsonl", "source"],
+    ["manifest.json", "review.jsonl", "source", "parsed"],
 )
 def test_tampered_bundle_member_rejects_decision(session, tmp_path: Path, member_name: str) -> None:
     setup_product(session)
-    service, _, _ = export_one(session, tmp_path, DataType.PRODUCT_DOCUMENT.value)
+    service = materialize_documents(session, DataType.PRODUCT_DOCUMENT.value)
     batch, bundle_path = service.export_bundle(session, DataType.PRODUCT_DOCUMENT.value)
     with zipfile.ZipFile(bundle_path) as bundle:
         row = json.loads(bundle.read("review.jsonl"))
-        target = row["raw_file_path"] if member_name == "source" else member_name
+        if member_name == "source":
+            target = row["raw_file_path"]
+        elif member_name == "parsed":
+            target = row["parsed_artifact_path"]
+        else:
+            target = member_name
         members = {name: bundle.read(name) for name in bundle.namelist()}
     members[target] = b"tampered"
     with zipfile.ZipFile(bundle_path, "w") as bundle:

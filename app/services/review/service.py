@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.exceptions import (
+    FieldEvidenceError,
     InvalidStateTransition,
     ReviewDecisionError,
 )
@@ -28,6 +29,7 @@ from app.models import (
     ReviewBatch,
     ReviewBatchItem,
     ReviewDecision,
+    ReviewReservation,
     SourceDocument,
 )
 from app.models.enums import (
@@ -50,7 +52,9 @@ from app.schemas.structured import (
     StrictDraft,
 )
 from app.services.collection import SafeUrlPolicy
+from app.services.field_evidence import EVIDENCE_FIELDS, FieldEvidenceService
 from app.services.integrity import RawArtifactIntegrityService
+from app.services.parsed_artifacts import ParsedArtifactIntegrityService
 from app.services.state_machine import StateMachineService
 from app.services.validation import ValidationService
 
@@ -163,10 +167,8 @@ class ReviewService:
         if file_format not in {"jsonl", "xlsx"}:
             raise ValueError("format must be jsonl or xlsx")
         records = self._pending_records(session, data_type)
-        integrity = RawArtifactIntegrityService(self.settings)
-        for record in records:
-            if isinstance(record, SourceDocument):
-                integrity.verify(record)
+        if not records:
+            raise ReviewDecisionError("no_records_available_for_review")
         unique_name = f"{data_type}-{uuid4().hex}"
         output_dir = self.settings.data_dir.resolve() / "review_batches"
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -174,7 +176,7 @@ class ReviewService:
         batch = ReviewBatch(
             batch_name=unique_name,
             data_type=data_type,
-            record_count=len(records),
+            record_count=0,
             export_path=str(path),
             schema_version=SCHEMA_VERSION,
             status="exported",
@@ -184,6 +186,36 @@ class ReviewService:
         rows: list[dict[str, Any]] = []
         for record in records:
             document = record if isinstance(record, SourceDocument) else None
+            if document:
+                RawArtifactIntegrityService(self.settings).verify(document)
+                ParsedArtifactIntegrityService(self.settings).verify(document, session=session)
+                for structured_record in StateMachineService.structured_records(session, document):
+                    try:
+                        FieldEvidenceService(self.settings).validate(
+                            session,
+                            document,
+                            {
+                                field_name: getattr(structured_record, field_name)
+                                for field_name in EVIDENCE_FIELDS[document.data_type]
+                            },
+                            structured_record.field_evidence_json,
+                        )
+                    except FieldEvidenceError as exc:
+                        raise ReviewDecisionError(str(exc)) from exc
+            try:
+                with session.begin_nested():
+                    session.add(
+                        ReviewReservation(
+                            record_type=data_type,
+                            record_id=record.id,
+                            document_id=document.id if document else None,
+                            batch_id=batch.id,
+                            status="active",
+                        )
+                    )
+                    session.flush()
+            except IntegrityError:
+                continue
             item = ReviewBatchItem(
                 batch_id=batch.id,
                 record_type=data_type,
@@ -201,6 +233,10 @@ class ReviewService:
             )
             item.payload_hash = payload_hash(row)
             rows.append(row)
+        if not rows:
+            session.rollback()
+            raise ReviewDecisionError("no_records_available_for_review")
+        batch.record_count = len(rows)
         self._write_export(path, file_format, rows)
         batch.export_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
         session.commit()
@@ -263,6 +299,37 @@ class ReviewService:
         )
         return path
 
+    def cancel_batch(
+        self,
+        session: Session,
+        batch_id: int,
+        reason: str,
+    ) -> ReviewBatch:
+        batch = session.get(ReviewBatch, batch_id)
+        if not batch or batch.status != "exported":
+            raise ReviewDecisionError("review_batch_not_cancellable")
+        if not reason.strip():
+            raise ReviewDecisionError("review_batch_cancellation_reason_required")
+        reservations = list(
+            session.scalars(
+                select(ReviewReservation).where(
+                    ReviewReservation.batch_id == batch.id,
+                    ReviewReservation.status == "active",
+                )
+            )
+        )
+        now = datetime.now(UTC)
+        for reservation in reservations:
+            reservation.status = "released"
+            reservation.released_at = now
+            reservation.release_reason = f"batch_cancelled: {reason.strip()}"
+        batch.status = "cancelled"
+        batch.cancelled_at = now
+        batch.cancellation_reason = reason.strip()
+        session.commit()
+        session.refresh(batch)
+        return batch
+
     def export_bundle(self, session: Session, data_type: str) -> tuple[ReviewBatch, Path]:
         batch = self.export_batch(session, data_type, "jsonl")
         items = list(
@@ -278,7 +345,7 @@ class ReviewService:
             for line in export_path.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
-        source_members: dict[str, bytes] = {}
+        artifact_members: dict[str, bytes] = {}
         item_by_id = {item.id: item for item in items}
         manifest_items: list[dict[str, Any]] = []
         for row in rows:
@@ -286,12 +353,17 @@ class ReviewService:
             if not document:
                 raise ReviewDecisionError("Review bundle document is missing")
             RawArtifactIntegrityService(self.settings).verify(document)
+            ParsedArtifactIntegrityService(self.settings).verify(document, session=session)
             source_path = Path(document.raw_file_path)
-            member = f"sources/{document.sha256}{source_path.suffix.lower()}"
+            source_member = f"sources/{document.sha256}{source_path.suffix.lower()}"
             source_bytes = source_path.read_bytes()
-            source_members.setdefault(member, source_bytes)
-            row["raw_file_path"] = member
-            row["raw_text_file"] = member
+            artifact_members.setdefault(source_member, source_bytes)
+            parsed_member = f"parsed/{document.parsed_artifact_sha256}.json"
+            parsed_bytes = Path(document.parsed_artifact_path or "").read_bytes()
+            artifact_members.setdefault(parsed_member, parsed_bytes)
+            row["raw_file_path"] = source_member
+            row["raw_text_file"] = source_member
+            row["parsed_artifact_path"] = parsed_member
             row["source_url"] = self._portable_url(row.get("source_url"))
             row["final_url"] = self._portable_url(row.get("final_url"))
             row["source_occurrences"] = self._portable_occurrences(row["source_occurrences"])
@@ -302,8 +374,17 @@ class ReviewService:
                     "batch_item_id": item.id,
                     "record_id": item.record_id,
                     "payload_hash": item.payload_hash,
-                    "raw_file_sha256": document.sha256,
-                    "bundle_relative_path": member,
+                    "raw_sha256": document.sha256,
+                    "raw_bundle_relative_path": source_member,
+                    "parsed_artifact_sha256": document.parsed_artifact_sha256,
+                    "parsed_text_sha256": document.parsed_text_sha256,
+                    "parsed_bundle_relative_path": parsed_member,
+                    "parser_name": document.parser_name,
+                    "parser_version": document.parser_version,
+                    "field_evidence_summary": [
+                        FieldEvidenceService.summary(getattr(record, "field_evidence_json", {}))
+                        for record in StateMachineService.structured_records(session, document)
+                    ],
                     "source_occurrences": row["source_occurrences"],
                 }
             )
@@ -317,7 +398,7 @@ class ReviewService:
             json.dumps(row, ensure_ascii=False) + "\n" for row in template_rows
         ).encode()
         package_payload_hash = self._bundle_payload_hash(
-            review_bytes, template_bytes, source_members
+            review_bytes, template_bytes, artifact_members
         )
         manifest = {
             "schema_version": batch.schema_version,
@@ -338,7 +419,7 @@ class ReviewService:
             bundle.writestr("manifest.json", manifest_bytes)
             bundle.writestr("review.jsonl", review_bytes)
             bundle.writestr("review-results-template.jsonl", template_bytes)
-            for name, content in sorted(source_members.items()):
+            for name, content in sorted(artifact_members.items()):
                 bundle.writestr(name, content)
         batch.bundle_path = str(bundle_path)
         batch.bundle_sha256 = hashlib.sha256(bundle_path.read_bytes()).hexdigest()
@@ -394,6 +475,8 @@ class ReviewService:
             raise ReviewDecisionError("Record is not part of this review batch")
         if item.decision_id is not None:
             raise ReviewDecisionError("Review batch item already has a decision")
+        if batch.status != "exported":
+            raise ReviewDecisionError("review_batch_not_open")
         if payload["schema_version"] != batch.schema_version:
             raise ReviewDecisionError("Review decision schema_version does not match batch")
         if payload["reviewed_payload_hash"] != item.payload_hash:
@@ -454,6 +537,7 @@ class ReviewService:
         if not document or document.data_type != record_type or item.document_id != document.id:
             raise ReviewDecisionError("Decision does not identify the exported document")
         RawArtifactIntegrityService(self.settings).verify(document)
+        ParsedArtifactIntegrityService(self.settings).verify(document, session=session)
         if document.final_review_status != ReviewStatus.PENDING_REVIEW.value:
             raise ReviewDecisionError(
                 f"Only pending_review records may be reviewed; "
@@ -475,7 +559,7 @@ class ReviewService:
         if not records:
             raise ReviewDecisionError("Structured record is missing")
         records_by_id = {record.id: record for record in records}
-        validated_updates: list[tuple[Any, dict[str, Any]]] = []
+        validated_updates: list[tuple[Any, dict[str, Any], dict[str, Any]]] = []
         for correction in correction_set.records if correction_set else []:
             target = records_by_id.get(correction.structured_record_id)
             if target is None:
@@ -483,21 +567,47 @@ class ReviewService:
                     "structured_record_id does not belong to the reviewed document"
                 )
             model = CORRECTION_MODELS[record_type]
+            evidence_fields = EVIDENCE_FIELDS[record_type]
             candidate = {field: getattr(target, field) for field in model.model_fields}
             candidate.update(correction.fields)
             try:
                 validated = model.model_validate(candidate).model_dump()
             except PydanticValidationError as exc:
                 raise ReviewDecisionError("invalid_correction_value") from exc
+            changed_evidence_fields = {
+                field
+                for field in set(correction.fields) & evidence_fields
+                if validated[field] is not None and str(validated[field]).strip()
+            }
+            if set(correction.field_evidence) != changed_evidence_fields:
+                raise ReviewDecisionError("correction_evidence_required")
+            candidate_evidence = {
+                **target.field_evidence_json,
+                **{
+                    key: [item.model_dump(mode="json", exclude_none=True) for item in values]
+                    for key, values in correction.field_evidence.items()
+                },
+            }
+            try:
+                validated_evidence = FieldEvidenceService(self.settings).validate(
+                    session,
+                    document,
+                    validated,
+                    candidate_evidence,
+                )
+            except (PydanticValidationError, FieldEvidenceError) as exc:
+                raise ReviewDecisionError("invalid_correction_value") from exc
             validated_updates.append(
                 (
                     target,
                     {key: validated[key] for key in correction.fields},
+                    validated_evidence,
                 )
             )
-        for target, updates in validated_updates:
+        for target, updates, validated_evidence in validated_updates:
             for key, value in updates.items():
                 setattr(target, key, value)
+            target.field_evidence_json = validated_evidence
         try:
             session.flush()
         except (IntegrityError, StatementError) as exc:
@@ -513,6 +623,9 @@ class ReviewService:
                 "issues": [issue.__dict__ for issue in validation.issues],
                 "validated_at": datetime.now(UTC).isoformat(),
                 "reviewed_payload_hash": item.payload_hash,
+                "field_evidence": [
+                    FieldEvidenceService.summary(record.field_evidence_json) for record in records
+                ],
             }
             document.metadata_json = metadata
             document.corrected_fields_json = {
@@ -529,6 +642,12 @@ class ReviewService:
         except IntegrityError as exc:
             raise ReviewDecisionError("Decision violates a database constraint") from exc
         item.decision_id = decision.id
+        self._release_reservation(
+            session,
+            item.record_type,
+            item.record_id,
+            "review_decided",
+        )
         if authenticity_decision:
             self._verify_authenticity(
                 session,
@@ -607,6 +726,12 @@ class ReviewService:
         session.add(decision)
         session.flush()
         item.decision_id = decision.id
+        self._release_reservation(
+            session,
+            item.record_type,
+            item.record_id,
+            "review_decided",
+        )
         self._complete_batch_if_ready(session, batch)
         if commit:
             session.commit()
@@ -710,6 +835,7 @@ class ReviewService:
                 "Only pending_verification documents may be verified as public"
             )
         RawArtifactIntegrityService(self.settings).verify(document)
+        ParsedArtifactIntegrityService(self.settings).verify(document, session=session)
         allowed_domains = source.crawl_policy.get("allowed_domains", [])
         if not isinstance(allowed_domains, list) or any(
             not isinstance(value, str) for value in allowed_domains
@@ -733,6 +859,19 @@ class ReviewService:
             for record in records
         ):
             raise ReviewDecisionError("source_quote cannot be located in immutable raw text")
+        for record in records:
+            try:
+                FieldEvidenceService(self.settings).validate(
+                    session,
+                    document,
+                    {
+                        field_name: getattr(record, field_name)
+                        for field_name in EVIDENCE_FIELDS[document.data_type]
+                    },
+                    record.field_evidence_json,
+                )
+            except FieldEvidenceError as exc:
+                raise ReviewDecisionError(str(exc)) from exc
         previous = document.authenticity_type
         document.authenticity_type = AuthenticityType.VERIFIED_PUBLIC.value
         session.add(
@@ -772,7 +911,13 @@ class ReviewService:
         records = StateMachineService.structured_records(session, document)
         parsed_records = [
             {
-                ("structured_record_id" if key == "id" else key): value
+                (
+                    "structured_record_id"
+                    if key == "id"
+                    else "field_evidence"
+                    if key == "field_evidence_json"
+                    else key
+                ): value
                 for key, value in vars(record).items()
                 if not key.startswith("_") and key != "document_id"
             }
@@ -793,6 +938,12 @@ class ReviewService:
             "raw_file_path": document.raw_file_path,
             "raw_text": document.raw_text,
             "raw_text_file": document.raw_file_path,
+            "parsed_artifact_path": document.parsed_artifact_path,
+            "parsed_artifact_sha256": document.parsed_artifact_sha256,
+            "parsed_text_sha256": document.parsed_text_sha256,
+            "parsed_from_raw_sha256": document.parsed_from_raw_sha256,
+            "parser_name": document.parser_name,
+            "parser_version": document.parser_version,
             "parsed_fields": {"records": parsed_records},
             "source_quotes": [
                 getattr(record, "source_quote", None)
@@ -900,13 +1051,13 @@ class ReviewService:
     def _bundle_payload_hash(
         review_bytes: bytes,
         template_bytes: bytes,
-        source_members: dict[str, bytes],
+        artifact_members: dict[str, bytes],
     ) -> str:
         digest = hashlib.sha256()
         for name, content in [
             ("review.jsonl", review_bytes),
             ("review-results-template.jsonl", template_bytes),
-            *sorted(source_members.items()),
+            *sorted(artifact_members.items()),
         ]:
             digest.update(name.encode())
             digest.update(b"\0")
@@ -949,21 +1100,27 @@ class ReviewService:
                         if line.strip()
                     )
                 }
-                source_members: dict[str, bytes] = {}
+                artifact_members: dict[str, bytes] = {}
                 for item in manifest["items"]:
                     row = rows[int(item["batch_item_id"])]
                     if (
                         payload_hash(row) != item["payload_hash"]
-                        or row["raw_file_path"] != item["bundle_relative_path"]
+                        or row["raw_file_path"] != item["raw_bundle_relative_path"]
+                        or row["parsed_artifact_path"] != item["parsed_bundle_relative_path"]
                     ):
                         raise ValueError
-                    member = item["bundle_relative_path"]
-                    content = bundle.read(member)
-                    if hashlib.sha256(content).hexdigest() != item["raw_file_sha256"]:
+                    raw_member = item["raw_bundle_relative_path"]
+                    raw_content = bundle.read(raw_member)
+                    if hashlib.sha256(raw_content).hexdigest() != item["raw_sha256"]:
                         raise ValueError
-                    source_members[member] = content
+                    parsed_member = item["parsed_bundle_relative_path"]
+                    parsed_content = bundle.read(parsed_member)
+                    if hashlib.sha256(parsed_content).hexdigest() != item["parsed_artifact_sha256"]:
+                        raise ValueError
+                    artifact_members[raw_member] = raw_content
+                    artifact_members[parsed_member] = parsed_content
                 if (
-                    self._bundle_payload_hash(review_bytes, template_bytes, source_members)
+                    self._bundle_payload_hash(review_bytes, template_bytes, artifact_members)
                     != manifest["package_sha256"]
                 ):
                     raise ValueError
@@ -1001,6 +1158,25 @@ class ReviewService:
                 ]
             )
         workbook.save(path)
+
+    @staticmethod
+    def _release_reservation(
+        session: Session,
+        record_type: str,
+        record_id: int,
+        reason: str,
+    ) -> None:
+        reservation = session.scalar(
+            select(ReviewReservation).where(
+                ReviewReservation.record_type == record_type,
+                ReviewReservation.record_id == record_id,
+                ReviewReservation.status == "active",
+            )
+        )
+        if reservation:
+            reservation.status = "released"
+            reservation.released_at = datetime.now(UTC)
+            reservation.release_reason = reason
 
     @staticmethod
     def _complete_batch_if_ready(session: Session, batch: ReviewBatch) -> None:

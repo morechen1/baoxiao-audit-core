@@ -9,6 +9,8 @@ from app.models.enums import (
     ReviewStatus,
 )
 from app.services.knowledge import KnowledgeIndexService
+from app.services.parsed_artifacts import ParsedArtifactService
+from app.services.parsing.base import ParsedDocument, ParsedPage
 
 
 def make_document(
@@ -49,6 +51,28 @@ def persist_pair(session, status: str, *, authenticity: str):
     raw_path.write_bytes(content)
     document.raw_file_path = str(raw_path)
     document.sha256 = digest
+    ParsedArtifactService(Settings(data_dir=session.info["data_dir"])).persist(
+        session,
+        document,
+        ParsedDocument(
+            title="演示产品",
+            plain_text=document.raw_text or "",
+            pages=[ParsedPage(page_number=1, text=document.raw_text or "")],
+        ),
+        parser_name="TestParser",
+    )
+    start = (document.raw_text or "").find(product.product_name)
+    product.field_evidence_json = {
+        "product_name": [
+            {
+                "quote": product.product_name,
+                "page_number": 1,
+                "start_offset": start,
+                "end_offset": start + len(product.product_name),
+                "mode": "verbatim",
+            }
+        ]
+    }
     product.document_id = document.id
     session.add(product)
     session.commit()

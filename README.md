@@ -16,7 +16,8 @@
 ## 当前范围与架构
 
 FastAPI 和 Typer CLI 共用 service/repository 层。PostgreSQL 保存来源、文档、切片、四类
-结构化记录、审核批次/决定和状态历史；`data/raw` 保存按 SHA-256 命名的原件。索引服务
+结构化记录、解析版本、字段证据、审核预留/决定和状态历史；`data/raw` 保存按 SHA-256
+命名的原件，`data/parsed_artifacts` 保存按内容哈希命名的不可变解析 JSON。索引服务
 当前只写入可信状态，不做 RAG、全文搜索、向量生成或法律结论。
 
 详细设计见 [架构](docs/architecture.md) 和 [数据模型](docs/data-model.md)。
@@ -60,9 +61,14 @@ python -m app.cli.main collect-local-manifest \
 python -m app.cli.main parse-pending
 python -m app.cli.main import-structured-drafts \
   --file ./data/parsed/structured_drafts.jsonl
+python -m app.cli.main revise-structured-draft \
+  --file ./data/parsed/structured_draft_revision.jsonl \
+  --reason "修正错误的原文引用" --actor "operator"
 python -m app.cli.main validate-pending
 python -m app.cli.main export-review-batch --data-type penalty --format jsonl
 python -m app.cli.main export-review-bundle --data-type penalty
+python -m app.cli.main cancel-review-batch \
+  --batch-id 1 --reason "审核任务重新分配"
 python -m app.cli.main create-review-result-template --batch-id 1
 python -m app.cli.main import-review-results \
   --file ./data/review_results/review_result.jsonl --batch-id 1
@@ -71,6 +77,8 @@ python -m app.cli.main index-approved
 python -m app.cli.main repair-status-consistency --dry-run
 python -m app.cli.main resubmit-for-review --record-type product_document \
   --record-id 123 --reason "已补充可核验官方来源"
+python -m app.cli.main reparse-document \
+  --document-id 123 --reason "解析器版本升级"
 python -m app.cli.main health-check
 ```
 
@@ -102,16 +110,20 @@ curl 'http://localhost:8000/records?status=pending_review'
 ## 审核闭环
 
 1. 采集后状态为 `collected`，原件由 SHA-256 去重。
-2. 每次解析、校验、审核导出/导入和索引前都重新流式核对原件 SHA-256 及受管路径。
-   疑似扫描 PDF 隔离为 `requires_ocr`，不伪造文本且不进入后续批次。
-3. 人工导入经 Pydantic 验证的结构化草稿；仅 `parsed`/`auto_validation_failed`
-   可导入，进入待审或任何人工终态后永久锁定普通草稿入口。
+2. 解析前重新流式核对原件 SHA-256；解析后固化包含页码/offset 的 JSON，同时绑定
+   原件哈希、解析 JSON 哈希和 `plain_text` 哈希。校验、审核导出/导入、真实性确认和
+   索引均验证受管路径、解析产物、数据库 `raw_text` 和 document chunks。
+3. 人工导入经 Pydantic 验证的结构化草稿；正式草稿的每个非空业务字段必须携带
+   `field_evidence`。仅 `parsed`/`auto_validation_failed` 可导入或经专用命令修订，
+   修订字段与证据原子写入并留审计；进入待审或人工终态后锁定草稿入口。
 4. 确定性校验只会进入 `pending_review` 或 `auto_validation_failed`，绝不会自动批准。
-5. 待审记录可导出 JSONL/XLSX；真实资料默认导出可移植 ZIP bundle，内含 manifest、
-   哈希绑定的决定模板及 `sources/<sha256>.<ext>` 原件，不暴露主机绝对路径。
-6. 只有 `approved_with_revision` 可以携带 corrections；文档修订按
-   `structured_record_id` 精确定位，并以对应 Pydantic 草稿模型对完整候选值重新做类型
-   校验后写入，保存独立 `post_review_validation` 审计结果。
+5. 待审记录以数据库唯一约束取得排他预留；已进入开放批次的记录会被跳过，取消批次
+   后才释放。可移植 ZIP bundle 内含 manifest、哈希绑定的决定模板、
+   `sources/<sha256>.<ext>` 原件及 `parsed/<sha256>.json` 解析产物。
+6. 只有 `approved_with_revision` 可以携带 corrections；证据型字段变更必须同步提供
+   同名证据，禁止单独替换未修改字段的证据。文档修订按 `structured_record_id` 精确
+   定位，完整候选值、offset、页码和确定性转换全部通过后才原子写入，并保存独立
+   `post_review_validation` 审计结果。
 7. `authenticity_decision` 必须指定一个属于当前文档的合格官方 occurrence、理由和
    `verified_public` 新值，并随已批准的哈希绑定决定提交。待核实文档缺少该决定时不得
    批准，应选择 `pending_source_verification`，补齐来源后再显式重新送审。

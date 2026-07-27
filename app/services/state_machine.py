@@ -22,6 +22,7 @@ ALLOWED_DOCUMENT_TRANSITIONS: dict[str, frozenset[str]] = {
         {
             ReviewStatus.PENDING_REVIEW.value,
             ReviewStatus.AUTO_VALIDATION_FAILED.value,
+            ReviewStatus.REQUIRES_EXPERT_REVIEW.value,
         }
     ),
     ReviewStatus.PENDING_REVIEW.value: frozenset(

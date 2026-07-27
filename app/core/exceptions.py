@@ -36,3 +36,11 @@ class RawArtifactIntegrityError(BaoxiaoError):
 
 class CollectionError(BaoxiaoError):
     """Raised when collected content violates provenance or type constraints."""
+
+
+class ParsedArtifactIntegrityError(BaoxiaoError):
+    """Raised when an immutable parsed artifact cannot be verified."""
+
+
+class FieldEvidenceError(BaoxiaoError):
+    """Raised when structured fields are not supported by immutable evidence."""

@@ -14,6 +14,8 @@ from app.models.enums import (
     ReviewStatus,
 )
 from app.schemas.structured import StructuredDraftEnvelope
+from app.services.parsed_artifacts import ParsedArtifactService
+from app.services.parsing.base import ParsedDocument, ParsedPage
 from app.services.structured_records import StructuredRecordService
 from app.services.validation import ValidationService
 
@@ -39,8 +41,22 @@ def parsed_document(session, data_type: str, *, raw_text: str) -> SourceDocument
     raw_path.write_bytes(content)
     document.raw_file_path = str(raw_path)
     document.sha256 = digest
+    ParsedArtifactService(Settings(data_dir=session.info["data_dir"])).persist(
+        session,
+        document,
+        ParsedDocument(
+            title="测试文档",
+            plain_text=raw_text,
+            pages=[ParsedPage(page_number=1, text=raw_text)],
+        ),
+        parser_name="TestParser",
+    )
     session.commit()
     return document
+
+
+def structured_service(session) -> StructuredRecordService:
+    return StructuredRecordService(Settings(data_dir=session.info["data_dir"]))
 
 
 def test_missing_structured_record_fails_validation(session) -> None:
@@ -69,6 +85,17 @@ def test_import_structured_penalty_draft(session, tmp_path: Path) -> None:
                     "original_sales_wording": None,
                     "source_quote": "演示违法事实",
                 },
+                "field_evidence": {
+                    "illegal_facts": [
+                        {
+                            "quote": "演示违法事实",
+                            "page_number": 1,
+                            "start_offset": 0,
+                            "end_offset": 6,
+                            "mode": "verbatim",
+                        }
+                    ]
+                },
             },
             ensure_ascii=False,
         )
@@ -76,7 +103,7 @@ def test_import_structured_penalty_draft(session, tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    imported, errors = StructuredRecordService().import_jsonl(session, path)
+    imported, errors = structured_service(session).import_jsonl(session, path)
 
     assert imported == 1
     assert errors == []
@@ -92,7 +119,7 @@ def test_record_type_must_match_document(session) -> None:
     )
 
     with pytest.raises(StructuredRecordError, match="does not match"):
-        StructuredRecordService().import_draft(session, envelope)
+        structured_service(session).import_draft(session, envelope)
 
 
 def test_empty_structured_record_cannot_bypass_validation(session) -> None:
@@ -105,10 +132,21 @@ def test_empty_structured_record_cannot_bypass_validation(session) -> None:
             "source_quote": "",
             "original_sales_wording_disclosed": False,
         },
+        field_evidence={
+            "illegal_facts": [
+                {
+                    "quote": "演示违法事实",
+                    "page_number": 1,
+                    "start_offset": 0,
+                    "end_offset": 6,
+                    "mode": "verbatim",
+                }
+            ]
+        },
     )
 
     with pytest.raises(StructuredRecordError):
-        StructuredRecordService().import_draft(session, envelope)
+        structured_service(session).import_draft(session, envelope)
 
 
 def test_penalty_primary_record_is_unique(session) -> None:
@@ -121,8 +159,19 @@ def test_penalty_primary_record_is_unique(session) -> None:
             "source_quote": "演示违法事实",
             "original_sales_wording_disclosed": False,
         },
+        field_evidence={
+            "illegal_facts": [
+                {
+                    "quote": "演示违法事实",
+                    "page_number": 1,
+                    "start_offset": 0,
+                    "end_offset": 6,
+                    "mode": "verbatim",
+                }
+            ]
+        },
     )
-    service = StructuredRecordService()
+    service = structured_service(session)
     service.import_draft(session, envelope)
 
     with pytest.raises(StructuredRecordError, match="already has"):
@@ -138,6 +187,17 @@ def regulation_envelope(document: SourceDocument) -> StructuredDraftEnvelope:
             "article_text": "第一条 演示规则内容",
             "source_quote": "演示规则内容",
         },
+        field_evidence={
+            "article_text": [
+                {
+                    "quote": "第一条 演示规则内容",
+                    "page_number": 1,
+                    "start_offset": 0,
+                    "end_offset": 10,
+                    "mode": "verbatim",
+                }
+            ]
+        },
     )
 
 
@@ -151,7 +211,7 @@ def assert_structured_record_locked(session, status: str) -> None:
     session.commit()
 
     with pytest.raises(StructuredRecordError, match="structured_record_locked"):
-        StructuredRecordService().import_draft(
+        structured_service(session).import_draft(
             session,
             regulation_envelope(document),
         )
@@ -188,7 +248,7 @@ def test_indexed_regulation_cannot_add_article(session) -> None:
     session.commit()
 
     with pytest.raises(StructuredRecordError, match="structured_record_locked"):
-        StructuredRecordService().import_draft(
+        structured_service(session).import_draft(
             session,
             regulation_envelope(document),
         )
@@ -203,7 +263,7 @@ def test_auto_validation_failed_draft_returns_document_to_parsed(session) -> Non
     document.final_review_status = ReviewStatus.AUTO_VALIDATION_FAILED.value
     session.commit()
 
-    record = StructuredRecordService().import_draft(
+    record = structured_service(session).import_draft(
         session,
         regulation_envelope(document),
     )

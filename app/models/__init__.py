@@ -4,14 +4,17 @@ from app.models.entities import (
     DocumentChunk,
     DocumentOccurrence,
     EvaluationSample,
+    ParsedArtifactVersion,
     Penalty,
     ProductDocument,
     Regulation,
     ReviewBatch,
     ReviewBatchItem,
     ReviewDecision,
+    ReviewReservation,
     SourceDocument,
     StatusHistory,
+    StructuredDraftRevision,
 )
 
 __all__ = [
@@ -21,11 +24,14 @@ __all__ = [
     "DocumentChunk",
     "EvaluationSample",
     "Penalty",
+    "ParsedArtifactVersion",
     "ProductDocument",
     "Regulation",
     "ReviewBatch",
     "ReviewBatchItem",
     "ReviewDecision",
+    "ReviewReservation",
     "SourceDocument",
     "StatusHistory",
+    "StructuredDraftRevision",
 ]

@@ -35,6 +35,7 @@ from app.services.parsing import ParsingService
 from app.services.review import ReviewService
 from app.services.state_machine import StateMachineService
 from app.services.structured_records import StructuredRecordService
+from app.services.structured_revisions import StructuredDraftRevisionService
 from app.services.validation import ValidationService
 
 app = typer.Typer(help="保销智审后端数据与审核工作流 CLI", no_args_is_help=True)
@@ -238,6 +239,25 @@ def import_structured_drafts(
         typer.echo(error, err=True)
 
 
+@app.command("revise-structured-draft")
+def revise_structured_draft(
+    file: Path = typer.Option(..., exists=True, dir_okay=False, help="JSONL 草稿修订"),
+    reason: str = typer.Option(..., help="修订原因"),
+    actor: str = typer.Option("cli_operator", help="操作人"),
+) -> None:
+    """Atomically revise pre-review fields and their evidence with an audit log."""
+    with SessionLocal() as session:
+        revised, errors = StructuredDraftRevisionService().import_jsonl(
+            session,
+            file,
+            reason=reason,
+            actor=actor,
+        )
+    typer.echo(f"revised={revised} failed={len(errors)}")
+    for error in errors:
+        typer.echo(error, err=True)
+
+
 @app.command("repair-status-consistency")
 def repair_status_consistency(
     dry_run: bool = typer.Option(False, "--dry-run", help="仅报告，不修改（默认）"),
@@ -270,6 +290,31 @@ def resubmit_for_review(
             raise typer.BadParameter("record_type and record_id do not identify a document")
         StateMachineService.resubmit_document(session, document, reason)
     typer.echo(f"record_id={record_id} status={ReviewStatus.PARSED.value}")
+
+
+@app.command("cancel-review-batch")
+def cancel_review_batch(
+    batch_id: int = typer.Option(..., min=1, help="审核批次 ID"),
+    reason: str = typer.Option(..., help="取消原因"),
+) -> None:
+    """Cancel one open batch and release its undecided reservations."""
+    with SessionLocal() as session:
+        batch = ReviewService().cancel_batch(session, batch_id, reason)
+    typer.echo(f"batch_id={batch.id} status={batch.status}")
+
+
+@app.command("reparse-document")
+def reparse_document(
+    document_id: int = typer.Option(..., min=1, help="文档 ID"),
+    reason: str = typer.Option(..., help="重新解析原因"),
+) -> None:
+    """Safely reparse a pre-review document while preserving artifact history."""
+    with SessionLocal() as session:
+        document = DocumentRepository(session).get(document_id)
+        if not document:
+            raise typer.BadParameter("document_id does not identify a document")
+        ParsingService().reparse_document(session, document, reason)
+    typer.echo(f"document_id={document_id} status={ReviewStatus.PARSED.value}")
 
 
 @app.command("health-check")

@@ -12,6 +12,8 @@ from app.services.collection import (
     FileCollector,
     LocalManifestCollector,
 )
+from app.services.parsed_artifacts import ParsedArtifactService
+from app.services.parsing.base import ParsedDocument, ParsedPage
 from app.services.review import ReviewService
 from app.services.review.service import payload_hash
 
@@ -108,12 +110,35 @@ def make_reviewable_regulation(session, document) -> None:
         **document.metadata_json,
         "automatic_validation": {"valid": True, "issues": []},
     }
+    ParsedArtifactService(Settings(data_dir=session.info["data_dir"])).persist(
+        session,
+        document,
+        ParsedDocument(
+            title="正式规则",
+            plain_text=document.raw_text,
+            pages=[ParsedPage(page_number=1, text=document.raw_text)],
+        ),
+        parser_name="TestParser",
+    )
+    quote = "正式规则内容"
+    start = document.raw_text.find(quote)
     session.add(
         Regulation(
             document_id=document.id,
             title="正式规则",
-            article_text="正式规则内容",
-            source_quote="正式规则内容",
+            article_text=quote,
+            source_quote=quote,
+            field_evidence_json={
+                "article_text": [
+                    {
+                        "quote": quote,
+                        "page_number": 1,
+                        "start_offset": start,
+                        "end_offset": start + len(quote),
+                        "mode": "verbatim",
+                    }
+                ]
+            },
             final_review_status=ReviewStatus.PENDING_REVIEW.value,
         )
     )

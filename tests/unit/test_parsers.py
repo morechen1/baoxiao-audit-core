@@ -1,9 +1,11 @@
 from pathlib import Path
 
 import fitz
+import pytest
 from docx import Document
 
 from app.core.config import Settings
+from app.core.exceptions import ReviewDecisionError
 from app.models.enums import DataType, ReviewStatus
 from app.services.collection import FileCollector
 from app.services.parsing import DocxParser, HtmlParser, ParsingService, PdfParser
@@ -93,10 +95,9 @@ def test_scanned_pdf_does_not_enter_review_batch(session, tmp_path: Path) -> Non
     )
     ParsingService(settings).parse_document(session, document)
 
-    batch = ReviewService(settings).export_batch(
-        session,
-        DataType.REGULATION.value,
-        "jsonl",
-    )
-
-    assert batch.record_count == 0
+    with pytest.raises(ReviewDecisionError, match="no_records_available_for_review"):
+        ReviewService(settings).export_batch(
+            session,
+            DataType.REGULATION.value,
+            "jsonl",
+        )

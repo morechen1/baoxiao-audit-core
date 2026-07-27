@@ -7,7 +7,11 @@ from datetime import UTC, datetime
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
-from app.core.exceptions import RawArtifactIntegrityError
+from app.core.exceptions import (
+    FieldEvidenceError,
+    ParsedArtifactIntegrityError,
+    RawArtifactIntegrityError,
+)
 from app.models import SourceDocument
 from app.models.enums import (
     APPROVABLE_STATUSES,
@@ -15,7 +19,9 @@ from app.models.enums import (
     KnowledgeIndexStatus,
 )
 from app.repositories import DocumentRepository
+from app.services.field_evidence import EVIDENCE_FIELDS, FieldEvidenceService
 from app.services.integrity import RawArtifactIntegrityService
+from app.services.parsed_artifacts import ParsedArtifactIntegrityService
 from app.services.state_machine import StateMachineService
 
 
@@ -52,6 +58,10 @@ class KnowledgeIndexService:
             RawArtifactIntegrityService(self.settings).verify(document)
         except RawArtifactIntegrityError as exc:
             reasons.append(str(exc))
+        try:
+            ParsedArtifactIntegrityService(self.settings).verify(document, session=session)
+        except (ParsedArtifactIntegrityError, RawArtifactIntegrityError) as exc:
+            reasons.append(str(exc))
         if document.final_review_status not in APPROVABLE_STATUSES:
             reasons.append("review_status_not_approved")
         if document.authenticity_type != AuthenticityType.VERIFIED_PUBLIC.value:
@@ -74,4 +84,20 @@ class KnowledgeIndexService:
             quote = getattr(record, "source_quote", None)
             if not quote or quote not in (document.raw_text or ""):
                 reasons.append("source_quote_not_found")
+            try:
+                FieldEvidenceService(self.settings).validate(
+                    session,
+                    document,
+                    {
+                        field_name: getattr(record, field_name)
+                        for field_name in EVIDENCE_FIELDS.get(document.data_type, frozenset())
+                    },
+                    getattr(record, "field_evidence_json", {}),
+                )
+            except (
+                FieldEvidenceError,
+                ParsedArtifactIntegrityError,
+                RawArtifactIntegrityError,
+            ) as exc:
+                reasons.append(str(exc))
         return sorted(set(reasons))

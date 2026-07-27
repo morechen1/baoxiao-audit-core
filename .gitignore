@@ -15,6 +15,7 @@ __pycache__/
 data/raw/*
 data/import/*
 data/parsed/*
+data/parsed_artifacts/*
 data/review_batches/*
 data/review_bundles/*
 data/review_results/*

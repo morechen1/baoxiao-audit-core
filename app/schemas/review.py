@@ -5,6 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.enums import AuthenticityType, DatasetSplit, SampleCategory
+from app.schemas.structured import FieldEvidenceItem
 
 
 class StrictReviewModel(BaseModel):
@@ -14,6 +15,7 @@ class StrictReviewModel(BaseModel):
 class StructuredRecordCorrection(StrictReviewModel):
     structured_record_id: int = Field(gt=0)
     fields: dict[str, Any] = Field(min_length=1)
+    field_evidence: dict[str, list[FieldEvidenceItem]] = Field(default_factory=dict)
 
 
 class StructuredRecordCorrections(StrictReviewModel):

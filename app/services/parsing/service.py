@@ -7,11 +7,13 @@ from app.models import DocumentChunk, SourceDocument
 from app.models.enums import ReviewStatus
 from app.repositories import DocumentRepository
 from app.services.integrity import RawArtifactIntegrityService
+from app.services.parsed_artifacts import ParsedArtifactService
 from app.services.parsing.base import DocumentParser, ParsedDocument
 from app.services.parsing.docx import DocxParser
 from app.services.parsing.html import HtmlParser
 from app.services.parsing.pdf import PdfParser
 from app.services.parsing.text import TextParser
+from app.services.state_machine import StateMachineService
 
 
 class ParsingService:
@@ -26,7 +28,14 @@ class ParsingService:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
 
-    def parse_document(self, session: Session, document: SourceDocument) -> ParsedDocument:
+    def parse_document(
+        self,
+        session: Session,
+        document: SourceDocument,
+        *,
+        transition_status: bool = True,
+        commit: bool = True,
+    ) -> ParsedDocument:
         RawArtifactIntegrityService(self.settings).verify(document)
         path = Path(document.raw_file_path)
         parser = self.parsers.get(path.suffix.lower())
@@ -40,7 +49,8 @@ class ParsingService:
             document.raw_text = None
             document.parse_status = "requires_ocr"
             document.chunks.clear()
-            session.commit()
+            if commit:
+                session.commit()
             return parsed
         document.raw_text = parsed.plain_text
         document.source_title = document.source_title or parsed.title
@@ -65,7 +75,51 @@ class ParsingService:
                     )
                 )
                 offset, chunk_index = end, chunk_index + 1
-        DocumentRepository(session).transition(document, ReviewStatus.PARSED.value, "parsed")
+        ParsedArtifactService(self.settings).persist(
+            session,
+            document,
+            parsed,
+            parser_name=parser.__class__.__name__,
+        )
+        if transition_status:
+            DocumentRepository(session).transition(document, ReviewStatus.PARSED.value, "parsed")
+        if commit:
+            session.commit()
+        return parsed
+
+    def reparse_document(
+        self,
+        session: Session,
+        document: SourceDocument,
+        reason: str,
+    ) -> ParsedDocument:
+        if document.final_review_status not in {
+            ReviewStatus.PARSED.value,
+            ReviewStatus.AUTO_VALIDATION_FAILED.value,
+        }:
+            raise ValueError("document_not_reparseable")
+        if not reason.strip():
+            raise ValueError("reparse_reason_required")
+        for record in StateMachineService.structured_records(session, document):
+            session.delete(record)
+        metadata = dict(document.metadata_json)
+        metadata.pop("automatic_validation", None)
+        metadata["reparse_reason"] = reason.strip()
+        document.metadata_json = metadata
+        previous_status = document.final_review_status
+        parsed = self.parse_document(
+            session,
+            document,
+            transition_status=False,
+            commit=False,
+        )
+        if previous_status == ReviewStatus.AUTO_VALIDATION_FAILED.value:
+            StateMachineService.transition_document(
+                session,
+                document,
+                ReviewStatus.PARSED.value,
+                f"reparsed: {reason.strip()}",
+            )
         session.commit()
         return parsed
 

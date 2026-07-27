@@ -11,10 +11,14 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+)
+from sqlalchemy import (
+    text as sql_text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -98,6 +102,18 @@ class SourceDocument(TimestampMixin, Base):
             "parse_status IN ('pending', 'parsed', 'failed', 'requires_ocr')",
             name="ck_source_documents_parse_status",
         ),
+        CheckConstraint(
+            "parsed_artifact_sha256 IS NULL OR length(parsed_artifact_sha256) = 64",
+            name="ck_source_documents_parsed_artifact_sha256",
+        ),
+        CheckConstraint(
+            "parsed_text_sha256 IS NULL OR length(parsed_text_sha256) = 64",
+            name="ck_source_documents_parsed_text_sha256",
+        ),
+        CheckConstraint(
+            "parsed_from_raw_sha256 IS NULL OR length(parsed_from_raw_sha256) = 64",
+            name="ck_source_documents_parsed_from_raw_sha256",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -115,6 +131,13 @@ class SourceDocument(TimestampMixin, Base):
     raw_file_path: Mapped[str] = mapped_column(String(2048))
     raw_text: Mapped[str | None] = mapped_column(Text)
     sha256: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    parsed_artifact_path: Mapped[str | None] = mapped_column(String(2048))
+    parsed_artifact_sha256: Mapped[str | None] = mapped_column(String(64))
+    parsed_text_sha256: Mapped[str | None] = mapped_column(String(64))
+    parsed_from_raw_sha256: Mapped[str | None] = mapped_column(String(64))
+    parser_name: Mapped[str | None] = mapped_column(String(255))
+    parser_version: Mapped[str | None] = mapped_column(String(32))
+    parsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     http_status: Mapped[int | None] = mapped_column(Integer)
     authenticity_type: Mapped[str] = mapped_column(
         String(50), default=AuthenticityType.PENDING_VERIFICATION.value
@@ -181,6 +204,7 @@ class Regulation(Base):
     article_number: Mapped[str | None] = mapped_column(String(100))
     article_text: Mapped[str] = mapped_column(Text)
     source_quote: Mapped[str] = mapped_column(Text)
+    field_evidence_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     final_review_status: Mapped[str] = mapped_column(String(50))
 
 
@@ -216,6 +240,7 @@ class Penalty(Base):
     original_sales_wording_disclosed: Mapped[bool] = mapped_column(Boolean, default=False)
     original_sales_wording: Mapped[str | None] = mapped_column(Text)
     source_quote: Mapped[str] = mapped_column(Text)
+    field_evidence_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     final_review_status: Mapped[str] = mapped_column(String(50))
 
 
@@ -245,6 +270,7 @@ class ProductDocument(Base):
     non_guaranteed_benefit: Mapped[str | None] = mapped_column(Text)
     surrender_risk: Mapped[str | None] = mapped_column(Text)
     source_quote: Mapped[str] = mapped_column(Text)
+    field_evidence_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     final_review_status: Mapped[str] = mapped_column(String(50))
 
 
@@ -293,7 +319,7 @@ class ReviewBatch(Base):
     __tablename__ = "review_batches"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('exported', 'completed')",
+            "status IN ('exported', 'completed', 'cancelled')",
             name="ck_review_batches_status",
         ),
         CheckConstraint(
@@ -320,6 +346,8 @@ class ReviewBatch(Base):
     status: Mapped[str] = mapped_column(String(50), default="exported")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancellation_reason: Mapped[str | None] = mapped_column(Text)
     bundle_path: Mapped[str | None] = mapped_column(String(2048))
     bundle_sha256: Mapped[str | None] = mapped_column(String(64))
     bundle_manifest_sha256: Mapped[str | None] = mapped_column(String(64))
@@ -462,3 +490,70 @@ class AuthenticityDecisionLog(Base):
     )
     reason: Mapped[str] = mapped_column(Text)
     changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ParsedArtifactVersion(Base):
+    __tablename__ = "parsed_artifact_versions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("source_documents.id", ondelete="CASCADE"), index=True
+    )
+    artifact_path: Mapped[str] = mapped_column(String(2048))
+    artifact_sha256: Mapped[str] = mapped_column(String(64), index=True)
+    text_sha256: Mapped[str] = mapped_column(String(64))
+    from_raw_sha256: Mapped[str] = mapped_column(String(64))
+    parser_name: Mapped[str] = mapped_column(String(255))
+    parser_version: Mapped[str] = mapped_column(String(32))
+    parsed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class StructuredDraftRevision(Base):
+    __tablename__ = "structured_draft_revisions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("source_documents.id", ondelete="RESTRICT"), index=True
+    )
+    record_type: Mapped[str] = mapped_column(String(50))
+    structured_record_id: Mapped[int | None] = mapped_column(Integer)
+    action: Mapped[str] = mapped_column(String(20))
+    previous_fields_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    new_fields_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    previous_evidence_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    new_evidence_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    reason: Mapped[str] = mapped_column(Text)
+    actor: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ReviewReservation(Base):
+    __tablename__ = "review_reservations"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('active', 'released')",
+            name="ck_review_reservations_status",
+        ),
+        Index(
+            "uq_review_reservations_active_record",
+            "record_type",
+            "record_id",
+            unique=True,
+            sqlite_where=sql_text("status = 'active'"),
+            postgresql_where=sql_text("status = 'active'"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    record_type: Mapped[str] = mapped_column(String(50))
+    record_id: Mapped[int] = mapped_column(Integer)
+    document_id: Mapped[int | None] = mapped_column(
+        ForeignKey("source_documents.id", ondelete="CASCADE"), index=True
+    )
+    batch_id: Mapped[int] = mapped_column(
+        ForeignKey("review_batches.id", ondelete="RESTRICT"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(20), default="active")
+    reserved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    release_reason: Mapped[str | None] = mapped_column(Text)
