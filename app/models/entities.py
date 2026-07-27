@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text
@@ -10,7 +10,7 @@ from app.models.enums import AuthenticityType, ReviewStatus
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Base(DeclarativeBase):
@@ -58,9 +58,7 @@ class SourceDocument(TimestampMixin, Base):
     authenticity_type: Mapped[str] = mapped_column(
         String(50), default=AuthenticityType.PENDING_VERIFICATION.value
     )
-    collection_status: Mapped[str] = mapped_column(
-        String(50), default=ReviewStatus.COLLECTED.value
-    )
+    collection_status: Mapped[str] = mapped_column(String(50), default=ReviewStatus.COLLECTED.value)
     parse_status: Mapped[str] = mapped_column(String(50), default="pending")
     final_review_status: Mapped[str] = mapped_column(
         String(50), default=ReviewStatus.COLLECTED.value, index=True
