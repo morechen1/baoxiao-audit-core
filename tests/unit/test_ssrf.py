@@ -7,6 +7,17 @@ from app.core.exceptions import UnsafeUrlError
 from app.services.collection import SafeUrlPolicy, WebPageCollector
 
 
+@pytest.fixture
+def public_dns(monkeypatch) -> None:
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))
+        ],
+    )
+
+
 @pytest.mark.parametrize(
     "url",
     [
@@ -58,7 +69,10 @@ def test_redirect_to_private_address_is_rejected(monkeypatch) -> None:
             request=request,
         )
 
-    collector = WebPageCollector(transport=httpx.MockTransport(handler))
+    collector = WebPageCollector(
+        allowed_hosts=frozenset({"public-name.test", "169.254.169.254"}),
+        transport=httpx.MockTransport(handler),
+    )
 
     with pytest.raises(UnsafeUrlError):
         collector.collect("https://public-name.test/start")
@@ -75,3 +89,76 @@ def test_registered_source_host_matching() -> None:
         "https://example.com",
         [],
     )
+
+
+def test_same_domain_redirect_is_allowed(public_dns) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/start":
+            return httpx.Response(302, headers={"location": "/final"}, request=request)
+        return httpx.Response(200, content=b"ok", request=request)
+
+    collector = WebPageCollector(
+        allowed_hosts=frozenset({"source.test"}),
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = collector.collect("https://source.test/start")
+    assert result.final_url == "https://source.test/final"
+
+
+def test_legal_subdomain_redirect_is_allowed(public_dns) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "source.test":
+            return httpx.Response(
+                302,
+                headers={"location": "https://docs.source.test/final"},
+                request=request,
+            )
+        return httpx.Response(200, content=b"ok", request=request)
+
+    collector = WebPageCollector(
+        allowed_hosts=frozenset({"source.test"}),
+        transport=httpx.MockTransport(handler),
+    )
+    assert collector.collect("https://source.test/start").final_url == (
+        "https://docs.source.test/final"
+    )
+
+
+def test_explicit_allowed_domain_redirect_is_allowed(public_dns) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "source.test":
+            return httpx.Response(
+                302,
+                headers={"location": "https://partner.test/final"},
+                request=request,
+            )
+        return httpx.Response(200, content=b"ok", request=request)
+
+    collector = WebPageCollector(
+        allowed_hosts=frozenset({"source.test", "partner.test"}),
+        transport=httpx.MockTransport(handler),
+    )
+    assert collector.collect("https://source.test/start").final_url == (
+        "https://partner.test/final"
+    )
+
+
+@pytest.mark.parametrize(
+    "redirect_url",
+    [
+        "https://attacker.test/file",
+        "https://source.test.attacker.test/file",
+    ],
+)
+def test_unauthorized_public_redirect_is_rejected(public_dns, redirect_url: str) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(302, headers={"location": redirect_url}, request=request)
+
+    collector = WebPageCollector(
+        allowed_hosts=frozenset({"source.test"}),
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(UnsafeUrlError, match="redirect_host_not_allowed"):
+        collector.collect("https://source.test/start")

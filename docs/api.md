@@ -20,7 +20,9 @@
 未捕获异常返回 `{"error":{"code","message","details"}}`。FastAPI 自身的输入错误返回
 标准 422 结构；下一阶段可统一转换为同一错误信封。
 
-网络采集必须提供启用的 `source_id`，并匹配来源类型和允许域名；真实性始终从
-`pending_verification` 开始。审核结果必须提供有效 `batch_id` 和 `batch_item_id`。
+网络采集必须提供启用的 `source_id`，并在所有重定向上匹配来源类型和允许域名；网络与
+本地公开资料真实性始终从 `pending_verification` 开始。审核结果必须提供有效
+`batch_id`、`batch_item_id`、`reviewed_payload_hash` 和 `schema_version`。真实性升级
+必须作为批准决定中的独立 `authenticity_decision` 提交。
 
 本 API 当前只适用于受控环境，不包含生产级身份认证、权限系统或自动法律结论。

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from app.core.config import Settings
 from app.models.enums import AuthenticityType, DataType
 from app.services.collection import CollectionResult, FileCollector
@@ -59,3 +61,17 @@ def test_same_content_from_different_urls_preserves_occurrences(session, tmp_pat
         first_result.source_url,
         second_result.source_url,
     }
+
+
+def test_collector_cannot_assign_verified_public_directly(session, tmp_path: Path) -> None:
+    source = tmp_path / "sample.txt"
+    source.write_text("public content", encoding="utf-8")
+    collector = FileCollector(Settings(database_url="sqlite://", data_dir=tmp_path / "data"))
+
+    with pytest.raises(ValueError, match="audited human review"):
+        collector.persist(
+            session,
+            collector.collect(source),
+            DataType.REGULATION.value,
+            authenticity_type=AuthenticityType.VERIFIED_PUBLIC.value,
+        )

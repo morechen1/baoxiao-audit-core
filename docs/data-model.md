@@ -11,13 +11,16 @@
 - `evaluation_samples`：人工构造样本、风险标签、依据、数据集切分与真实性。
 - `review_batches`：审核文件 SHA-256、schema 版本、完成时间。
 - `review_batch_items`：批次成员、导出状态、payload hash 和唯一决定。
-- `review_decisions`：证据等级、字段复核、修订和审核人。
+- `review_decisions`：人工决定、证据等级、字段复核、修订、审核人、条目 payload hash
+  和 schema 版本；`batch_id` 不可为空且数据库只接受人工决定状态。
+- `authenticity_decision_logs`：真实性变更前后值、审核人、绑定的审核决定、原因和时间。
 - `status_history`：每次状态变化的旧值、新值、原因和时间。
 
 `source_documents.sha256` 有唯一索引。处罚记录中
 `original_sales_wording_disclosed=false` 时，`original_sales_wording` 必须为空，
 由数据库 CheckConstraint 与 `OriginalWordingValidator` 双重强制执行。处罚和产品主记录
-每个父文档唯一；监管规则允许多个条款记录。
+每个父文档唯一；监管规则允许多个条款记录。评测样本类别、split、非空文本和
+`constructed_for_evaluation` 真实性由数据库约束。
 
 真实性值为 `verified_public`、`constructed_for_evaluation`、`demo_only`、
 `pending_verification`。审核状态集合见 `app/models/enums.py`。

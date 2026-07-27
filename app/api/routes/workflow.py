@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_db
 from app.core.config import get_settings
-from app.models import DataSource
+from app.models import DataSource, SourceDocument
 from app.models.enums import AuthenticityType
 from app.repositories import DocumentRepository
 from app.schemas import (
@@ -35,11 +35,14 @@ def collect_url(
     if source.source_type != payload.source_type.value:
         raise HTTPException(status_code=400, detail="source_type does not match registered source")
     allowed_domains = source.crawl_policy.get("allowed_domains", [])
-    if not isinstance(allowed_domains, list) or not SafeUrlPolicy.host_allowed(
-        str(payload.url), source.base_url, allowed_domains
+    if (
+        not isinstance(allowed_domains, list)
+        or any(not isinstance(value, str) for value in allowed_domains)
+        or not SafeUrlPolicy.host_allowed(str(payload.url), source.base_url, allowed_domains)
     ):
         raise HTTPException(status_code=400, detail="URL host is not allowed for this source")
-    collector = WebPageCollector()
+    allowed_hosts = SafeUrlPolicy.allowed_hosts(source.base_url, allowed_domains)
+    collector = WebPageCollector(allowed_hosts=allowed_hosts)
     result = collector.collect(str(payload.url))
     document, created = collector.persist(
         session,
@@ -63,7 +66,7 @@ def collect_local(
         result,
         payload.source_type.value,
         source_id=payload.source_id,
-        authenticity_type=payload.authenticity_type.value,
+        authenticity_type=AuthenticityType.PENDING_VERIFICATION.value,
     )
     return {"document_id": document.id, "created": created, "sha256": document.sha256}
 
@@ -146,7 +149,7 @@ def _safe_data_path(path: Path, required_subdir: str | None = None) -> Path:
     return candidate
 
 
-def _document_dict(document: object, include_text: bool = False) -> dict[str, object]:
+def _document_dict(document: SourceDocument, include_text: bool = False) -> dict[str, object]:
     result = {
         "id": document.id,
         "data_type": document.data_type,

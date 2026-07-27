@@ -1,4 +1,5 @@
 from app.models.entities import (
+    AuthenticityDecisionLog,
     DataSource,
     DocumentChunk,
     DocumentOccurrence,
@@ -14,6 +15,7 @@ from app.models.entities import (
 )
 
 __all__ = [
+    "AuthenticityDecisionLog",
     "DataSource",
     "DocumentOccurrence",
     "DocumentChunk",

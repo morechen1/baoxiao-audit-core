@@ -47,6 +47,10 @@ class BaseCollector(ABC):
         source_id: int | None = None,
         authenticity_type: str = AuthenticityType.PENDING_VERIFICATION.value,
     ) -> tuple[SourceDocument, bool]:
+        if authenticity_type == AuthenticityType.VERIFIED_PUBLIC.value:
+            raise ValueError(
+                "verified_public can only be assigned by an audited human review decision"
+            )
         digest = self.sha256(result.content)
         repository = DocumentRepository(session)
         duplicate = repository.by_hash(digest)

@@ -64,9 +64,24 @@ class SafeUrlPolicy:
             raise UnsafeUrlError("Connection peer differs from validated DNS result")
 
     @staticmethod
-    def host_allowed(url: str, base_url: str | None, allowed_domains: list[str]) -> bool:
-        target = (urlparse(url).hostname or "").rstrip(".").lower()
+    def allowed_hosts(base_url: str | None, allowed_domains: list[str]) -> frozenset[str]:
         base_host = (urlparse(base_url or "").hostname or "").rstrip(".").lower()
-        allowed = {base_host, *(value.rstrip(".").lower() for value in allowed_domains)}
+        allowed = {base_host}
+        for value in allowed_domains:
+            parsed = urlparse(value if "://" in value else f"//{value}")
+            host = (parsed.hostname or "").rstrip(".").lower()
+            if host:
+                allowed.add(host)
         allowed.discard("")
-        return any(target == host or target.endswith(f".{host}") for host in allowed)
+        return frozenset(allowed)
+
+    @staticmethod
+    def host_allowed_for_hosts(url: str, allowed_hosts: frozenset[str]) -> bool:
+        target = (urlparse(url).hostname or "").rstrip(".").lower()
+        return bool(target) and any(
+            target == host or target.endswith(f".{host}") for host in allowed_hosts
+        )
+
+    @classmethod
+    def host_allowed(cls, url: str, base_url: str | None, allowed_domains: list[str]) -> bool:
+        return cls.host_allowed_for_hosts(url, cls.allowed_hosts(base_url, allowed_domains))

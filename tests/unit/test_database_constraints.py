@@ -1,8 +1,15 @@
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from app.models import DocumentChunk, Penalty, SourceDocument
-from app.models.enums import DataType, ReviewStatus
+from app.models import (
+    DocumentChunk,
+    EvaluationSample,
+    Penalty,
+    ReviewBatch,
+    ReviewDecision,
+    SourceDocument,
+)
+from app.models.enums import AuthenticityType, DataType, ReviewStatus
 
 
 def test_sqlite_foreign_keys_are_enforced(session) -> None:
@@ -54,6 +61,65 @@ def test_invalid_review_status_is_rejected_by_database(session) -> None:
             raw_file_path="/tmp/rule.txt",
             sha256="1" * 64,
             final_review_status="invalid_status",
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("sample_category", "invalid"),
+        ("split", "invalid"),
+        ("authenticity_type", AuthenticityType.VERIFIED_PUBLIC.value),
+    ],
+)
+def test_invalid_evaluation_domains_are_rejected_by_database(
+    session, field: str, value: str
+) -> None:
+    values = {
+        "sample_text": "评测样本",
+        "sample_category": "risky",
+        "risk_labels": ["风险"],
+        "expected_evidence": {},
+        "construction_basis": "人工构造",
+        "authenticity_type": AuthenticityType.CONSTRUCTED_FOR_EVALUATION.value,
+        "split": "train",
+        "final_review_status": ReviewStatus.PENDING_REVIEW.value,
+    }
+    values[field] = value
+    session.add(EvaluationSample(**values))
+
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
+def test_review_decision_rejects_non_human_status(session) -> None:
+    batch = ReviewBatch(
+        batch_name="batch",
+        data_type=DataType.REGULATION.value,
+        record_count=1,
+        export_path="/tmp/batch.jsonl",
+        export_sha256="a" * 64,
+        schema_version="2.0",
+        status="exported",
+    )
+    session.add(batch)
+    session.flush()
+    session.add(
+        ReviewDecision(
+            batch_id=batch.id,
+            record_type=DataType.REGULATION.value,
+            record_id=1,
+            decision=ReviewStatus.PENDING_REVIEW.value,
+            field_reviews_json={},
+            corrections_json={},
+            evidence_quality="A",
+            reviewer="reviewer",
+            reviewed_payload_hash="b" * 64,
+            schema_version="2.0",
         )
     )
 

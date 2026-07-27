@@ -56,5 +56,16 @@ APPROVABLE_STATUSES = {
 }
 
 REVIEW_STATUS_VALUES = tuple(status.value for status in ReviewStatus)
+HUMAN_REVIEW_STATUS_VALUES = tuple(
+    status.value
+    for status in ReviewStatus
+    if status
+    not in {
+        ReviewStatus.COLLECTED,
+        ReviewStatus.PARSED,
+        ReviewStatus.AUTO_VALIDATION_FAILED,
+        ReviewStatus.PENDING_REVIEW,
+    }
+)
 AUTHENTICITY_TYPE_VALUES = tuple(value.value for value in AuthenticityType)
 KNOWLEDGE_INDEX_STATUS_VALUES = tuple(value.value for value in KnowledgeIndexStatus)

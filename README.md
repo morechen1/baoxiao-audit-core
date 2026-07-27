@@ -52,16 +52,17 @@ python -m app.cli.main init-db
 python -m app.cli.main register-source --name "示例来源" \
   --base-url "https://example.com" --source-type regulation
 python -m app.cli.main collect-url --url "https://example.com/document.pdf" \
+  --source-type regulation --source-id 1
+python -m app.cli.main collect-directory --path ./data/incoming \
   --source-type regulation
-python -m app.cli.main collect-directory --path ./data/samples \
-  --source-type regulation --authenticity-type demo_only
 python -m app.cli.main parse-pending
 python -m app.cli.main import-structured-drafts \
   --file ./data/parsed/structured_drafts.jsonl
 python -m app.cli.main validate-pending
 python -m app.cli.main export-review-batch --data-type penalty --format jsonl
+python -m app.cli.main create-review-result-template --batch-id 1
 python -m app.cli.main import-review-results \
-  --file ./data/review_results/review_result.jsonl
+  --file ./data/review_results/review_result.jsonl --batch-id 1
 python -m app.cli.main list-records --status pending_review
 python -m app.cli.main index-approved
 python -m app.cli.main repair-status-consistency --dry-run
@@ -69,9 +70,11 @@ python -m app.cli.main health-check
 ```
 
 采集器使用明确 User-Agent、逐跳安全验证、20 秒超时、三次温和重试及 50 MiB 限制；
-拒绝 localhost、私网、链路本地、云元数据和 DNS 重绑定目标，不会绕过验证码、登录或
-访问控制。API 网络采集必须使用已登记、启用且域名/类型匹配的来源，采集真实性固定为
-`pending_verification`。PDF 离线样例位于 `tests/fixtures/demo.pdf`。
+拒绝 localhost、私网、链路本地、云元数据和 DNS 重绑定目标；初始 URL、每次重定向及
+最终 URL 都必须匹配登记来源主机或显式允许域名。CLI/API 网络采集必须使用已登记、启用
+且域名/类型匹配的来源，所有公开网页和本地资料的初始真实性固定为
+`pending_verification`，不能通过采集参数直接指定 `verified_public`。PDF 离线样例位于
+`tests/fixtures/demo.pdf`。
 
 ## API
 
@@ -95,10 +98,13 @@ curl 'http://localhost:8000/records?status=pending_review'
 2. 解析生成不可变 `raw_text`、页码切片、offset 和警告，状态为 `parsed`。
 3. 人工导入经 Pydantic 验证的结构化草稿；缺失或空草稿无法通过校验。
 4. 确定性校验只会进入 `pending_review` 或 `auto_validation_failed`，绝不会自动批准。
-5. 待审记录导出 JSONL/XLSX；批次项目保存 payload hash，结果以 JSONL 导入。
-6. `approved_with_revision` 必须带白名单内 corrections；修订写入结构化字段及单独 JSON，
-   不覆盖原始采集文本。
-7. 索引不修改 `final_review_status`。只有已批准、`verified_public`、解析/校验通过、
+5. 待审记录导出 JSONL/XLSX；批次保存文件 SHA-256，条目保存 payload hash。结果模板由
+   系统生成并绑定 `batch_id`、`batch_item_id`、`reviewed_payload_hash` 和 schema 版本。
+6. 只有 `approved_with_revision` 可以携带 corrections；文档修订按
+   `structured_record_id` 精确定位，并保存独立 `post_review_validation` 审计结果。
+7. `authenticity_decision=verified_public` 只能随已批准的、哈希绑定的人工决定提交，并写入
+   独立真实性审计日志；拒绝和待核实决定不能升级真实性。
+8. 索引不修改 `final_review_status`。只有已批准、`verified_public`、解析/校验通过、
    结构化记录和父文档状态一致且引用可在完整原文定位的数据才能被标记为 `indexed`。
 
 完整状态与审核格式见 [审核工作流](docs/review-workflow.md)。

@@ -20,11 +20,14 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.models.enums import (
     AUTHENTICITY_TYPE_VALUES,
+    HUMAN_REVIEW_STATUS_VALUES,
     KNOWLEDGE_INDEX_STATUS_VALUES,
     REVIEW_STATUS_VALUES,
     AuthenticityType,
+    DatasetSplit,
     KnowledgeIndexStatus,
     ReviewStatus,
+    SampleCategory,
 )
 
 
@@ -238,8 +241,24 @@ class EvaluationSample(Base):
     __tablename__ = "evaluation_samples"
     __table_args__ = (
         CheckConstraint(
-            f"authenticity_type IN ({sql_values(AUTHENTICITY_TYPE_VALUES)})",
+            f"authenticity_type = '{AuthenticityType.CONSTRUCTED_FOR_EVALUATION.value}'",
             name="ck_evaluation_samples_authenticity",
+        ),
+        CheckConstraint(
+            f"sample_category IN ({sql_values(tuple(value.value for value in SampleCategory))})",
+            name="ck_evaluation_samples_category",
+        ),
+        CheckConstraint(
+            f"split IN ({sql_values(tuple(value.value for value in DatasetSplit))})",
+            name="ck_evaluation_samples_split",
+        ),
+        CheckConstraint(
+            "length(trim(sample_text)) > 0",
+            name="ck_evaluation_samples_text_nonempty",
+        ),
+        CheckConstraint(
+            "length(trim(construction_basis)) > 0",
+            name="ck_evaluation_samples_basis_nonempty",
         ),
         CheckConstraint(
             f"final_review_status IN ({sql_values(REVIEW_STATUS_VALUES)})",
@@ -266,6 +285,10 @@ class ReviewBatch(Base):
             "status IN ('exported', 'completed')",
             name="ck_review_batches_status",
         ),
+        CheckConstraint(
+            "export_sha256 IS NULL OR length(export_sha256) = 64",
+            name="ck_review_batches_export_sha256",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -288,14 +311,18 @@ class ReviewDecision(Base):
             name="ck_review_decisions_evidence_quality",
         ),
         CheckConstraint(
-            f"decision IN ({sql_values(REVIEW_STATUS_VALUES)})",
+            f"decision IN ({sql_values(HUMAN_REVIEW_STATUS_VALUES)})",
             name="ck_review_decisions_decision",
+        ),
+        CheckConstraint(
+            "length(reviewed_payload_hash) = 64",
+            name="ck_review_decisions_payload_hash",
         ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    batch_id: Mapped[int | None] = mapped_column(
-        ForeignKey("review_batches.id", ondelete="RESTRICT")
+    batch_id: Mapped[int] = mapped_column(
+        ForeignKey("review_batches.id", ondelete="RESTRICT"), nullable=False
     )
     record_type: Mapped[str] = mapped_column(String(50))
     record_id: Mapped[int] = mapped_column(Integer)
@@ -305,6 +332,8 @@ class ReviewDecision(Base):
     evidence_quality: Mapped[str] = mapped_column(String(1))
     review_comment: Mapped[str | None] = mapped_column(Text)
     reviewer: Mapped[str] = mapped_column(String(255))
+    reviewed_payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
     reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -329,6 +358,10 @@ class ReviewBatchItem(Base):
         CheckConstraint(
             f"exported_status IN ({sql_values(REVIEW_STATUS_VALUES)})",
             name="ck_review_batch_items_exported_status",
+        ),
+        CheckConstraint(
+            "length(payload_hash) = 64",
+            name="ck_review_batch_items_payload_hash",
         ),
     )
 
@@ -374,3 +407,30 @@ class DocumentOccurrence(Base):
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     response_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     document: Mapped[SourceDocument] = relationship(back_populates="occurrences")
+
+
+class AuthenticityDecisionLog(Base):
+    __tablename__ = "authenticity_decision_logs"
+    __table_args__ = (
+        CheckConstraint(
+            f"previous_authenticity_type IN ({sql_values(AUTHENTICITY_TYPE_VALUES)})",
+            name="ck_auth_decisions_previous_type",
+        ),
+        CheckConstraint(
+            f"new_authenticity_type = '{AuthenticityType.VERIFIED_PUBLIC.value}'",
+            name="ck_auth_decisions_new_type",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("source_documents.id", ondelete="RESTRICT"), index=True
+    )
+    previous_authenticity_type: Mapped[str] = mapped_column(String(50))
+    new_authenticity_type: Mapped[str] = mapped_column(String(50))
+    reviewer: Mapped[str] = mapped_column(String(255))
+    review_decision_id: Mapped[int] = mapped_column(
+        ForeignKey("review_decisions.id", ondelete="RESTRICT"), unique=True
+    )
+    reason: Mapped[str] = mapped_column(Text)
+    changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

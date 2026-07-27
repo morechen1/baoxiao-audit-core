@@ -26,3 +26,53 @@ def test_cli_help_and_health() -> None:
     assert "init-db" in help_result.stdout
     assert health_result.exit_code == 0
     assert "status=ok" in health_result.stdout
+
+
+def test_cli_collect_url_requires_registered_source() -> None:
+    result = CliRunner().invoke(
+        cli_app,
+        [
+            "collect-url",
+            "--url",
+            "https://source.test/rule",
+            "--source-type",
+            "regulation",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "--source-id" in result.output
+
+
+def test_cli_cannot_set_verified_public_during_collection(tmp_path) -> None:
+    network = CliRunner().invoke(
+        cli_app,
+        [
+            "collect-url",
+            "--url",
+            "https://source.test/rule",
+            "--source-type",
+            "regulation",
+            "--source-id",
+            "1",
+            "--authenticity-type",
+            "verified_public",
+        ],
+    )
+    local = CliRunner().invoke(
+        cli_app,
+        [
+            "collect-directory",
+            "--path",
+            str(tmp_path),
+            "--source-type",
+            "regulation",
+            "--authenticity-type",
+            "verified_public",
+        ],
+    )
+
+    assert network.exit_code == 2
+    assert local.exit_code == 2
+    assert "No such option" in network.output
+    assert "No such option" in local.output

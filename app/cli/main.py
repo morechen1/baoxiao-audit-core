@@ -22,7 +22,12 @@ from app.models.enums import (
     SampleCategory,
 )
 from app.repositories import DocumentRepository
-from app.services.collection import FileCollector, LocalDirectoryCollector, WebPageCollector
+from app.services.collection import (
+    FileCollector,
+    LocalDirectoryCollector,
+    SafeUrlPolicy,
+    WebPageCollector,
+)
 from app.services.knowledge import KnowledgeIndexService
 from app.services.parsing import ParsingService
 from app.services.review import ReviewService
@@ -66,20 +71,28 @@ def register_source(
 def collect_url(
     url: str = typer.Option(..., help="公开 HTTP(S) URL"),
     source_type: DataType = typer.Option(..., help="数据类型"),
-    source_id: int | None = typer.Option(None, help="已注册来源 ID"),
-    authenticity_type: AuthenticityType = typer.Option(
-        AuthenticityType.PENDING_VERIFICATION, help="真实性标识"
-    ),
+    source_id: int = typer.Option(..., help="已注册来源 ID"),
 ) -> None:
     """Collect one web page, PDF, DOCX or text URL."""
-    collector = WebPageCollector()
     with SessionLocal() as session:
+        source = session.get(DataSource, source_id)
+        if not source or not source.enabled:
+            raise typer.BadParameter("source_id must identify an enabled source")
+        if source.source_type != source_type.value:
+            raise typer.BadParameter("source_type does not match registered source")
+        allowed_domains = source.crawl_policy.get("allowed_domains", [])
+        if not isinstance(allowed_domains, list) or any(
+            not isinstance(value, str) for value in allowed_domains
+        ):
+            raise typer.BadParameter("registered source allowed_domains must be a string list")
+        allowed_hosts = SafeUrlPolicy.allowed_hosts(source.base_url, allowed_domains)
+        collector = WebPageCollector(allowed_hosts=allowed_hosts)
         document, created = collector.persist(
             session,
             collector.collect(url),
             source_type.value,
             source_id=source_id,
-            authenticity_type=authenticity_type.value,
+            authenticity_type=AuthenticityType.PENDING_VERIFICATION.value,
         )
         typer.echo(f"document_id={document.id} created={created} sha256={document.sha256}")
 
@@ -88,9 +101,6 @@ def collect_url(
 def collect_directory(
     path: Path = typer.Option(..., exists=True, file_okay=False, help="本地目录"),
     source_type: DataType = typer.Option(..., help="数据类型"),
-    authenticity_type: AuthenticityType = typer.Option(
-        AuthenticityType.PENDING_VERIFICATION, help="真实性标识"
-    ),
 ) -> None:
     """Collect supported files recursively; one failure does not stop the batch."""
     collector = LocalDirectoryCollector()
@@ -102,7 +112,7 @@ def collect_directory(
                     session,
                     result,
                     source_type.value,
-                    authenticity_type=authenticity_type.value,
+                    authenticity_type=AuthenticityType.PENDING_VERIFICATION.value,
                 )
                 created += int(is_created)
                 duplicates += int(not is_created)
@@ -140,6 +150,16 @@ def export_review_batch(
     with SessionLocal() as session:
         batch = ReviewService().export_batch(session, data_type.value, format)
     typer.echo(f"batch_id={batch.id} records={batch.record_count} path={batch.export_path}")
+
+
+@app.command("create-review-result-template")
+def create_review_result_template(
+    batch_id: int = typer.Option(..., min=1, help="审核批次 ID"),
+) -> None:
+    """Create a hash-bound JSONL decision template from an immutable review batch."""
+    with SessionLocal() as session:
+        path = ReviewService().create_result_template(session, batch_id)
+    typer.echo(f"batch_id={batch_id} path={path}")
 
 
 @app.command("import-review-results")

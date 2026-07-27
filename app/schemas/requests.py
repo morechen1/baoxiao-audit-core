@@ -3,7 +3,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, HttpUrl
 
-from app.models.enums import AuthenticityType, DataType
+from app.models.enums import DataType
 
 
 class SourceCreate(BaseModel):
@@ -26,7 +26,6 @@ class CollectionLocalRequest(BaseModel):
     path: Path
     source_type: DataType
     source_id: int | None = None
-    authenticity_type: AuthenticityType = AuthenticityType.PENDING_VERIFICATION
 
 
 class ReviewBatchRequest(BaseModel):
