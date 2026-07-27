@@ -696,7 +696,7 @@ def test_approved_manifest_requires_approval_metadata(
     assert calls == []
 
 
-def test_regulatory_case_is_ledgered_but_never_persisted_as_document(
+def test_regulatory_case_pilot_collects_document_without_creating_penalty(
     session, tmp_path: Path
 ) -> None:
     registry_dir, manifests_dir = _layout(tmp_path)
@@ -713,11 +713,14 @@ def test_regulatory_case_is_ledgered_but_never_persisted_as_document(
 
     _, calls, result = _collect(session, tmp_path, manifest, registry_dir)
     item = session.query(PilotCollectionItem).one()
+    document = session.get(SourceDocument, item.document_id)
 
-    assert calls == []
-    assert result.outcomes[0].error_code == "regulatory_case_model_not_implemented"
-    assert item.status == "blocked_not_implemented"
-    assert session.query(SourceDocument).count() == 0
+    assert calls == ["https://source.test/case.txt"]
+    assert result.outcomes[0].status == "collected"
+    assert result.outcomes[0].authenticity_type == "pending_verification"
+    assert item.status == "collected"
+    assert document is not None
+    assert document.data_type == "regulatory_case"
     assert session.query(Penalty).count() == 0
 
 
