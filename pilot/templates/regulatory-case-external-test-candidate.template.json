@@ -1,7 +1,23 @@
 {
-  "importable": false,
-  "source_type": "regulatory_case",
-  "case_usage": "external_test_candidate",
-  "design_status": "dedicated_model_required",
-  "note": "当前不得写入 penalties；项目规划者确认模型后再实现结构化导入。"
+  "document_id": 0,
+  "record_type": "regulatory_case",
+  "fields": {
+    "case_title": "",
+    "publisher": null,
+    "published_at": null,
+    "case_category": "consumer_risk_alert",
+    "scenario_text": "",
+    "marketing_wording_disclosed": false,
+    "marketing_wording": null,
+    "case_facts": null,
+    "regulatory_analysis": null,
+    "consumer_advice": null,
+    "case_usage": "external_test_candidate",
+    "source_quote": ""
+  },
+  "field_evidence": {
+    "case_title": [],
+    "scenario_text": []
+  },
+  "note": "空字段和空证据仅为格式占位；导入前必须替换为不可变解析文本支持的值与证据。"
 }

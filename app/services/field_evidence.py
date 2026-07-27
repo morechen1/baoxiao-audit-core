@@ -56,6 +56,18 @@ EVIDENCE_FIELDS: dict[str, frozenset[str]] = {
             "surrender_risk",
         }
     ),
+    DataType.REGULATORY_CASE.value: frozenset(
+        {
+            "case_title",
+            "publisher",
+            "published_at",
+            "scenario_text",
+            "marketing_wording",
+            "case_facts",
+            "regulatory_analysis",
+            "consumer_advice",
+        }
+    ),
 }
 
 
@@ -181,10 +193,13 @@ class FieldEvidenceService:
     ) -> None:
         allowed = {
             "title": {"source_title", "filename"},
+            "case_title": {"source_title", "filename"},
             "issuing_authority": {"publisher"},
             "authority": {"publisher"},
+            "publisher": {"publisher"},
             "effective_date": {"published_at"},
             "decision_date": {"published_at"},
+            "published_at": {"published_at"},
         }
         if item.metadata_field not in allowed.get(field_name, set()):
             raise FieldEvidenceError("field_not_supported_by_evidence")

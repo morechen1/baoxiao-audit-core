@@ -3,7 +3,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
 
-from app.models.enums import DataType
+from app.models.enums import (
+    DataType,
+    RegulatoryCaseCategory,
+    RegulatoryCaseUsage,
+)
 
 
 class StrictDraft(BaseModel):
@@ -78,6 +82,33 @@ class ProductDocumentDraft(StrictDraft):
     non_guaranteed_benefit: StrictStr | None = None
     surrender_risk: StrictStr | None = None
     source_quote: StrictStr = Field(min_length=1)
+
+
+class RegulatoryCaseDraft(StrictDraft):
+    case_title: StrictStr = Field(min_length=1)
+    publisher: StrictStr | None = Field(default=None, min_length=1)
+    published_at: date | None = None
+    case_category: RegulatoryCaseCategory
+    scenario_text: StrictStr = Field(min_length=1)
+    marketing_wording_disclosed: bool = Field(strict=True)
+    marketing_wording: StrictStr | None = Field(default=None, min_length=1)
+    case_facts: StrictStr | None = Field(default=None, min_length=1)
+    regulatory_analysis: StrictStr | None = Field(default=None, min_length=1)
+    consumer_advice: StrictStr | None = Field(default=None, min_length=1)
+    case_usage: RegulatoryCaseUsage = RegulatoryCaseUsage.EXTERNAL_TEST_CANDIDATE
+    source_quote: StrictStr = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_marketing_wording(self) -> "RegulatoryCaseDraft":
+        if self.marketing_wording_disclosed and not self.marketing_wording:
+            raise ValueError("disclosed marketing wording must be provided")
+        if not self.marketing_wording_disclosed and self.marketing_wording:
+            raise ValueError("undisclosed marketing wording must be empty")
+        return self
+
+
+class RegulatoryCaseRevision(RegulatoryCaseDraft):
+    """Full candidate model used for atomic human-review corrections."""
 
 
 class StructuredDraftEnvelope(StrictDraft):

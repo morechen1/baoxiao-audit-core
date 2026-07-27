@@ -1,12 +1,18 @@
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_db
 from app.core.config import get_settings
-from app.models import DataSource, Regulation, SourceDocument
-from app.models.enums import AuthenticityType, DataType
+from app.models import DataSource, Regulation, RegulatoryCase, SourceDocument
+from app.models.enums import (
+    AuthenticityType,
+    DataType,
+    RegulatoryCaseCategory,
+    RegulatoryCaseUsage,
+)
 from app.repositories import DocumentRepository
 from app.schemas import (
     CollectionLocalRequest,
@@ -137,6 +143,47 @@ def get_record(
     return _document_dict(document, session, include_text=True)
 
 
+@router.get("/regulatory-cases")
+def list_regulatory_cases(
+    case_category: RegulatoryCaseCategory | None = Query(default=None),
+    case_usage: RegulatoryCaseUsage | None = Query(default=None),
+    review_status: str | None = Query(default=None),
+    authenticity_type: AuthenticityType | None = Query(default=None),
+    session: Session = Depends(get_db),
+) -> list[dict[str, object]]:
+    statement = (
+        select(RegulatoryCase, SourceDocument)
+        .join(SourceDocument, SourceDocument.id == RegulatoryCase.document_id)
+        .order_by(RegulatoryCase.id)
+    )
+    if case_category is not None:
+        statement = statement.where(RegulatoryCase.case_category == case_category.value)
+    if case_usage is not None:
+        statement = statement.where(RegulatoryCase.case_usage == case_usage.value)
+    if review_status is not None:
+        statement = statement.where(RegulatoryCase.final_review_status == review_status)
+    if authenticity_type is not None:
+        statement = statement.where(SourceDocument.authenticity_type == authenticity_type.value)
+    return [
+        _regulatory_case_dict(record, document, session)
+        for record, document in session.execute(statement)
+    ]
+
+
+@router.get("/regulatory-cases/{case_id}")
+def get_regulatory_case(
+    case_id: int,
+    session: Session = Depends(get_db),
+) -> dict[str, object]:
+    record = session.get(RegulatoryCase, case_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="RegulatoryCase not found")
+    document = session.get(SourceDocument, record.document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="RegulatoryCase document not found")
+    return _regulatory_case_dict(record, document, session)
+
+
 @router.post("/knowledge/index-approved")
 def index_approved(session: Session = Depends(get_db)) -> dict[str, object]:
     summary = KnowledgeIndexService().index_approved(session)
@@ -176,7 +223,44 @@ def _document_dict(
             next(iter(statuses)) if len(statuses) == 1 else "unknown"
         )
         result["regulation_validity_display"] = "效力状态待核验"
+    if document.data_type == DataType.REGULATORY_CASE.value:
+        record = session.scalar(
+            select(RegulatoryCase).where(RegulatoryCase.document_id == document.id)
+        )
+        if record is not None:
+            result["regulatory_case"] = _regulatory_case_dict(record, document, session)
     if include_text:
         result["raw_text"] = document.raw_text
         result["metadata"] = document.metadata_json
     return result
+
+
+def _regulatory_case_dict(
+    record: RegulatoryCase,
+    document: SourceDocument,
+    session: Session,
+) -> dict[str, object]:
+    rejection_reasons = KnowledgeIndexService().rejection_reasons(session, document)
+    return {
+        "id": record.id,
+        "document_id": document.id,
+        "case_title": record.case_title,
+        "publisher": record.publisher,
+        "published_at": record.published_at,
+        "case_category": record.case_category,
+        "scenario_text": record.scenario_text,
+        "marketing_wording_disclosed": record.marketing_wording_disclosed,
+        "marketing_wording": record.marketing_wording,
+        "case_facts": record.case_facts,
+        "regulatory_analysis": record.regulatory_analysis,
+        "consumer_advice": record.consumer_advice,
+        "case_usage": record.case_usage,
+        "source_quote": record.source_quote,
+        "field_evidence": record.field_evidence_json,
+        "evidence_quality": record.evidence_quality,
+        "final_review_status": record.final_review_status,
+        "authenticity_type": document.authenticity_type,
+        "knowledge_index_status": document.knowledge_index_status,
+        "can_index": not rejection_reasons,
+        "index_rejection_reasons": rejection_reasons,
+    }

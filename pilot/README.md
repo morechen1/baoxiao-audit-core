@@ -84,8 +84,10 @@ python -m app.cli.main pilot-quality-report \
 读取账本，不读取可变 Manifest 或历史 JSONL；清空 Manifest 后历史仍然可核验。
 
 监管典型案例或风险提示必须使用 `source_type=regulatory_case` 和
-`case_usage=external_test_candidate`。当前数据模型不能准确表达该类型，所以采集命令
-会返回 `regulatory_case_model_not_implemented`，绝不会将其写入行政处罚表。
+`case_usage=external_test_candidate`。采集会创建独立类型的待核验文档、Occurrence 和
+Pilot 账本项，绝不会将其写入行政处罚表，也不会自动生成结构化案例、审核或索引。
+调整为 `retrieval_only` 或 `sealed_external_test` 必须经过人工审核；封存外部测试集
+不能通过普通流程重新开放。
 
 结构化草稿空白模板位于 `templates/`。其中 `source_quote` 和所有 `field_evidence`
 必须来自不可变解析文本；模板中的 `null` 只表示“不得猜测”，不是可直接导入的数据。

@@ -12,11 +12,13 @@ from app.core.exceptions import (
     ParsedArtifactIntegrityError,
     RawArtifactIntegrityError,
 )
-from app.models import SourceDocument
+from app.models import RegulatoryCase, SourceDocument
 from app.models.enums import (
     APPROVABLE_STATUSES,
     AuthenticityType,
+    DataType,
     KnowledgeIndexStatus,
+    RegulatoryCaseUsage,
 )
 from app.repositories import DocumentRepository
 from app.services.field_evidence import EVIDENCE_FIELDS, FieldEvidenceService
@@ -46,6 +48,21 @@ class KnowledgeIndexService:
             if reasons:
                 summary.rejected[document.id] = reasons
                 continue
+            if document.data_type == DataType.REGULATORY_CASE.value:
+                record = next(
+                    (
+                        value
+                        for value in StateMachineService.structured_records(session, document)
+                        if isinstance(value, RegulatoryCase)
+                    ),
+                    None,
+                )
+                if record is not None:
+                    metadata = dict(document.metadata_json)
+                    metadata["knowledge_index_payload"] = self._regulatory_case_payload(
+                        document, record
+                    )
+                    document.metadata_json = metadata
             document.knowledge_index_status = KnowledgeIndexStatus.INDEXED.value
             document.indexed_at = datetime.now(UTC)
             summary.indexed += 1
@@ -79,6 +96,13 @@ class KnowledgeIndexService:
         if not records:
             reasons.append("missing_structured_record")
         for record in records:
+            if isinstance(record, RegulatoryCase):
+                if record.case_usage == RegulatoryCaseUsage.EXTERNAL_TEST_CANDIDATE.value:
+                    reasons.append("external_test_candidate_not_indexable")
+                elif record.case_usage == RegulatoryCaseUsage.SEALED_EXTERNAL_TEST.value:
+                    reasons.append("sealed_external_test_not_indexable")
+                elif record.case_usage != RegulatoryCaseUsage.RETRIEVAL_ONLY.value:
+                    reasons.append("case_usage_not_indexable")
             if record.final_review_status != document.final_review_status:
                 reasons.append("structured_status_mismatch")
             quote = getattr(record, "source_quote", None)
@@ -101,3 +125,23 @@ class KnowledgeIndexService:
             ) as exc:
                 reasons.append(str(exc))
         return sorted(set(reasons))
+
+    @staticmethod
+    def _regulatory_case_payload(
+        document: SourceDocument,
+        record: RegulatoryCase,
+    ) -> dict[str, object]:
+        return {
+            "case_title": record.case_title,
+            "case_category": record.case_category,
+            "scenario_text": record.scenario_text,
+            "marketing_wording": record.marketing_wording,
+            "case_facts": record.case_facts,
+            "regulatory_analysis": record.regulatory_analysis,
+            "consumer_advice": record.consumer_advice,
+            "publisher": record.publisher,
+            "published_at": record.published_at.isoformat() if record.published_at else None,
+            "source_url": document.source_url,
+            "document_id": document.id,
+            "record_id": record.id,
+        }

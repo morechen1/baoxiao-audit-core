@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.exceptions import FieldEvidenceError
-from app.models import Penalty, ProductDocument, Regulation, SourceDocument
+from app.models import Penalty, ProductDocument, Regulation, RegulatoryCase, SourceDocument
 from app.models.enums import DataType, ReviewStatus
 from app.repositories import DocumentRepository
 from app.services.field_evidence import EVIDENCE_FIELDS, FieldEvidenceService
@@ -16,6 +16,7 @@ from app.services.validation.validators import (
     DateValidator,
     HashDuplicateValidator,
     OriginalWordingValidator,
+    RegulatoryCaseValidator,
     RequiredFieldValidator,
     Sha256Validator,
     SourceQuoteValidator,
@@ -36,6 +37,7 @@ class ValidationService:
         Sha256Validator(),
         AuthenticityValidator(),
         OriginalWordingValidator(),
+        RegulatoryCaseValidator(),
     )
 
     def __init__(self, settings: Settings | None = None) -> None:
@@ -98,6 +100,14 @@ class ValidationService:
                     "original_sales_wording_disclosed",
                 ),
                 DataType.PRODUCT_DOCUMENT.value: ("product_name", "source_quote"),
+                DataType.REGULATORY_CASE.value: (
+                    "case_title",
+                    "case_category",
+                    "scenario_text",
+                    "marketing_wording_disclosed",
+                    "case_usage",
+                    "source_quote",
+                ),
             }.get(document.data_type, ())
             context = ValidationContext(
                 document=document,
@@ -166,6 +176,7 @@ class ValidationService:
             DataType.REGULATION.value: Regulation,
             DataType.PENALTY.value: Penalty,
             DataType.PRODUCT_DOCUMENT.value: ProductDocument,
+            DataType.REGULATORY_CASE.value: RegulatoryCase,
         }.get(document.data_type)
         return (
             list(session.scalars(select(model).where(model.document_id == document.id)))

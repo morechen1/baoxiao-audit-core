@@ -15,8 +15,9 @@
 
 ## 当前范围与架构
 
-FastAPI 和 Typer CLI 共用 service/repository 层。PostgreSQL 保存来源、文档、切片、四类
-结构化记录、解析版本、字段证据、审核预留/决定和状态历史；`data/raw` 保存按 SHA-256
+FastAPI 和 Typer CLI 共用 service/repository 层。PostgreSQL 保存来源、文档、切片、
+监管规则、行政处罚、产品资料、监管案例和评测样本等结构化记录，以及解析版本、字段
+证据、审核预留/决定和状态历史；`data/raw` 保存按 SHA-256
 命名的原件，`data/parsed_artifacts` 保存按内容哈希命名的不可变解析 JSON。索引服务
 当前只写入可信状态，不做 RAG、全文搜索、向量生成或法律结论。
 
@@ -82,6 +83,10 @@ python -m app.cli.main create-review-result-template --batch-id 1
 python -m app.cli.main import-review-results \
   --file ./data/review_results/review_result.jsonl --batch-id 1
 python -m app.cli.main list-records --status pending_review
+python -m app.cli.main list-regulatory-cases \
+  --case-category consumer_risk_alert \
+  --case-usage external_test_candidate
+python -m app.cli.main show-regulatory-case --case-id 1
 python -m app.cli.main index-approved
 python -m app.cli.main repair-status-consistency --dry-run
 python -m app.cli.main resubmit-for-review --record-type product_document \
@@ -97,7 +102,9 @@ python -m app.cli.main health-check
 使用已登记、启用且域名/类型匹配的来源。普通目录采集明确标记为“无官方来源声明”；
 官方清单会同时保留本地导入信息和可核验 URL occurrence，但两者的初始真实性都固定为
 `pending_verification`，不能通过采集参数直接指定 `verified_public`。文档采集接口只
-接受监管、处罚和产品资料，评测样本必须走独立导入路径。PDF 离线样例位于
+接受监管、处罚、产品资料和监管案例，评测样本必须走独立导入路径。监管案例绝不写入
+行政处罚表；Pilot 采集只建立待核验文档、Occurrence 和账本项，不自动结构化、审核或
+索引。PDF 离线样例位于
 `tests/fixtures/demo.pdf`。
 
 ## API
@@ -112,6 +119,8 @@ curl -X POST http://localhost:8000/sources \
 curl -X POST http://localhost:8000/parsing/run
 curl -X POST http://localhost:8000/validation/run
 curl 'http://localhost:8000/records?status=pending_review'
+curl 'http://localhost:8000/regulatory-cases?case_usage=external_test_candidate'
+curl 'http://localhost:8000/regulatory-cases/1'
 ```
 
 端点明细见 [API 文档](docs/api.md)。
@@ -139,8 +148,12 @@ curl 'http://localhost:8000/records?status=pending_review'
    批准，应选择 `pending_source_verification`，补齐来源后再显式重新送审。
 8. 索引不修改 `final_review_status`。只有已批准、`verified_public`、解析/校验通过、
    结构化记录和父文档状态一致且引用可在完整原文定位的数据才能被标记为 `indexed`。
+   `RegulatoryCase` 还必须由人工审核将用途调整为 `retrieval_only`；
+   `external_test_candidate` 和 `sealed_external_test` 永不通过普通索引命令。
 
 完整状态与审核格式见 [审核工作流](docs/review-workflow.md)。
+监管典型案例、消费者风险提示和“以案说险”的独立字段、证据与评测隔离规则见
+[监管案例模型](docs/regulatory-case-model.md)。
 首批小规模真实公开数据的来源审批、Manifest、采集、质量报告与 Bundle 协作见
 [试采集流程](docs/pilot-real-data-ingestion.md)。
 
@@ -172,6 +185,8 @@ make test
   `collect-url` 命令不属于 Pilot 账本流程。
 - 尚未建立法规修订、废止及替代关系库；`validity_status` 仅允许 `NULL/unknown`，
   API 统一展示“效力状态待核验”，不得解释为现行有效。
+- 监管案例索引目前只保存可审计的结构化 payload 和状态，不提供全文检索、排序、向量
+  检索或面向用户的法律判断。
 
 ## 下一阶段
 

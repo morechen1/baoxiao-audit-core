@@ -150,9 +150,11 @@ python -m app.cli.main pilot-status --run-id 1
 }
 ```
 
-当前模型缺少专用实体，采集命令会明确返回
-`regulatory_case_model_not_implemented`，不会写入 `penalties`。下一步应由项目规划者
-决定是否新增独立 `RegulatoryCase` 模型、字段和迁移，再开放采集与审核。
+该类型由独立 `RegulatoryCase`/`regulatory_cases` 表表达，绝不会写入 `penalties`。
+受控采集只创建 `data_type=regulatory_case`、真实性为 `pending_verification` 的
+`SourceDocument`，并绑定 Pilot Item 和 Occurrence；不会自动创建结构化案例、审核或
+索引。普通结构化导入保持 `case_usage=external_test_candidate`，只有人工审核才能调整
+用途。
 
 ## 字段级证据
 
@@ -171,6 +173,7 @@ python -m app.cli.main pilot-status --run-id 1
 python -m app.cli.main export-review-bundle --data-type regulation
 python -m app.cli.main export-review-bundle --data-type penalty
 python -m app.cli.main export-review-bundle --data-type product_document
+python -m app.cli.main export-review-bundle --data-type regulatory_case
 ```
 
 运行产物可在仓库外按以下名称归档：
@@ -179,9 +182,10 @@ python -m app.cli.main export-review-bundle --data-type product_document
 pilot-regulations-review-bundle.zip
 pilot-penalties-review-bundle.zip
 pilot-product-documents-review-bundle.zip
+pilot-regulatory-cases-review-bundle.zip
 ```
 
-专用监管案例模型实现前不得生成伪装成 penalty 的案例 Bundle。每个现有 Bundle 包含
+监管案例 Bundle 与处罚 Bundle 完全独立。每个 Bundle 包含
 `manifest.json`、`review.jsonl`、`review-results-template.jsonl`、`sources/` 和
 `parsed/`，并由哈希绑定原件、解析产物、审核 payload 和字段证据摘要。
 

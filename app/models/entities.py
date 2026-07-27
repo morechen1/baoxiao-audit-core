@@ -27,6 +27,8 @@ from app.models.enums import (
     DOCUMENT_DATA_TYPE_VALUES,
     HUMAN_REVIEW_STATUS_VALUES,
     KNOWLEDGE_INDEX_STATUS_VALUES,
+    REGULATORY_CASE_CATEGORY_VALUES,
+    REGULATORY_CASE_USAGE_VALUES,
     REVIEW_STATUS_VALUES,
     AuthenticityType,
     DatasetSplit,
@@ -280,6 +282,62 @@ class ProductDocument(Base):
     source_quote: Mapped[str] = mapped_column(Text)
     field_evidence_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     final_review_status: Mapped[str] = mapped_column(String(50))
+
+
+class RegulatoryCase(TimestampMixin, Base):
+    __tablename__ = "regulatory_cases"
+    __table_args__ = (
+        UniqueConstraint("document_id", name="uq_regulatory_cases_document_id"),
+        CheckConstraint(
+            f"case_category IN ({sql_values(REGULATORY_CASE_CATEGORY_VALUES)})",
+            name="ck_regulatory_cases_category",
+        ),
+        CheckConstraint(
+            f"case_usage IN ({sql_values(REGULATORY_CASE_USAGE_VALUES)})",
+            name="ck_regulatory_cases_usage",
+        ),
+        CheckConstraint(
+            "(marketing_wording_disclosed = true "
+            "AND marketing_wording IS NOT NULL "
+            "AND length(trim(marketing_wording)) > 0) "
+            "OR (marketing_wording_disclosed = false "
+            "AND marketing_wording IS NULL)",
+            name="ck_regulatory_cases_marketing_wording",
+        ),
+        CheckConstraint(
+            f"final_review_status IN ({sql_values(REVIEW_STATUS_VALUES)})",
+            name="ck_regulatory_cases_review_status",
+        ),
+        CheckConstraint(
+            "evidence_quality IS NULL OR evidence_quality IN ('A', 'B', 'C', 'D')",
+            name="ck_regulatory_cases_evidence_quality",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("source_documents.id", ondelete="CASCADE"), index=True
+    )
+    case_title: Mapped[str] = mapped_column(String(1000))
+    publisher: Mapped[str | None] = mapped_column(String(500))
+    published_at: Mapped[date | None] = mapped_column(Date, index=True)
+    case_category: Mapped[str] = mapped_column(String(50), index=True)
+    scenario_text: Mapped[str] = mapped_column(Text)
+    marketing_wording_disclosed: Mapped[bool] = mapped_column(Boolean, default=False)
+    marketing_wording: Mapped[str | None] = mapped_column(Text)
+    case_facts: Mapped[str | None] = mapped_column(Text)
+    regulatory_analysis: Mapped[str | None] = mapped_column(Text)
+    consumer_advice: Mapped[str | None] = mapped_column(Text)
+    case_usage: Mapped[str] = mapped_column(
+        String(50),
+        default="external_test_candidate",
+        server_default="external_test_candidate",
+        index=True,
+    )
+    source_quote: Mapped[str] = mapped_column(Text)
+    field_evidence_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    final_review_status: Mapped[str] = mapped_column(String(50), index=True)
+    evidence_quality: Mapped[str | None] = mapped_column(String(1))
 
 
 class EvaluationSample(Base):

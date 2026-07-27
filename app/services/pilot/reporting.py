@@ -14,6 +14,7 @@ from app.models import (
     PilotCollectionRun,
     ProductDocument,
     Regulation,
+    RegulatoryCase,
     SourceDocument,
 )
 from app.models.enums import KnowledgeIndexStatus, ReviewStatus
@@ -226,6 +227,7 @@ class PilotReportService:
             PilotSourceType.REGULATION.value: Regulation,
             PilotSourceType.PENALTY.value: Penalty,
             PilotSourceType.PRODUCT_DOCUMENT.value: ProductDocument,
+            PilotSourceType.REGULATORY_CASE.value: RegulatoryCase,
         }.get(document.data_type)
         return (
             list(session.scalars(select(model).where(model.document_id == document.id)))

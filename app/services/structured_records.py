@@ -10,12 +10,24 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.exceptions import StructuredRecordError
-from app.models import Penalty, ProductDocument, Regulation, SourceDocument
-from app.models.enums import AuthenticityType, DataType, ReviewStatus
+from app.models import (
+    Penalty,
+    ProductDocument,
+    Regulation,
+    RegulatoryCase,
+    SourceDocument,
+)
+from app.models.enums import (
+    AuthenticityType,
+    DataType,
+    RegulatoryCaseUsage,
+    ReviewStatus,
+)
 from app.schemas.structured import (
     PenaltyDraft,
     ProductDocumentDraft,
     RegulationDraft,
+    RegulatoryCaseDraft,
     StructuredDraftEnvelope,
 )
 from app.services.field_evidence import EVIDENCE_FIELDS, FieldEvidenceService
@@ -25,12 +37,14 @@ DRAFT_MODELS = {
     DataType.REGULATION.value: RegulationDraft,
     DataType.PENALTY.value: PenaltyDraft,
     DataType.PRODUCT_DOCUMENT.value: ProductDocumentDraft,
+    DataType.REGULATORY_CASE.value: RegulatoryCaseDraft,
 }
 
 ENTITY_MODELS = {
     DataType.REGULATION.value: Regulation,
     DataType.PENALTY.value: Penalty,
     DataType.PRODUCT_DOCUMENT.value: ProductDocument,
+    DataType.REGULATORY_CASE.value: RegulatoryCase,
 }
 
 
@@ -61,7 +75,7 @@ class StructuredRecordService:
 
     def import_draft(
         self, session: Session, envelope: StructuredDraftEnvelope
-    ) -> Regulation | Penalty | ProductDocument:
+    ) -> Regulation | Penalty | ProductDocument | RegulatoryCase:
         document = session.get(SourceDocument, envelope.document_id)
         if not document:
             raise StructuredRecordError(f"Document {envelope.document_id} does not exist")
@@ -82,9 +96,15 @@ class StructuredRecordService:
             draft = draft_model.model_validate(envelope.fields)
         except PydanticValidationError as exc:
             raise StructuredRecordError(str(exc)) from exc
+        if (
+            document.data_type == DataType.REGULATORY_CASE.value
+            and draft.case_usage != RegulatoryCaseUsage.EXTERNAL_TEST_CANDIDATE
+        ):
+            raise StructuredRecordError("case_usage_requires_human_review")
         if document.data_type in {
             DataType.PENALTY.value,
             DataType.PRODUCT_DOCUMENT.value,
+            DataType.REGULATORY_CASE.value,
         }:
             duplicate = session.scalar(
                 select(entity_model).where(entity_model.document_id == document.id)
@@ -129,7 +149,7 @@ class StructuredRecordService:
             )
         session.commit()
         session.refresh(record)
-        return cast(Regulation | Penalty | ProductDocument, record)
+        return cast(Regulation | Penalty | ProductDocument | RegulatoryCase, record)
 
     @staticmethod
     def _legacy_demo_evidence(

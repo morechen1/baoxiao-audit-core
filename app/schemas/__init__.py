@@ -11,6 +11,8 @@ from app.schemas.structured import (
     PenaltyDraft,
     ProductDocumentDraft,
     RegulationDraft,
+    RegulatoryCaseDraft,
+    RegulatoryCaseRevision,
     StructuredDraftEnvelope,
 )
 
@@ -22,6 +24,8 @@ __all__ = [
     "MessageResponse",
     "PenaltyDraft",
     "ProductDocumentDraft",
+    "RegulatoryCaseDraft",
+    "RegulatoryCaseRevision",
     "RegulationDraft",
     "ReviewBatchRequest",
     "ReviewImportRequest",
