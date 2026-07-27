@@ -6,10 +6,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
-from app.models import SourceDocument
+from app.models import DocumentOccurrence, SourceDocument
 from app.models.enums import AuthenticityType, ReviewStatus
 from app.repositories import DocumentRepository
 
@@ -50,6 +51,8 @@ class BaseCollector(ABC):
         repository = DocumentRepository(session)
         duplicate = repository.by_hash(digest)
         if duplicate:
+            self._record_occurrence(session, duplicate, result, source_id=source_id)
+            session.commit()
             return duplicate, False
 
         raw_dir = self.settings.data_dir.resolve() / "raw"
@@ -75,9 +78,41 @@ class BaseCollector(ABC):
             metadata_json=result.metadata,
         )
         repository.add(document)
-        repository.transition(document, ReviewStatus.COLLECTED.value, "collection completed")
+        self._record_occurrence(session, document, result, source_id=source_id)
         session.commit()
         return document, True
+
+    @staticmethod
+    def _record_occurrence(
+        session: Session,
+        document: SourceDocument,
+        result: CollectionResult,
+        *,
+        source_id: int | None,
+    ) -> None:
+        existing = session.scalar(
+            select(DocumentOccurrence).where(
+                DocumentOccurrence.document_id == document.id,
+                DocumentOccurrence.source_url == result.source_url,
+                DocumentOccurrence.final_url == result.final_url,
+            )
+        )
+        if existing:
+            existing.source_id = source_id
+            existing.http_status = result.http_status
+            existing.response_metadata = result.metadata
+            return
+        session.add(
+            DocumentOccurrence(
+                document_id=document.id,
+                source_id=source_id,
+                source_url=result.source_url,
+                final_url=result.final_url,
+                publisher=document.publisher,
+                http_status=result.http_status,
+                response_metadata=result.metadata,
+            )
+        )
 
 
 def _suffix_for_content_type(content_type: str, url: str | None) -> str:

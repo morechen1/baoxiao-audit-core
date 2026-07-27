@@ -2,7 +2,7 @@ from pathlib import Path
 
 from app.core.config import Settings
 from app.models.enums import AuthenticityType, DataType
-from app.services.collection import FileCollector
+from app.services.collection import CollectionResult, FileCollector
 
 
 def test_sha256_deduplication(session, tmp_path: Path) -> None:
@@ -28,3 +28,34 @@ def test_sha256_deduplication(session, tmp_path: Path) -> None:
     assert second_created is False
     assert first.id == second.id
     assert first.sha256 == second.sha256
+
+
+def test_same_content_from_different_urls_preserves_occurrences(session, tmp_path: Path) -> None:
+    settings = Settings(database_url="sqlite://", data_dir=tmp_path / "data")
+    collector = FileCollector(settings)
+    first_result = CollectionResult(
+        content=b"same public content",
+        source_url="https://one.example.test/rule",
+        final_url="https://one.example.test/rule",
+        content_type="text/plain",
+        http_status=200,
+    )
+    second_result = CollectionResult(
+        content=b"same public content",
+        source_url="https://two.example.test/rule",
+        final_url="https://two.example.test/rule",
+        content_type="text/plain",
+        http_status=200,
+    )
+
+    first, created = collector.persist(session, first_result, DataType.REGULATION.value)
+    second, second_created = collector.persist(session, second_result, DataType.REGULATION.value)
+
+    assert created is True
+    assert second_created is False
+    assert first.id == second.id
+    assert len(first.occurrences) == 2
+    assert {item.source_url for item in first.occurrences} == {
+        first_result.source_url,
+        second_result.source_url,
+    }
