@@ -1,0 +1,83 @@
+name: backend-ci
+
+on:
+  pull_request:
+    branches: [develop]
+  push:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  quality-and-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: baoxiao_test
+          POSTGRES_USER: baoxiao
+          POSTGRES_PASSWORD: ci_only_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U baoxiao -d baoxiao_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://baoxiao:ci_only_password@localhost:5432/baoxiao_test
+      LLM_ENABLED: "false"
+      EMBEDDING_ENABLED: "false"
+      OCR_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.32"
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install locked dependencies
+        run: uv sync --frozen --extra dev
+      - name: Ruff lint
+        run: uv run ruff check app tests scripts
+      - name: Ruff format
+        run: uv run ruff format --check app tests scripts
+      - name: Mypy
+        run: uv run mypy app/core app/models app/repositories app/services app/providers
+      - name: Pytest
+        run: uv run pytest
+      - name: PostgreSQL migration cycle
+        run: |
+          uv run alembic upgrade head
+          uv run alembic downgrade base
+          uv run alembic upgrade head
+      - name: Build runtime image
+        run: docker build --target runtime -t baoxiao-audit-core:ci .
+      - name: Build and run test image
+        run: |
+          docker build --target test -t baoxiao-audit-core:test .
+          docker run --rm baoxiao-audit-core:test
+      - name: Compose health check
+        env:
+          POSTGRES_PASSWORD: compose_ci_only_password
+        run: |
+          docker compose up -d --build
+          docker compose exec -T api alembic upgrade head
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://localhost:8000/health; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs
+          exit 1
+      - name: Compose logs on failure
+        if: failure()
+        run: docker compose logs
+      - name: Compose cleanup
+        if: always()
+        run: docker compose down -v
