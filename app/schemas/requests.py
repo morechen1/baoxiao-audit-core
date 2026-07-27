@@ -19,8 +19,7 @@ class SourceCreate(BaseModel):
 class CollectionUrlRequest(BaseModel):
     url: HttpUrl
     source_type: DataType
-    source_id: int | None = None
-    authenticity_type: AuthenticityType = AuthenticityType.PENDING_VERIFICATION
+    source_id: int = Field(gt=0)
 
 
 class CollectionLocalRequest(BaseModel):
@@ -37,4 +36,8 @@ class ReviewBatchRequest(BaseModel):
 
 class ReviewImportRequest(BaseModel):
     path: Path
-    batch_id: int | None = None
+    batch_id: int = Field(gt=0)
+
+
+class StructuredImportRequest(BaseModel):
+    path: Path

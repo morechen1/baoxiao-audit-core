@@ -5,17 +5,21 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_db
 from app.core.config import get_settings
+from app.models import DataSource
+from app.models.enums import AuthenticityType
 from app.repositories import DocumentRepository
 from app.schemas import (
     CollectionLocalRequest,
     CollectionUrlRequest,
     ReviewBatchRequest,
     ReviewImportRequest,
+    StructuredImportRequest,
 )
-from app.services.collection import FileCollector, WebPageCollector
+from app.services.collection import FileCollector, SafeUrlPolicy, WebPageCollector
 from app.services.knowledge import KnowledgeIndexService
 from app.services.parsing import ParsingService
 from app.services.review import ReviewService
+from app.services.structured_records import StructuredRecordService
 from app.services.validation import ValidationService
 
 router = APIRouter(tags=["workflow"])
@@ -25,6 +29,16 @@ router = APIRouter(tags=["workflow"])
 def collect_url(
     payload: CollectionUrlRequest, session: Session = Depends(get_db)
 ) -> dict[str, object]:
+    source = session.get(DataSource, payload.source_id)
+    if not source or not source.enabled:
+        raise HTTPException(status_code=400, detail="source_id must identify an enabled source")
+    if source.source_type != payload.source_type.value:
+        raise HTTPException(status_code=400, detail="source_type does not match registered source")
+    allowed_domains = source.crawl_policy.get("allowed_domains", [])
+    if not isinstance(allowed_domains, list) or not SafeUrlPolicy.host_allowed(
+        str(payload.url), source.base_url, allowed_domains
+    ):
+        raise HTTPException(status_code=400, detail="URL host is not allowed for this source")
     collector = WebPageCollector()
     result = collector.collect(str(payload.url))
     document, created = collector.persist(
@@ -32,7 +46,7 @@ def collect_url(
         result,
         payload.source_type.value,
         source_id=payload.source_id,
-        authenticity_type=payload.authenticity_type.value,
+        authenticity_type=AuthenticityType.PENDING_VERIFICATION.value,
     )
     return {"document_id": document.id, "created": created, "sha256": document.sha256}
 
@@ -71,7 +85,13 @@ def export_review_batch(
     payload: ReviewBatchRequest, session: Session = Depends(get_db)
 ) -> dict[str, object]:
     batch = ReviewService().export_batch(session, payload.data_type.value, payload.format)
-    return {"batch_id": batch.id, "record_count": batch.record_count, "path": batch.export_path}
+    return {
+        "batch_id": batch.id,
+        "record_count": batch.record_count,
+        "path": batch.export_path,
+        "export_sha256": batch.export_sha256,
+        "schema_version": batch.schema_version,
+    }
 
 
 @router.post("/review/results/import")
@@ -80,6 +100,15 @@ def import_review_results(
 ) -> dict[str, object]:
     path = _safe_data_path(payload.path, required_subdir="review_results")
     imported, errors = ReviewService().import_results(session, path, payload.batch_id)
+    return {"imported": imported, "errors": errors}
+
+
+@router.post("/structured-drafts/import")
+def import_structured_drafts(
+    payload: StructuredImportRequest, session: Session = Depends(get_db)
+) -> dict[str, object]:
+    path = _safe_data_path(payload.path, required_subdir="parsed")
+    imported, errors = StructuredRecordService().import_jsonl(session, path)
     return {"imported": imported, "errors": errors}
 
 
@@ -103,8 +132,9 @@ def get_record(
 
 
 @router.post("/knowledge/index-approved")
-def index_approved(session: Session = Depends(get_db)) -> dict[str, int]:
-    return {"indexed": KnowledgeIndexService().index_approved(session)}
+def index_approved(session: Session = Depends(get_db)) -> dict[str, object]:
+    summary = KnowledgeIndexService().index_approved(session)
+    return {"indexed": summary.indexed, "rejected": summary.rejected}
 
 
 def _safe_data_path(path: Path, required_subdir: str | None = None) -> Path:
