@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import typer
@@ -13,12 +14,16 @@ from app.models import (
     Penalty,
     ProductDocument,
     Regulation,
+    RegulatoryCase,
+    SourceDocument,
 )
 from app.models.enums import (
     AuthenticityType,
     DatasetSplit,
     DataType,
     DocumentDataType,
+    RegulatoryCaseCategory,
+    RegulatoryCaseUsage,
     ReviewStatus,
     SampleCategory,
 )
@@ -317,6 +322,82 @@ def list_records(
         typer.echo(
             f"{record.id}\t{record.data_type}\t{record.final_review_status}"
             f"\t{record.source_title or '-'}"
+        )
+
+
+@app.command("list-regulatory-cases")
+def list_regulatory_cases(
+    case_category: RegulatoryCaseCategory | None = typer.Option(None, help="案例类别过滤"),
+    case_usage: RegulatoryCaseUsage | None = typer.Option(None, help="案例用途过滤"),
+    status: str | None = typer.Option(None, help="审核状态过滤"),
+    authenticity: AuthenticityType | None = typer.Option(None, help="真实性过滤"),
+) -> None:
+    """List RegulatoryCase records and their trust/index state."""
+    with SessionLocal() as session:
+        statement = (
+            select(RegulatoryCase, SourceDocument)
+            .join(SourceDocument, SourceDocument.id == RegulatoryCase.document_id)
+            .order_by(RegulatoryCase.id)
+        )
+        if case_category is not None:
+            statement = statement.where(RegulatoryCase.case_category == case_category.value)
+        if case_usage is not None:
+            statement = statement.where(RegulatoryCase.case_usage == case_usage.value)
+        if status is not None:
+            statement = statement.where(RegulatoryCase.final_review_status == status)
+        if authenticity is not None:
+            statement = statement.where(SourceDocument.authenticity_type == authenticity.value)
+        service = KnowledgeIndexService()
+        rows = list(session.execute(statement))
+        for record, document in rows:
+            can_index = not service.rejection_reasons(session, document)
+            typer.echo(
+                f"{record.id}\tdocument_id={document.id}\t{record.case_category}"
+                f"\t{record.case_usage}\t{record.final_review_status}"
+                f"\t{document.authenticity_type}\tcan_index={str(can_index).lower()}"
+                f"\t{record.case_title}"
+            )
+
+
+@app.command("show-regulatory-case")
+def show_regulatory_case(
+    case_id: int = typer.Option(..., min=1, help="RegulatoryCase记录 ID"),
+) -> None:
+    """Show one RegulatoryCase including evidence and index eligibility."""
+    with SessionLocal() as session:
+        record = session.get(RegulatoryCase, case_id)
+        if record is None:
+            raise typer.BadParameter("case_id does not identify a RegulatoryCase")
+        document = session.get(SourceDocument, record.document_id)
+        if document is None:
+            raise typer.BadParameter("RegulatoryCase document is missing")
+        reasons = KnowledgeIndexService().rejection_reasons(session, document)
+        typer.echo(
+            json.dumps(
+                {
+                    "id": record.id,
+                    "document_id": document.id,
+                    "case_title": record.case_title,
+                    "publisher": record.publisher,
+                    "published_at": record.published_at,
+                    "case_category": record.case_category,
+                    "scenario_text": record.scenario_text,
+                    "marketing_wording_disclosed": record.marketing_wording_disclosed,
+                    "marketing_wording": record.marketing_wording,
+                    "case_facts": record.case_facts,
+                    "regulatory_analysis": record.regulatory_analysis,
+                    "consumer_advice": record.consumer_advice,
+                    "case_usage": record.case_usage,
+                    "field_evidence": record.field_evidence_json,
+                    "evidence_quality": record.evidence_quality,
+                    "final_review_status": record.final_review_status,
+                    "authenticity_type": document.authenticity_type,
+                    "can_index": not reasons,
+                    "index_rejection_reasons": reasons,
+                },
+                ensure_ascii=False,
+                default=str,
+            )
         )
 
 

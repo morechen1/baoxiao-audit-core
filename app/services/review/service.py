@@ -26,6 +26,7 @@ from app.models import (
     DataSource,
     DocumentOccurrence,
     EvaluationSample,
+    RegulatoryCase,
     ReviewBatch,
     ReviewBatchItem,
     ReviewDecision,
@@ -37,6 +38,7 @@ from app.models.enums import (
     AuthenticityType,
     DatasetSplit,
     DataType,
+    RegulatoryCaseUsage,
     ReviewStatus,
 )
 from app.repositories import DocumentRepository
@@ -49,6 +51,7 @@ from app.schemas.structured import (
     PenaltyDraft,
     ProductDocumentDraft,
     RegulationDraft,
+    RegulatoryCaseRevision,
     StrictDraft,
 )
 from app.services.collection import SafeUrlPolicy
@@ -112,6 +115,21 @@ CORRECTION_FIELDS: dict[str, frozenset[str]] = {
             "surrender_risk",
         }
     ),
+    DataType.REGULATORY_CASE.value: frozenset(
+        {
+            "case_title",
+            "publisher",
+            "published_at",
+            "case_category",
+            "scenario_text",
+            "marketing_wording_disclosed",
+            "marketing_wording",
+            "case_facts",
+            "regulatory_analysis",
+            "consumer_advice",
+            "case_usage",
+        }
+    ),
     DataType.EVALUATION_SAMPLE.value: frozenset(
         {
             "sample_text",
@@ -128,6 +146,7 @@ CORRECTION_MODELS: dict[str, type[StrictDraft]] = {
     DataType.REGULATION.value: RegulationDraft,
     DataType.PENALTY.value: PenaltyDraft,
     DataType.PRODUCT_DOCUMENT.value: ProductDocumentDraft,
+    DataType.REGULATORY_CASE.value: RegulatoryCaseRevision,
 }
 
 PROTECTED_CORRECTION_FIELDS = frozenset(
@@ -573,6 +592,12 @@ class ReviewService:
                 validated = model.model_validate(candidate).model_dump()
             except PydanticValidationError as exc:
                 raise ReviewDecisionError("invalid_correction_value") from exc
+            if (
+                isinstance(target, RegulatoryCase)
+                and target.case_usage == RegulatoryCaseUsage.SEALED_EXTERNAL_TEST.value
+                and validated["case_usage"] != RegulatoryCaseUsage.SEALED_EXTERNAL_TEST.value
+            ):
+                raise ReviewDecisionError("sealed_external_test_cannot_be_reopened")
             changed_evidence_fields = {
                 field
                 for field in set(correction.fields) & evidence_fields
@@ -587,6 +612,9 @@ class ReviewService:
                     for key, values in correction.field_evidence.items()
                 },
             }
+            for field in set(correction.fields) & evidence_fields:
+                if validated[field] is None or not str(validated[field]).strip():
+                    candidate_evidence.pop(field, None)
             try:
                 validated_evidence = FieldEvidenceService(self.settings).validate(
                     session,
@@ -631,6 +659,9 @@ class ReviewService:
                 **document.corrected_fields_json,
                 "records": corrections["records"],
             }
+        for record in records:
+            if isinstance(record, RegulatoryCase):
+                record.evidence_quality = quality
         StateMachineService.transition_document(session, document, final_status, "human review")
         decision = self._new_decision(
             batch.id, record_type, record_id, payload, final_status, corrections, quality
