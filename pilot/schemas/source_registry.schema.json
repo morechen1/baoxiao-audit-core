@@ -45,6 +45,15 @@
           },
           "enabled": {"type": "boolean"},
           "confirmed_by": {"type": ["string", "null"]},
+          "robots_review": {
+            "$ref": "#/$defs/robotsReview"
+          },
+          "terms_review": {
+            "$ref": "#/$defs/termsReview"
+          },
+          "approval": {
+            "$ref": "#/$defs/approval"
+          },
           "crawl_policy": {
             "type": "object",
             "additionalProperties": false,
@@ -60,7 +69,82 @@
             }
           },
           "notes": {"type": "string", "minLength": 1}
-        }
+        },
+        "allOf": [
+          {
+            "if": {"properties": {"enabled": {"const": true}}},
+            "then": {
+              "required": [
+                "confirmed_by",
+                "robots_review",
+                "terms_review",
+                "approval"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "robotsReview": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "checked_at",
+        "checked_by",
+        "reference_url",
+        "notes"
+      ],
+      "properties": {
+        "status": {
+          "enum": ["allowed", "not_published_manual_review", "prohibited"]
+        },
+        "checked_at": {"type": "string", "format": "date"},
+        "checked_by": {"type": "string", "minLength": 1},
+        "reference_url": {
+          "type": ["string", "null"],
+          "format": "uri"
+        },
+        "notes": {"type": "string", "minLength": 1}
+      }
+    },
+    "termsReview": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "checked_at",
+        "checked_by",
+        "reference_url",
+        "notes"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "public_access_allowed",
+            "not_published_manual_review",
+            "prohibited"
+          ]
+        },
+        "checked_at": {"type": "string", "format": "date"},
+        "checked_by": {"type": "string", "minLength": 1},
+        "reference_url": {
+          "type": ["string", "null"],
+          "format": "uri"
+        },
+        "notes": {"type": "string", "minLength": 1}
+      }
+    },
+    "approval": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["approved_by", "approved_at", "approval_reference"],
+      "properties": {
+        "approved_by": {"type": "string", "minLength": 1},
+        "approved_at": {"type": "string", "format": "date-time"},
+        "approval_reference": {"type": "string", "minLength": 1}
       }
     }
   }

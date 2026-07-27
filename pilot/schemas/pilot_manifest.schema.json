@@ -35,6 +35,8 @@
       "items": {"type": "string", "minLength": 1}
     },
     "confirmed_by": {"type": ["string", "null"]},
+    "approved_at": {"type": ["string", "null"], "format": "date-time"},
+    "approval_reference": {"type": ["string", "null"]},
     "status": {
       "enum": [
         "draft",
@@ -51,5 +53,21 @@
       "type": ["string", "null"],
       "enum": ["external_test_candidate", null]
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {"const": "approved_for_collection"}
+        }
+      },
+      "then": {
+        "required": [
+          "confirmed_by",
+          "approved_at",
+          "approval_reference"
+        ]
+      }
+    }
+  ]
 }

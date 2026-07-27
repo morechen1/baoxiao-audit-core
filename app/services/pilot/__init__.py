@@ -4,10 +4,17 @@ from app.services.pilot.models import (
     PilotSourceType,
     SourceRegistryEntry,
 )
-from app.services.pilot.service import PilotCollectionOutcome, PilotService
+from app.services.pilot.service import (
+    PilotCollectionOutcome,
+    PilotCollectionResult,
+    PilotConfigurationError,
+    PilotService,
+)
 
 __all__ = [
     "PilotCollectionOutcome",
+    "PilotCollectionResult",
+    "PilotConfigurationError",
     "PilotManifestEntry",
     "PilotManifestStatus",
     "PilotService",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Literal
 from urllib.parse import urlparse
@@ -25,6 +26,18 @@ class PilotManifestStatus(StrEnum):
     REJECTED = "rejected"
 
 
+class RobotsReviewStatus(StrEnum):
+    ALLOWED = "allowed"
+    NOT_PUBLISHED_MANUAL_REVIEW = "not_published_manual_review"
+    PROHIBITED = "prohibited"
+
+
+class TermsReviewStatus(StrEnum):
+    PUBLIC_ACCESS_ALLOWED = "public_access_allowed"
+    NOT_PUBLISHED_MANUAL_REVIEW = "not_published_manual_review"
+    PROHIBITED = "prohibited"
+
+
 class StrictPilotModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -33,6 +46,28 @@ class CrawlPolicy(StrictPilotModel):
     rate_limit_seconds: float = Field(default=2, ge=0)
     max_documents: int = Field(default=10, gt=0)
     allow_subdomains: bool = True
+
+
+class RobotsReview(StrictPilotModel):
+    status: RobotsReviewStatus
+    checked_at: date
+    checked_by: StrictStr = Field(min_length=1)
+    reference_url: HttpUrl | None = None
+    notes: StrictStr = Field(min_length=1)
+
+
+class TermsReview(StrictPilotModel):
+    status: TermsReviewStatus
+    checked_at: date
+    checked_by: StrictStr = Field(min_length=1)
+    reference_url: HttpUrl | None = None
+    notes: StrictStr = Field(min_length=1)
+
+
+class SourceApproval(StrictPilotModel):
+    approved_by: StrictStr = Field(min_length=1)
+    approved_at: datetime
+    approval_reference: StrictStr = Field(min_length=1)
 
 
 class SourceRegistryEntry(StrictPilotModel):
@@ -44,13 +79,14 @@ class SourceRegistryEntry(StrictPilotModel):
     allowed_domains: list[StrictStr] = Field(min_length=1)
     enabled: bool = False
     confirmed_by: StrictStr | None = None
+    robots_review: RobotsReview | None = None
+    terms_review: TermsReview | None = None
+    approval: SourceApproval | None = None
     crawl_policy: CrawlPolicy = Field(default_factory=CrawlPolicy)
     notes: StrictStr = Field(min_length=1)
 
     @model_validator(mode="after")
-    def validate_confirmation_and_domains(self) -> SourceRegistryEntry:
-        if self.enabled and not (self.confirmed_by and self.confirmed_by.strip()):
-            raise ValueError("enabled source requires confirmed_by")
+    def validate_domains(self) -> SourceRegistryEntry:
         for domain in self.allowed_domains:
             parsed = urlparse(domain if "://" in domain else f"//{domain}")
             if not parsed.hostname or parsed.username or parsed.password:
@@ -71,15 +107,13 @@ class PilotManifestEntry(StrictPilotModel):
     collection_method: Literal["url"] = "url"
     evaluation_usage: list[StrictStr] = Field(default_factory=list)
     confirmed_by: StrictStr | None = None
+    approved_at: datetime | None = None
+    approval_reference: StrictStr | None = None
     status: PilotManifestStatus = PilotManifestStatus.DRAFT
     case_usage: Literal["external_test_candidate"] | None = None
 
     @model_validator(mode="after")
-    def validate_approval_and_case_usage(self) -> PilotManifestEntry:
-        if self.status == PilotManifestStatus.APPROVED_FOR_COLLECTION and not (
-            self.confirmed_by and self.confirmed_by.strip()
-        ):
-            raise ValueError("approved_for_collection requires confirmed_by")
+    def validate_case_usage(self) -> PilotManifestEntry:
         if self.source_type == PilotSourceType.REGULATORY_CASE:
             if self.case_usage != "external_test_candidate":
                 raise ValueError("regulatory_case requires case_usage=external_test_candidate")
