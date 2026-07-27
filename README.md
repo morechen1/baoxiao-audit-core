@@ -116,6 +116,7 @@ curl 'http://localhost:8000/records?status=pending_review'
 3. 人工导入经 Pydantic 验证的结构化草稿；正式草稿的每个非空业务字段必须携带
    `field_evidence`。仅 `parsed`/`auto_validation_failed` 可导入或经专用命令修订，
    修订字段与证据原子写入并留审计；进入待审或人工终态后锁定草稿入口。
+   监管标题和处罚对象同样属于强制证据字段，不能依赖兼容展示用的 `source_quote`。
 4. 确定性校验只会进入 `pending_review` 或 `auto_validation_failed`，绝不会自动批准。
 5. 待审记录以数据库唯一约束取得排他预留；已进入开放批次的记录会被跳过，取消批次
    后才释放。可移植 ZIP bundle 内含 manifest、哈希绑定的决定模板、
@@ -157,6 +158,8 @@ make test
 - API 当前只适合受控网络环境，不包含生产级身份认证。
 - LLM、Embedding 和 OCR 保持完全禁用；接口预留不代表已接入这些能力。
 - 来源请求间隔已建模，当前单 URL 命令不负责跨任务全局限速。
+- 尚未建立法规修订、废止及替代关系库；`validity_status` 仅允许 `NULL/unknown`，
+  API 统一展示“效力状态待核验”，不得解释为现行有效。
 
 ## 下一阶段
 

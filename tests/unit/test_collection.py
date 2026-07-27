@@ -122,6 +122,8 @@ def make_reviewable_regulation(session, document) -> None:
     )
     quote = "正式规则内容"
     start = document.raw_text.find(quote)
+    title = "正式规则"
+    title_start = document.raw_text.find(title)
     session.add(
         Regulation(
             document_id=document.id,
@@ -129,6 +131,15 @@ def make_reviewable_regulation(session, document) -> None:
             article_text=quote,
             source_quote=quote,
             field_evidence_json={
+                "title": [
+                    {
+                        "quote": title,
+                        "page_number": 1,
+                        "start_offset": title_start,
+                        "end_offset": title_start + len(title),
+                        "mode": "verbatim",
+                    }
+                ],
                 "article_text": [
                     {
                         "quote": quote,
@@ -137,7 +148,7 @@ def make_reviewable_regulation(session, document) -> None:
                         "end_offset": start + len(quote),
                         "mode": "verbatim",
                     }
-                ]
+                ],
             },
             final_review_status=ReviewStatus.PENDING_REVIEW.value,
         )

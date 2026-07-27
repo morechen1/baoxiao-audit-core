@@ -80,7 +80,6 @@ CORRECTION_FIELDS: dict[str, frozenset[str]] = {
             "issuing_authority",
             "effective_date",
             "expiry_date",
-            "validity_status",
             "article_number",
             "article_text",
         }

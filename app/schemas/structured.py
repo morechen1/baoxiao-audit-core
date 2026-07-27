@@ -38,7 +38,7 @@ class RegulationDraft(StrictDraft):
     issuing_authority: StrictStr | None = None
     effective_date: date | None = None
     expiry_date: date | None = None
-    validity_status: StrictStr | None = None
+    validity_status: Literal["unknown"] | None = "unknown"
     article_number: StrictStr | None = None
     article_text: StrictStr = Field(min_length=1)
     source_quote: StrictStr = Field(min_length=1)

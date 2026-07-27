@@ -5,8 +5,11 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
+from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy.exc import IntegrityError
 
+from app.api.dependencies import get_db
 from app.core.config import Settings
 from app.core.exceptions import (
     FieldEvidenceError,
@@ -14,6 +17,7 @@ from app.core.exceptions import (
     ReviewDecisionError,
     StructuredRecordError,
 )
+from app.main import app
 from app.models import (
     DocumentChunk,
     ParsedArtifactVersion,
@@ -32,6 +36,7 @@ from app.models.enums import (
     ReviewStatus,
 )
 from app.schemas.structured import (
+    RegulationDraft,
     StructuredDraftEnvelope,
     StructuredDraftRevisionEnvelope,
 )
@@ -176,12 +181,16 @@ def test_true_source_quote_cannot_support_fabricated_field(
     data_type: str,
     field_name: str,
 ) -> None:
-    document = make_document(session, data_type, "真实原文")
+    raw_text = "正式规则 真实原文" if data_type == DataType.REGULATION.value else "真实原文"
+    document = make_document(session, data_type, raw_text)
+    field_evidence = {field_name: evidence(document, "真实原文")}
+    if data_type == DataType.REGULATION.value:
+        field_evidence["title"] = evidence(document, "正式规则")
     draft = envelope_for(
         document,
         "虚构内容",
         field_name,
-        {field_name: evidence(document, "真实原文")},
+        field_evidence,
     )
 
     with pytest.raises(StructuredRecordError, match="field_not_supported_by_evidence"):
@@ -386,7 +395,7 @@ def test_review_correction_with_valid_evidence_is_atomic(session) -> None:
 
 
 def test_one_bad_evidence_rolls_back_all_record_corrections(session) -> None:
-    text = "第一条 原文甲。第二条 原文乙。修订甲 修订乙"
+    text = "规则 第一条 原文甲。第二条 原文乙。修订甲 修订乙"
     document = make_document(
         session,
         DataType.REGULATION.value,
@@ -400,7 +409,10 @@ def test_one_bad_evidence_rolls_back_all_record_corrections(session) -> None:
         title="规则",
         article_text="原文甲。",
         source_quote="原文甲。",
-        field_evidence_json={"article_text": evidence(document, "原文甲。")},
+        field_evidence_json={
+            "title": evidence(document, "规则"),
+            "article_text": evidence(document, "原文甲。"),
+        },
         final_review_status=ReviewStatus.PENDING_REVIEW.value,
     )
     second = Regulation(
@@ -408,7 +420,10 @@ def test_one_bad_evidence_rolls_back_all_record_corrections(session) -> None:
         title="规则",
         article_text="原文乙。",
         source_quote="原文乙。",
-        field_evidence_json={"article_text": evidence(document, "原文乙。")},
+        field_evidence_json={
+            "title": evidence(document, "规则"),
+            "article_text": evidence(document, "原文乙。"),
+        },
         final_review_status=ReviewStatus.PENDING_REVIEW.value,
     )
     session.add_all([first, second])
@@ -761,7 +776,7 @@ def test_tampered_bundle_parsed_artifact_rejects_decision(session) -> None:
 
 
 def test_regulation_add_and_delete_are_audited_pre_review(session) -> None:
-    text = "第一条 新增条款"
+    text = "规则 第一条 新增条款"
     document = make_document(session, DataType.REGULATION.value, text)
     service = StructuredDraftRevisionService(settings_for(session))
     addition = StructuredDraftRevisionEnvelope.model_validate(
@@ -776,6 +791,7 @@ def test_regulation_add_and_delete_are_audited_pre_review(session) -> None:
                 "source_quote": "新增条款",
             },
             "field_evidence": {
+                "title": evidence(document, "规则"),
                 "article_number": evidence(document, "第一条"),
                 "article_text": evidence(document, "新增条款"),
             },
@@ -848,3 +864,424 @@ def test_failed_index_keeps_document_not_indexed(session) -> None:
     KnowledgeIndexService(settings_for(session)).index_approved(session)
 
     assert document.knowledge_index_status == KnowledgeIndexStatus.NOT_INDEXED.value
+
+
+def regulation_draft(
+    document: SourceDocument,
+    *,
+    title: str,
+    title_evidence: list[dict[str, object]] | None,
+    validity_status: str | None = "unknown",
+) -> StructuredDraftEnvelope:
+    payload: dict[str, list[dict[str, object]]] = {"article_text": evidence(document, "监管条款")}
+    if title_evidence is not None:
+        payload["title"] = title_evidence
+    return StructuredDraftEnvelope.model_validate(
+        {
+            "document_id": document.id,
+            "record_type": DataType.REGULATION.value,
+            "fields": {
+                "title": title,
+                "article_text": "监管条款",
+                "source_quote": "监管条款",
+                "validity_status": validity_status,
+            },
+            "field_evidence": payload,
+        }
+    )
+
+
+def penalty_draft(
+    document: SourceDocument,
+    *,
+    punished_entity: str,
+    entity_evidence: list[dict[str, object]] | None,
+) -> StructuredDraftEnvelope:
+    payload: dict[str, list[dict[str, object]]] = {"illegal_facts": evidence(document, "违法事实")}
+    if entity_evidence is not None:
+        payload["punished_entity"] = entity_evidence
+    return StructuredDraftEnvelope.model_validate(
+        {
+            "document_id": document.id,
+            "record_type": DataType.PENALTY.value,
+            "fields": {
+                "punished_entity": punished_entity,
+                "illegal_facts": "违法事实",
+                "original_sales_wording_disclosed": False,
+                "original_sales_wording": None,
+                "source_quote": "违法事实",
+            },
+            "field_evidence": payload,
+        }
+    )
+
+
+def test_fabricated_regulation_title_without_evidence_is_rejected(session) -> None:
+    document = make_document(session, DataType.REGULATION.value, "监管条款")
+
+    with pytest.raises(StructuredRecordError, match="missing_field_evidence"):
+        StructuredRecordService(settings_for(session)).import_draft(
+            session,
+            regulation_draft(
+                document,
+                title="虚构监管标题",
+                title_evidence=None,
+            ),
+        )
+
+
+def test_regulation_title_supported_by_body_evidence_is_accepted(session) -> None:
+    document = make_document(
+        session,
+        DataType.REGULATION.value,
+        "保险销售行为管理办法 监管条款",
+    )
+
+    record = StructuredRecordService(settings_for(session)).import_draft(
+        session,
+        regulation_draft(
+            document,
+            title="保险销售行为管理办法",
+            title_evidence=evidence(document, "保险销售行为管理办法"),
+        ),
+    )
+
+    assert record.title == "保险销售行为管理办法"
+    assert record.validity_status == "unknown"
+
+
+def test_regulation_title_supported_by_source_title_metadata_is_accepted(session) -> None:
+    document = make_document(
+        session,
+        DataType.REGULATION.value,
+        "保险销售行为管理办法 监管条款",
+    )
+    document.source_title = "保险销售行为管理办法"
+    session.commit()
+    metadata_evidence = evidence(document, "保险销售行为管理办法")
+    metadata_evidence[0]["mode"] = "document_metadata"
+    metadata_evidence[0]["metadata_field"] = "source_title"
+
+    record = StructuredRecordService(settings_for(session)).import_draft(
+        session,
+        regulation_draft(
+            document,
+            title="保险销售行为管理办法",
+            title_evidence=metadata_evidence,
+        ),
+    )
+
+    assert record.field_evidence_json["title"][0]["metadata_field"] == "source_title"
+
+
+def make_reviewable_regulation_record(
+    session,
+) -> tuple[SourceDocument, Regulation, ReviewService]:
+    document = make_document(
+        session,
+        DataType.REGULATION.value,
+        "旧标题 新标题 监管条款",
+        status=ReviewStatus.PENDING_REVIEW.value,
+        authenticity=AuthenticityType.VERIFIED_PUBLIC.value,
+    )
+    document.metadata_json = {"automatic_validation": {"valid": True, "issues": []}}
+    record = Regulation(
+        document_id=document.id,
+        title="旧标题",
+        validity_status="unknown",
+        article_text="监管条款",
+        source_quote="监管条款",
+        field_evidence_json={
+            "title": evidence(document, "旧标题"),
+            "article_text": evidence(document, "监管条款"),
+        },
+        final_review_status=ReviewStatus.PENDING_REVIEW.value,
+    )
+    session.add(record)
+    session.commit()
+    return document, record, ReviewService(settings_for(session))
+
+
+def test_title_correction_without_new_evidence_is_rejected(session) -> None:
+    _, record, service = make_reviewable_regulation_record(session)
+    batch, row = exported_review(session, service, DataType.REGULATION.value)
+
+    with pytest.raises(ReviewDecisionError, match="correction_evidence_required"):
+        service.apply_decision(
+            session,
+            decision(
+                batch,
+                row,
+                status=ReviewStatus.APPROVED_WITH_REVISION.value,
+                corrections={
+                    "records": [
+                        {
+                            "structured_record_id": record.id,
+                            "fields": {"title": "新标题"},
+                        }
+                    ]
+                },
+            ),
+            batch.id,
+        )
+
+
+def test_title_correction_cannot_reuse_unsupported_old_evidence(session) -> None:
+    document, record, service = make_reviewable_regulation_record(session)
+    batch, row = exported_review(session, service, DataType.REGULATION.value)
+
+    with pytest.raises(ReviewDecisionError, match="invalid_correction_value"):
+        service.apply_decision(
+            session,
+            decision(
+                batch,
+                row,
+                status=ReviewStatus.APPROVED_WITH_REVISION.value,
+                corrections={
+                    "records": [
+                        {
+                            "structured_record_id": record.id,
+                            "fields": {"title": "新标题"},
+                            "field_evidence": {"title": evidence(document, "旧标题")},
+                        }
+                    ]
+                },
+            ),
+            batch.id,
+        )
+
+
+def test_fabricated_punished_entity_without_evidence_is_rejected(session) -> None:
+    document = make_document(session, DataType.PENALTY.value, "违法事实")
+
+    with pytest.raises(StructuredRecordError, match="missing_field_evidence"):
+        StructuredRecordService(settings_for(session)).import_draft(
+            session,
+            penalty_draft(
+                document,
+                punished_entity="虚构保险公司",
+                entity_evidence=None,
+            ),
+        )
+
+
+def test_punished_entity_supported_by_body_evidence_is_accepted(session) -> None:
+    document = make_document(
+        session,
+        DataType.PENALTY.value,
+        "某某人寿保险股份有限公司 违法事实",
+    )
+
+    record = StructuredRecordService(settings_for(session)).import_draft(
+        session,
+        penalty_draft(
+            document,
+            punished_entity="某某人寿保险股份有限公司",
+            entity_evidence=evidence(document, "某某人寿保险股份有限公司"),
+        ),
+    )
+
+    assert record.punished_entity == "某某人寿保险股份有限公司"
+
+
+def test_punished_entity_correction_without_new_evidence_is_rejected(session) -> None:
+    document = make_document(
+        session,
+        DataType.PENALTY.value,
+        "旧机构 新机构 违法事实",
+        status=ReviewStatus.PENDING_REVIEW.value,
+        authenticity=AuthenticityType.VERIFIED_PUBLIC.value,
+    )
+    document.metadata_json = {"automatic_validation": {"valid": True, "issues": []}}
+    record = Penalty(
+        document_id=document.id,
+        punished_entity="旧机构",
+        illegal_facts="违法事实",
+        original_sales_wording_disclosed=False,
+        source_quote="违法事实",
+        field_evidence_json={
+            "punished_entity": evidence(document, "旧机构"),
+            "illegal_facts": evidence(document, "违法事实"),
+        },
+        final_review_status=ReviewStatus.PENDING_REVIEW.value,
+    )
+    session.add(record)
+    session.commit()
+    service = ReviewService(settings_for(session))
+    batch, row = exported_review(session, service, DataType.PENALTY.value)
+
+    with pytest.raises(ReviewDecisionError, match="correction_evidence_required"):
+        service.apply_decision(
+            session,
+            decision(
+                batch,
+                row,
+                status=ReviewStatus.APPROVED_WITH_REVISION.value,
+                corrections={
+                    "records": [
+                        {
+                            "structured_record_id": record.id,
+                            "fields": {"punished_entity": "新机构"},
+                        }
+                    ]
+                },
+            ),
+            batch.id,
+        )
+
+
+def test_arbitrary_regulation_validity_status_is_rejected_by_schema() -> None:
+    with pytest.raises(PydanticValidationError):
+        RegulationDraft(
+            title="规则",
+            article_text="条款",
+            source_quote="条款",
+            validity_status="现行有效（虚构）",
+        )
+
+
+def test_ordinary_draft_cannot_set_effective_status(session) -> None:
+    document = make_document(
+        session,
+        DataType.REGULATION.value,
+        "保险销售行为管理办法 监管条款",
+    )
+    payload = {
+        "document_id": document.id,
+        "record_type": DataType.REGULATION.value,
+        "fields": {
+            "title": "保险销售行为管理办法",
+            "article_text": "监管条款",
+            "source_quote": "监管条款",
+            "validity_status": "effective",
+        },
+        "field_evidence": {
+            "title": evidence(document, "保险销售行为管理办法"),
+            "article_text": evidence(document, "监管条款"),
+        },
+    }
+
+    with pytest.raises(StructuredRecordError):
+        StructuredRecordService(settings_for(session)).import_draft(
+            session,
+            StructuredDraftEnvelope.model_validate(payload),
+        )
+
+
+def test_ordinary_correction_cannot_set_effective_status(session) -> None:
+    _, record, service = make_reviewable_regulation_record(session)
+    batch, row = exported_review(session, service, DataType.REGULATION.value)
+
+    with pytest.raises(ReviewDecisionError, match="Unknown correction field"):
+        service.apply_decision(
+            session,
+            decision(
+                batch,
+                row,
+                status=ReviewStatus.APPROVED_WITH_REVISION.value,
+                corrections={
+                    "records": [
+                        {
+                            "structured_record_id": record.id,
+                            "fields": {"validity_status": "effective"},
+                        }
+                    ]
+                },
+            ),
+            batch.id,
+        )
+
+
+def test_unknown_regulation_validity_status_is_saved(session) -> None:
+    document = make_document(
+        session,
+        DataType.REGULATION.value,
+        "保险销售行为管理办法 监管条款",
+    )
+
+    record = StructuredRecordService(settings_for(session)).import_draft(
+        session,
+        regulation_draft(
+            document,
+            title="保险销售行为管理办法",
+            title_evidence=evidence(document, "保险销售行为管理办法"),
+        ),
+    )
+
+    assert record.validity_status == "unknown"
+
+
+def test_database_rejects_non_unknown_regulation_validity_status(session) -> None:
+    document = make_document(session, DataType.REGULATION.value, "规则 监管条款")
+    session.add(
+        Regulation(
+            document_id=document.id,
+            title="规则",
+            validity_status="effective",
+            article_text="监管条款",
+            source_quote="监管条款",
+            final_review_status=ReviewStatus.PARSED.value,
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
+def test_regulation_record_response_marks_unknown_validity_as_pending(session) -> None:
+    document = make_document(session, DataType.REGULATION.value, "规则 监管条款")
+    session.add(
+        Regulation(
+            document_id=document.id,
+            title="规则",
+            validity_status="unknown",
+            article_text="监管条款",
+            source_quote="监管条款",
+            field_evidence_json={
+                "title": evidence(document, "规则"),
+                "article_text": evidence(document, "监管条款"),
+            },
+            final_review_status=ReviewStatus.PARSED.value,
+        )
+    )
+    session.commit()
+    app.dependency_overrides[get_db] = lambda: session
+    try:
+        response = TestClient(app).get(f"/records/regulation/{document.id}")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["regulation_validity_status"] == "unknown"
+    assert response.json()["regulation_validity_display"] == "效力状态待核验"
+
+
+def test_unknown_validity_regulation_remains_eligible_for_knowledge_index(session) -> None:
+    document = make_document(
+        session,
+        DataType.REGULATION.value,
+        "规则 监管条款",
+        status=ReviewStatus.APPROVED.value,
+        authenticity=AuthenticityType.VERIFIED_PUBLIC.value,
+    )
+    document.metadata_json = {"automatic_validation": {"valid": True, "issues": []}}
+    session.add(
+        Regulation(
+            document_id=document.id,
+            title="规则",
+            validity_status="unknown",
+            article_text="监管条款",
+            source_quote="监管条款",
+            field_evidence_json={
+                "title": evidence(document, "规则"),
+                "article_text": evidence(document, "监管条款"),
+            },
+            final_review_status=ReviewStatus.APPROVED.value,
+        )
+    )
+    session.commit()
+
+    summary = KnowledgeIndexService(settings_for(session)).index_approved(session)
+
+    assert summary.indexed == 1
+    assert document.knowledge_index_status == KnowledgeIndexStatus.INDEXED.value

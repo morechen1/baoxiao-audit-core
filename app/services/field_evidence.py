@@ -3,7 +3,9 @@ from __future__ import annotations
 import re
 import unicodedata
 from datetime import date
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy.orm import Session
@@ -18,6 +20,7 @@ from app.services.parsed_artifacts import ParsedArtifactIntegrityService
 EVIDENCE_FIELDS: dict[str, frozenset[str]] = {
     DataType.REGULATION.value: frozenset(
         {
+            "title",
             "document_number",
             "issuing_authority",
             "effective_date",
@@ -28,6 +31,7 @@ EVIDENCE_FIELDS: dict[str, frozenset[str]] = {
     ),
     DataType.PENALTY.value: frozenset(
         {
+            "punished_entity",
             "authority",
             "document_number",
             "decision_date",
@@ -186,7 +190,7 @@ class FieldEvidenceService:
             raise FieldEvidenceError("field_not_supported_by_evidence")
         metadata_value: Any
         if item.metadata_field == "filename":
-            metadata_value = document.raw_file_path.rsplit("/", 1)[-1]
+            metadata_value = FieldEvidenceService._official_filename(document)
         else:
             metadata_value = getattr(document, item.metadata_field or "", None)
         if FieldEvidenceService._basic_normalize(
@@ -195,6 +199,22 @@ class FieldEvidenceService:
             FieldEvidenceService._string_value(metadata_value)
         ):
             raise FieldEvidenceError("field_not_supported_by_evidence")
+
+    @staticmethod
+    def _official_filename(document: SourceDocument) -> str | None:
+        original_filename = document.metadata_json.get("original_filename")
+        if isinstance(original_filename, str) and original_filename.strip():
+            return Path(original_filename).name
+        original_path = document.metadata_json.get("original_path")
+        if isinstance(original_path, str) and original_path.strip():
+            return Path(original_path).name
+        for value in (document.final_url, document.source_url):
+            if not value:
+                continue
+            filename = Path(urlparse(value).path).name
+            if filename:
+                return filename
+        return None
 
     @staticmethod
     def _string_value(value: Any) -> str:

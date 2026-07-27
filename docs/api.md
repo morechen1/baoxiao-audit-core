@@ -25,4 +25,8 @@
 `batch_id`、`batch_item_id`、`reviewed_payload_hash` 和 `schema_version`。真实性升级
 必须作为批准决定中的独立 `authenticity_decision` 提交。
 
+监管记录查询额外返回 `regulation_validity_status=unknown` 和
+`regulation_validity_display=效力状态待核验`。当前系统没有独立法规效力确认流程，
+因此不得把该值展示或解释为“现行有效”。
+
 本 API 当前只适用于受控环境，不包含生产级身份认证、权限系统或自动法律结论。

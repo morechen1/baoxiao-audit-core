@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_db
 from app.core.config import get_settings
-from app.models import DataSource, SourceDocument
-from app.models.enums import AuthenticityType
+from app.models import DataSource, Regulation, SourceDocument
+from app.models.enums import AuthenticityType, DataType
 from app.repositories import DocumentRepository
 from app.schemas import (
     CollectionLocalRequest,
@@ -121,7 +121,10 @@ def list_records(
     data_type: str | None = Query(default=None),
     session: Session = Depends(get_db),
 ) -> list[dict[str, object]]:
-    return [_document_dict(item) for item in DocumentRepository(session).list(status, data_type)]
+    return [
+        _document_dict(item, session)
+        for item in DocumentRepository(session).list(status, data_type)
+    ]
 
 
 @router.get("/records/{record_type}/{record_id}")
@@ -131,7 +134,7 @@ def get_record(
     document = DocumentRepository(session).get(record_id)
     if not document or document.data_type != record_type:
         raise HTTPException(status_code=404, detail="Record not found")
-    return _document_dict(document, include_text=True)
+    return _document_dict(document, session, include_text=True)
 
 
 @router.post("/knowledge/index-approved")
@@ -149,7 +152,11 @@ def _safe_data_path(path: Path, required_subdir: str | None = None) -> Path:
     return candidate
 
 
-def _document_dict(document: SourceDocument, include_text: bool = False) -> dict[str, object]:
+def _document_dict(
+    document: SourceDocument,
+    session: Session,
+    include_text: bool = False,
+) -> dict[str, object]:
     result = {
         "id": document.id,
         "data_type": document.data_type,
@@ -160,6 +167,15 @@ def _document_dict(document: SourceDocument, include_text: bool = False) -> dict
         "knowledge_index_status": document.knowledge_index_status,
         "corrected_fields": document.corrected_fields_json,
     }
+    if document.data_type == DataType.REGULATION.value:
+        statuses = {
+            regulation.validity_status or "unknown"
+            for regulation in session.query(Regulation).filter_by(document_id=document.id)
+        }
+        result["regulation_validity_status"] = (
+            next(iter(statuses)) if len(statuses) == 1 else "unknown"
+        )
+        result["regulation_validity_display"] = "效力状态待核验"
     if include_text:
         result["raw_text"] = document.raw_text
         result["metadata"] = document.metadata_json

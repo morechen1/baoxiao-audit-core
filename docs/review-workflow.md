@@ -98,6 +98,15 @@ ISO 日期会转换为日期对象；任一字段或证据非法时返回领域�
 正式草稿缺少证据返回 `missing_field_evidence`。常见拒绝码还包括
 `evidence_offset_mismatch`、`evidence_page_mismatch`、
 `field_not_supported_by_evidence` 和 `summary_evidence_requires_expert_review`。
+监管记录的 `title` 与处罚记录的非空 `punished_entity` 也必须提供字段证据。标题可以
+使用正文 `verbatim`，或绑定 `source_title`/正式 `filename` 的
+`document_metadata`；处罚对象只接受正文 `verbatim` 或可重放的 `normalized`。
+修改这两个字段时，corrections 必须同步提交同名新证据，旧证据不能支持新值时整体回滚。
+
+法规效力采用严格最小方案：`validity_status` 只允许 `NULL` 或 `unknown`，省略时默认为
+`unknown`。普通草稿、预审修订和 `approved_with_revision` 均不能设置 `effective`、
+`expired`、`repealed`、`superseded` 或 `pending_effective`。在后续建立独立效力确认
+流程前，记录查询统一返回 `regulation_validity_display = "效力状态待核验"`。
 
 `auto_validation_failed` 的草稿通过专用入口修正，字段与证据共同留痕：
 

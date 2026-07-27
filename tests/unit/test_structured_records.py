@@ -188,6 +188,15 @@ def regulation_envelope(document: SourceDocument) -> StructuredDraftEnvelope:
             "source_quote": "演示规则内容",
         },
         field_evidence={
+            "title": [
+                {
+                    "quote": "演示规则",
+                    "page_number": 1,
+                    "start_offset": 4,
+                    "end_offset": 8,
+                    "mode": "verbatim",
+                }
+            ],
             "article_text": [
                 {
                     "quote": "第一条 演示规则内容",
@@ -196,7 +205,7 @@ def regulation_envelope(document: SourceDocument) -> StructuredDraftEnvelope:
                     "end_offset": 10,
                     "mode": "verbatim",
                 }
-            ]
+            ],
         },
     )
 

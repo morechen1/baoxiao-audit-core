@@ -367,7 +367,7 @@ def seed() -> None:
                     title="演示监管规则",
                     article_text="本演示规则不具有法律效力",
                     source_quote="本演示规则不具有法律效力",
-                    validity_status="demo_only",
+                    validity_status="unknown",
                     final_review_status=ReviewStatus.PARSED.value,
                 )
             )

@@ -434,7 +434,9 @@ def test_non_revision_decisions_cannot_have_corrections(
 
 
 def setup_regulation(session, *, suffix: str = "r"):
-    raw_text = "第一条 原文甲。第二条 原文乙。修订甲 第二条（修订） 本应回滚 生效日期：2026-01-01"
+    raw_text = (
+        "规则 第一条 原文甲。第二条 原文乙。修订甲 第二条（修订） 本应回滚 生效日期：2026-01-01"
+    )
     document = SourceDocument(
         data_type=DataType.REGULATION.value,
         source_url=f"https://example.test/rule/{suffix}",

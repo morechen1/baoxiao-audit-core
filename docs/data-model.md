@@ -33,6 +33,10 @@
 每个父文档唯一；监管规则允许多个条款记录。评测样本类别、split、非空文本和
 `constructed_for_evaluation` 真实性由数据库约束。
 
+监管标题及处罚对象属于强制证据字段。法规效力尚未建立独立确认关系，因此
+`regulations.validity_status` 由数据库约束为 `NULL/unknown`，应用默认 `unknown`；
+普通结构化导入和审核修订不能声明“现行有效”、废止、失效或被替代。
+
 真实性值为 `verified_public`、`constructed_for_evaluation`、`demo_only`、
 `pending_verification`。审核状态集合见 `app/models/enums.py`。
 

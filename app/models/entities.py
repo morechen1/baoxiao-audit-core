@@ -189,6 +189,10 @@ class Regulation(Base):
             f"final_review_status IN ({sql_values(REVIEW_STATUS_VALUES)})",
             name="ck_regulations_review_status",
         ),
+        CheckConstraint(
+            "validity_status IS NULL OR validity_status = 'unknown'",
+            name="ck_regulations_validity_status",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -200,7 +204,11 @@ class Regulation(Base):
     issuing_authority: Mapped[str | None] = mapped_column(String(255))
     effective_date: Mapped[date | None] = mapped_column(Date)
     expiry_date: Mapped[date | None] = mapped_column(Date)
-    validity_status: Mapped[str | None] = mapped_column(String(50))
+    validity_status: Mapped[str | None] = mapped_column(
+        String(50),
+        default="unknown",
+        server_default="unknown",
+    )
     article_number: Mapped[str | None] = mapped_column(String(100))
     article_text: Mapped[str] = mapped_column(Text)
     source_quote: Mapped[str] = mapped_column(Text)
