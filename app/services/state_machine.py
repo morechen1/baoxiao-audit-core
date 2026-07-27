@@ -36,9 +36,7 @@ ALLOWED_DOCUMENT_TRANSITIONS: dict[str, frozenset[str]] = {
             ReviewStatus.REQUIRES_EXPERT_REVIEW.value,
         }
     ),
-    ReviewStatus.AUTO_VALIDATION_FAILED.value: frozenset(
-        {ReviewStatus.PARSED.value}
-    ),
+    ReviewStatus.AUTO_VALIDATION_FAILED.value: frozenset({ReviewStatus.PARSED.value}),
 }
 
 

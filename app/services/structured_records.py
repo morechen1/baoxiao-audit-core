@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import StructuredRecordError
 from app.models import Penalty, ProductDocument, Regulation, SourceDocument
-from app.models.enums import DataType
+from app.models.enums import DataType, ReviewStatus
 from app.schemas.structured import (
     PenaltyDraft,
     ProductDocumentDraft,
