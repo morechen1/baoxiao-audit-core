@@ -1,2 +1,31 @@
-# 初始用途为 external_test_candidate；独立建模且不会写入行政处罚表。
-sources: []
+sources:
+  - source_key: nfra_regulatory_cases_v1
+    name: 国家金融监督管理总局消费者教育及风险提示
+    publisher: 国家金融监督管理总局及派出机构
+    base_url: https://www.nfra.gov.cn
+    source_type: regulatory_case
+    allowed_domains:
+      - www.nfra.gov.cn
+    enabled: true
+    confirmed_by: project_planner
+    crawl_policy:
+      rate_limit_seconds: 3
+      max_documents: 5
+      allow_subdomains: false
+    robots_review:
+      status: not_published_manual_review
+      checked_at: "2026-07-27"
+      checked_by: project_planner
+      reference_url: https://www.nfra.gov.cn/robots.txt
+      notes: 仅访问5个已确认的风险提示或案例页面
+    terms_review:
+      status: public_access_allowed
+      checked_at: "2026-07-27"
+      checked_by: project_planner
+      reference_url: https://www.nfra.gov.cn/cn/view/pages/index/falvshengming.html
+      notes: 仅用于真实案例评测候选，不修改或补写案例事实
+    approval:
+      approved_by: project_planner
+      approved_at: "2026-07-27T14:00:00+08:00"
+      approval_reference: pilot-first-batch-v1-regulatory-cases
+    notes: 首批真实公开数据试采集V1，案例用途固定为external_test_candidate

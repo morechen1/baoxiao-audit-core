@@ -1,2 +1,31 @@
-# 项目规划者需同时确认发布主体、栏目和明确文件 URL。
-sources: []
+sources:
+  - source_key: cpic_product_documents_v1
+    name: 中国太平洋人寿互联网保险产品公开信息
+    publisher: 中国太平洋人寿保险股份有限公司
+    base_url: https://life.cpic.com.cn
+    source_type: product_document
+    allowed_domains:
+      - life.cpic.com.cn
+    enabled: true
+    confirmed_by: project_planner
+    crawl_policy:
+      rate_limit_seconds: 3
+      max_documents: 2
+      allow_subdomains: false
+    robots_review:
+      status: not_published_manual_review
+      checked_at: "2026-07-27"
+      checked_by: project_planner
+      reference_url: https://life.cpic.com.cn/robots.txt
+      notes: 仅下载2份官方公开产品条款PDF
+    terms_review:
+      status: not_published_manual_review
+      checked_at: "2026-07-27"
+      checked_by: project_planner
+      reference_url: https://life.cpic.com.cn/xrsbx/
+      notes: 官方公开信息披露资料，仅用于条款核验并保留出处
+    approval:
+      approved_by: project_planner
+      approved_at: "2026-07-27T14:00:00+08:00"
+      approval_reference: pilot-first-batch-v1-products
+    notes: 首批真实公开数据试采集V1，仅下载已批准的2份官方产品条款PDF
