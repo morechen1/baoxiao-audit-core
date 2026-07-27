@@ -26,6 +26,8 @@ from app.services.collection import FileCollector, LocalDirectoryCollector, WebP
 from app.services.knowledge import KnowledgeIndexService
 from app.services.parsing import ParsingService
 from app.services.review import ReviewService
+from app.services.state_machine import StateMachineService
+from app.services.structured_records import StructuredRecordService
 from app.services.validation import ValidationService
 
 app = typer.Typer(help="保销智审后端数据与审核工作流 CLI", no_args_is_help=True)
@@ -172,8 +174,41 @@ def list_records(
 def index_approved() -> None:
     """Mark eligible human-approved records as indexed."""
     with SessionLocal() as session:
-        count = KnowledgeIndexService().index_approved(session)
-    typer.echo(f"indexed={count}")
+        summary = KnowledgeIndexService().index_approved(session)
+    typer.echo(f"indexed={summary.indexed} rejected={len(summary.rejected)}")
+    for document_id, reasons in summary.rejected.items():
+        typer.echo(f"document_id={document_id} rejected={','.join(reasons)}")
+
+
+@app.command("import-structured-drafts")
+def import_structured_drafts(
+    file: Path = typer.Option(..., exists=True, dir_okay=False, help="JSONL 结构化草稿"),
+) -> None:
+    """Import validated structured drafts for parsed documents."""
+    with SessionLocal() as session:
+        imported, errors = StructuredRecordService().import_jsonl(session, file)
+    typer.echo(f"imported={imported} failed={len(errors)}")
+    for error in errors:
+        typer.echo(error, err=True)
+
+
+@app.command("repair-status-consistency")
+def repair_status_consistency(
+    dry_run: bool = typer.Option(False, "--dry-run", help="仅报告，不修改（默认）"),
+    apply_changes: bool = typer.Option(False, "--apply", help="应用结构化状态修复"),
+) -> None:
+    """Report or repair structured-record status mismatches."""
+    if dry_run and apply_changes:
+        raise typer.BadParameter("--dry-run and --apply are mutually exclusive")
+    with SessionLocal() as session:
+        repairs = StateMachineService.repair_consistency(session, apply=apply_changes)
+    mode = "apply" if apply_changes else "dry-run"
+    typer.echo(f"mode={mode} mismatches={len(repairs)}")
+    for repair in repairs:
+        typer.echo(
+            f"document_id={repair['document_id']} record_type={repair['record_type']} "
+            f"record_id={repair['record_id']} {repair['from_status']}->{repair['to_status']}"
+        )
 
 
 @app.command("health-check")
