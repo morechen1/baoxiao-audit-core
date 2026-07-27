@@ -55,6 +55,8 @@ jobs:
           uv run alembic upgrade head
           uv run alembic downgrade base
           uv run alembic upgrade head
+      - name: Alembic schema drift check
+        run: uv run alembic check
       - name: Build runtime image
         run: docker build --target runtime -t baoxiao-audit-core:ci .
       - name: Build and run test image

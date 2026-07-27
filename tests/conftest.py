@@ -10,7 +10,7 @@ from app.models.entities import Base
 
 
 @pytest.fixture
-def session() -> Generator[Session, None, None]:
+def session(tmp_path: Path) -> Generator[Session, None, None]:
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -25,6 +25,7 @@ def session() -> Generator[Session, None, None]:
 
     Base.metadata.create_all(engine)
     with Session(engine, expire_on_commit=False) as value:
+        value.info["data_dir"] = tmp_path / "data"
         yield value
     Base.metadata.drop_all(engine)
 

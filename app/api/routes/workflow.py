@@ -73,8 +73,8 @@ def collect_local(
 
 @router.post("/parsing/run")
 def parse_pending(session: Session = Depends(get_db)) -> dict[str, object]:
-    parsed, errors = ParsingService().parse_pending(session)
-    return {"parsed": parsed, "errors": errors}
+    parsed, requires_ocr, errors = ParsingService().parse_pending(session)
+    return {"parsed": parsed, "requires_ocr": requires_ocr, "errors": errors}
 
 
 @router.post("/validation/run")

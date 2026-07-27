@@ -28,3 +28,11 @@ class ReviewDecisionError(BaoxiaoError):
 
 class UnsafeUrlError(BaoxiaoError):
     """Raised when a URL can reach a prohibited network target."""
+
+
+class RawArtifactIntegrityError(BaoxiaoError):
+    """Raised when an immutable stored source artifact cannot be verified."""
+
+
+class CollectionError(BaoxiaoError):
+    """Raised when collected content violates provenance or type constraints."""

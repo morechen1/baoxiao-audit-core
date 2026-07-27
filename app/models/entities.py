@@ -20,6 +20,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.models.enums import (
     AUTHENTICITY_TYPE_VALUES,
+    DOCUMENT_DATA_TYPE_VALUES,
     HUMAN_REVIEW_STATUS_VALUES,
     KNOWLEDGE_INDEX_STATUS_VALUES,
     REVIEW_STATUS_VALUES,
@@ -52,6 +53,12 @@ class TimestampMixin:
 
 class DataSource(TimestampMixin, Base):
     __tablename__ = "data_sources"
+    __table_args__ = (
+        CheckConstraint(
+            f"source_type IN ({sql_values(DOCUMENT_DATA_TYPE_VALUES)})",
+            name="ck_data_sources_document_type",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
@@ -67,6 +74,10 @@ class DataSource(TimestampMixin, Base):
 class SourceDocument(TimestampMixin, Base):
     __tablename__ = "source_documents"
     __table_args__ = (
+        CheckConstraint(
+            f"data_type IN ({sql_values(DOCUMENT_DATA_TYPE_VALUES)})",
+            name="ck_source_documents_data_type",
+        ),
         CheckConstraint(
             f"authenticity_type IN ({sql_values(AUTHENTICITY_TYPE_VALUES)})",
             name="ck_source_documents_authenticity",
@@ -289,6 +300,14 @@ class ReviewBatch(Base):
             "export_sha256 IS NULL OR length(export_sha256) = 64",
             name="ck_review_batches_export_sha256",
         ),
+        CheckConstraint(
+            "bundle_sha256 IS NULL OR length(bundle_sha256) = 64",
+            name="ck_review_batches_bundle_sha256",
+        ),
+        CheckConstraint(
+            "bundle_manifest_sha256 IS NULL OR length(bundle_manifest_sha256) = 64",
+            name="ck_review_batches_bundle_manifest_sha256",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -301,6 +320,9 @@ class ReviewBatch(Base):
     status: Mapped[str] = mapped_column(String(50), default="exported")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    bundle_path: Mapped[str | None] = mapped_column(String(2048))
+    bundle_sha256: Mapped[str | None] = mapped_column(String(64))
+    bundle_manifest_sha256: Mapped[str | None] = mapped_column(String(64))
 
 
 class ReviewDecision(Base):
@@ -431,6 +453,12 @@ class AuthenticityDecisionLog(Base):
     reviewer: Mapped[str] = mapped_column(String(255))
     review_decision_id: Mapped[int] = mapped_column(
         ForeignKey("review_decisions.id", ondelete="RESTRICT"), unique=True
+    )
+    source_id: Mapped[int] = mapped_column(
+        ForeignKey("data_sources.id", ondelete="RESTRICT"), index=True
+    )
+    verified_occurrence_id: Mapped[int] = mapped_column(
+        ForeignKey("document_occurrences.id", ondelete="RESTRICT"), unique=True
     )
     reason: Mapped[str] = mapped_column(Text)
     changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

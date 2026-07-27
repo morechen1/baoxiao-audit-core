@@ -3,7 +3,11 @@ from pathlib import Path
 import fitz
 from docx import Document
 
-from app.services.parsing import DocxParser, HtmlParser, PdfParser
+from app.core.config import Settings
+from app.models.enums import DataType, ReviewStatus
+from app.services.collection import FileCollector
+from app.services.parsing import DocxParser, HtmlParser, ParsingService, PdfParser
+from app.services.review import ReviewService
 
 
 def test_pdf_parser_preserves_page_numbers(tmp_path: Path) -> None:
@@ -44,3 +48,55 @@ def test_html_parser_removes_navigation_and_scripts(sample_html: Path) -> None:
     assert "仅用于测试" in result.plain_text
     assert "无关导航" not in result.plain_text
     assert "danger" not in result.plain_text
+
+
+def scanned_pdf(path: Path) -> None:
+    pdf = fitz.open()
+    page = pdf.new_page()
+    pixmap = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 32, 32), False)
+    pixmap.clear_with(180)
+    page.insert_image(page.rect, stream=pixmap.tobytes("png"))
+    pdf.save(path)
+    pdf.close()
+
+
+def test_scanned_pdf_is_quarantined_for_ocr(session, tmp_path: Path) -> None:
+    path = tmp_path / "scanned.pdf"
+    scanned_pdf(path)
+    settings = Settings(database_url="sqlite://", data_dir=tmp_path / "data")
+    collector = FileCollector(settings)
+    document, _ = collector.persist(
+        session,
+        collector.collect(path),
+        DataType.REGULATION.value,
+    )
+
+    parsed = ParsingService(settings).parse_document(session, document)
+
+    assert parsed.metadata["requires_ocr"] is True
+    assert parsed.warnings == ["suspected_scanned_pdf"]
+    assert document.parse_status == "requires_ocr"
+    assert document.raw_text is None
+    assert document.final_review_status == ReviewStatus.COLLECTED.value
+    assert document.chunks == []
+
+
+def test_scanned_pdf_does_not_enter_review_batch(session, tmp_path: Path) -> None:
+    path = tmp_path / "scanned-review.pdf"
+    scanned_pdf(path)
+    settings = Settings(database_url="sqlite://", data_dir=tmp_path / "data")
+    collector = FileCollector(settings)
+    document, _ = collector.persist(
+        session,
+        collector.collect(path),
+        DataType.REGULATION.value,
+    )
+    ParsingService(settings).parse_document(session, document)
+
+    batch = ReviewService(settings).export_batch(
+        session,
+        DataType.REGULATION.value,
+        "jsonl",
+    )
+
+    assert batch.record_count == 0

@@ -30,6 +30,19 @@ class StructuredRecordCorrections(StrictReviewModel):
         return records
 
 
+class AuthenticityDecisionInput(StrictReviewModel):
+    new_type: Literal[AuthenticityType.VERIFIED_PUBLIC]
+    verified_occurrence_id: int = Field(gt=0)
+    reason: str = Field(min_length=1)
+
+    @field_validator("reason")
+    @classmethod
+    def reason_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("reason must not be blank")
+        return value.strip()
+
+
 class EvaluationSampleRevision(StrictReviewModel):
     sample_text: str = Field(min_length=1)
     sample_category: SampleCategory

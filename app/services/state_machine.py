@@ -14,7 +14,7 @@ from app.models import (
     SourceDocument,
     StatusHistory,
 )
-from app.models.enums import DataType, ReviewStatus
+from app.models.enums import HUMAN_REVIEW_STATUS_VALUES, DataType, ReviewStatus
 
 ALLOWED_DOCUMENT_TRANSITIONS: dict[str, frozenset[str]] = {
     ReviewStatus.COLLECTED.value: frozenset({ReviewStatus.PARSED.value}),
@@ -37,6 +37,8 @@ ALLOWED_DOCUMENT_TRANSITIONS: dict[str, frozenset[str]] = {
         }
     ),
     ReviewStatus.AUTO_VALIDATION_FAILED.value: frozenset({ReviewStatus.PARSED.value}),
+    ReviewStatus.PENDING_SOURCE_VERIFICATION.value: frozenset({ReviewStatus.PARSED.value}),
+    ReviewStatus.REQUIRES_EXPERT_REVIEW.value: frozenset({ReviewStatus.PARSED.value}),
 }
 
 
@@ -109,6 +111,28 @@ class StateMachineService:
         return list(session.scalars(select(model).where(model.document_id == document.id)))
 
     @classmethod
+    def resubmit_document(
+        cls,
+        session: Session,
+        document: SourceDocument,
+        reason: str,
+    ) -> None:
+        if document.final_review_status not in {
+            ReviewStatus.PENDING_SOURCE_VERIFICATION.value,
+            ReviewStatus.REQUIRES_EXPERT_REVIEW.value,
+        }:
+            raise InvalidStateTransition("record_not_resubmittable")
+        if not reason.strip():
+            raise InvalidStateTransition("resubmission_reason_required")
+        cls.transition_document(
+            session,
+            document,
+            ReviewStatus.PARSED.value,
+            f"resubmitted for review: {reason.strip()}",
+        )
+        session.commit()
+
+    @classmethod
     def repair_consistency(cls, session: Session, *, apply: bool = False) -> list[dict[str, Any]]:
         repairs: list[dict[str, Any]] = []
         for document in session.scalars(select(SourceDocument).order_by(SourceDocument.id)):
@@ -124,7 +148,7 @@ class StateMachineService:
                         "to_status": document.final_review_status,
                     }
                 )
-                if apply:
+                if apply and document.final_review_status not in HUMAN_REVIEW_STATUS_VALUES:
                     record.final_review_status = document.final_review_status
         if apply:
             session.commit()

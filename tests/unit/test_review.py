@@ -1,13 +1,17 @@
+import hashlib
 import json
+import zipfile
+from datetime import date
 from pathlib import Path
 
 import pytest
 
 from app.core.config import Settings
-from app.core.exceptions import ReviewDecisionError
+from app.core.exceptions import RawArtifactIntegrityError, ReviewDecisionError
 from app.models import (
     AuthenticityDecisionLog,
     DataSource,
+    DocumentOccurrence,
     EvaluationSample,
     Penalty,
     ProductDocument,
@@ -86,7 +90,18 @@ def setup_penalty(session):
 
 
 def export_one(session, tmp_path: Path, data_type: str):
-    service = ReviewService(Settings(database_url="sqlite://", data_dir=tmp_path))
+    data_dir = session.info["data_dir"]
+    raw_dir = data_dir / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    for document in session.query(SourceDocument).filter_by(data_type=data_type):
+        content = f"{document.raw_text or ''}\nartifact-id={document.id}".encode()
+        digest = hashlib.sha256(content).hexdigest()
+        path = raw_dir / f"{digest}.txt"
+        path.write_bytes(content)
+        document.sha256 = digest
+        document.raw_file_path = str(path)
+    session.commit()
+    service = ReviewService(Settings(database_url="sqlite://", data_dir=data_dir))
     batch = service.export_batch(session, data_type, "jsonl")
     row = json.loads(Path(batch.export_path).read_text(encoding="utf-8").splitlines()[0])
     return service, batch, row
@@ -244,7 +259,7 @@ def test_failed_post_correction_validation_rolls_back(session, tmp_path: Path) -
     document, product = setup_product(session)
     service, batch, row = export_one(session, tmp_path, DataType.PRODUCT_DOCUMENT.value)
 
-    with pytest.raises(ReviewDecisionError, match="failed deterministic"):
+    with pytest.raises(ReviewDecisionError, match="invalid_correction_value"):
         service.apply_decision(
             session,
             decision_payload(
@@ -441,7 +456,7 @@ def test_multiple_regulation_revisions_roll_back_together(session, tmp_path: Pat
     _, first, second = setup_regulation(session)
     service, batch, row = export_one(session, tmp_path, DataType.REGULATION.value)
 
-    with pytest.raises(ReviewDecisionError, match="failed deterministic"):
+    with pytest.raises(ReviewDecisionError, match="invalid_correction_value"):
         service.apply_decision(
             session,
             decision_payload(
@@ -579,6 +594,16 @@ def setup_pending_public_product(session):
         final_review_status=ReviewStatus.PENDING_REVIEW.value,
     )
     session.add(product)
+    session.add(
+        DocumentOccurrence(
+            document_id=document.id,
+            source_id=source.id,
+            source_url=document.source_url,
+            final_url=document.final_url,
+            publisher="登记来源",
+            response_metadata={},
+        )
+    )
     session.commit()
     return document
 
@@ -587,7 +612,11 @@ def test_approved_review_can_audit_verified_public_authenticity(session, tmp_pat
     document = setup_pending_public_product(session)
     service, batch, row = export_one(session, tmp_path, DataType.PRODUCT_DOCUMENT.value)
     payload = decision_payload(row)
-    payload["authenticity_decision"] = AuthenticityType.VERIFIED_PUBLIC.value
+    payload["authenticity_decision"] = {
+        "new_type": AuthenticityType.VERIFIED_PUBLIC.value,
+        "verified_occurrence_id": row["source_occurrences"][0]["occurrence_id"],
+        "reason": "已核对官方网站、文件原文及发布机构",
+    }
     decision = service.apply_decision(session, payload, batch.id)
 
     assert document.authenticity_type == AuthenticityType.VERIFIED_PUBLIC.value
@@ -601,7 +630,11 @@ def test_rejected_review_cannot_upgrade_authenticity(session, tmp_path: Path) ->
     document = setup_pending_public_product(session)
     service, batch, row = export_one(session, tmp_path, DataType.PRODUCT_DOCUMENT.value)
     payload = decision_payload(row, status=ReviewStatus.REJECTED.value)
-    payload["authenticity_decision"] = AuthenticityType.VERIFIED_PUBLIC.value
+    payload["authenticity_decision"] = {
+        "new_type": AuthenticityType.VERIFIED_PUBLIC.value,
+        "verified_occurrence_id": row["source_occurrences"][0]["occurrence_id"],
+        "reason": "拒绝决定不得升级",
+    }
 
     with pytest.raises(ReviewDecisionError, match="Only approved"):
         service.apply_decision(session, payload, batch.id)
@@ -613,9 +646,15 @@ def test_pending_authenticity_cannot_index_until_human_verification(
 ) -> None:
     document = setup_pending_public_product(session)
     service, batch, row = export_one(session, tmp_path, DataType.PRODUCT_DOCUMENT.value)
-    service.apply_decision(session, decision_payload(row), batch.id)
+    service.apply_decision(
+        session,
+        decision_payload(row, status=ReviewStatus.PENDING_SOURCE_VERIFICATION.value),
+        batch.id,
+    )
 
-    first = KnowledgeIndexService().index_approved(session)
+    first = KnowledgeIndexService(Settings(data_dir=session.info["data_dir"])).index_approved(
+        session
+    )
     assert "authenticity_not_verified_public" in first.rejected[document.id]
 
 
@@ -623,10 +662,16 @@ def test_human_verified_approved_document_can_index(session, tmp_path: Path) -> 
     document = setup_pending_public_product(session)
     service, batch, row = export_one(session, tmp_path, DataType.PRODUCT_DOCUMENT.value)
     payload = decision_payload(row)
-    payload["authenticity_decision"] = AuthenticityType.VERIFIED_PUBLIC.value
+    payload["authenticity_decision"] = {
+        "new_type": AuthenticityType.VERIFIED_PUBLIC.value,
+        "verified_occurrence_id": row["source_occurrences"][0]["occurrence_id"],
+        "reason": "已核对官方网站、文件原文及发布机构",
+    }
     service.apply_decision(session, payload, batch.id)
 
-    summary = KnowledgeIndexService().index_approved(session)
+    summary = KnowledgeIndexService(Settings(data_dir=session.info["data_dir"])).index_approved(
+        session
+    )
     assert summary.indexed == 1
     assert document.id not in summary.rejected
 
@@ -642,3 +687,246 @@ def test_result_template_contains_review_binding_fields(session, tmp_path: Path)
     assert template["batch_item_id"] == row["batch_item_id"]
     assert template["reviewed_payload_hash"] == payload_hash(row)
     assert template["schema_version"] == batch.schema_version
+
+
+def test_modified_raw_artifact_cannot_be_exported(session, tmp_path: Path) -> None:
+    document, _ = setup_product(session)
+    service, _, _ = export_one(session, tmp_path, DataType.PRODUCT_DOCUMENT.value)
+    Path(document.raw_file_path).write_text("tampered", encoding="utf-8")
+
+    with pytest.raises(RawArtifactIntegrityError, match="raw_file_hash_mismatch"):
+        service.export_batch(session, DataType.PRODUCT_DOCUMENT.value, "jsonl")
+
+
+def test_modified_raw_artifact_cannot_be_approved(session, tmp_path: Path) -> None:
+    document, _ = setup_product(session)
+    service, batch, row = export_one(session, tmp_path, DataType.PRODUCT_DOCUMENT.value)
+    Path(document.raw_file_path).write_text("tampered", encoding="utf-8")
+
+    with pytest.raises(RawArtifactIntegrityError, match="raw_file_hash_mismatch"):
+        service.apply_decision(session, decision_payload(row), batch.id)
+    assert document.final_review_status == ReviewStatus.PENDING_REVIEW.value
+
+
+def test_deleted_raw_artifact_cannot_be_approved(session, tmp_path: Path) -> None:
+    document, _ = setup_product(session)
+    service, batch, row = export_one(session, tmp_path, DataType.PRODUCT_DOCUMENT.value)
+    Path(document.raw_file_path).unlink()
+
+    with pytest.raises(RawArtifactIntegrityError, match="raw_file_missing"):
+        service.apply_decision(session, decision_payload(row), batch.id)
+    assert document.final_review_status == ReviewStatus.PENDING_REVIEW.value
+
+
+def test_modified_raw_artifact_cannot_be_indexed(session, tmp_path: Path) -> None:
+    document, _ = setup_product(session)
+    service, batch, row = export_one(session, tmp_path, DataType.PRODUCT_DOCUMENT.value)
+    service.apply_decision(session, decision_payload(row), batch.id)
+    Path(document.raw_file_path).write_text("tampered", encoding="utf-8")
+
+    summary = KnowledgeIndexService(Settings(data_dir=session.info["data_dir"])).index_approved(
+        session
+    )
+
+    assert summary.indexed == 0
+    assert "raw_file_hash_mismatch" in summary.rejected[document.id]
+
+
+def test_pending_authenticity_cannot_be_approved_without_decision(session, tmp_path: Path) -> None:
+    document = setup_pending_public_product(session)
+    service, batch, row = export_one(session, tmp_path, DataType.PRODUCT_DOCUMENT.value)
+
+    with pytest.raises(
+        ReviewDecisionError,
+        match="pending_verification approval requires authenticity_decision",
+    ):
+        service.apply_decision(session, decision_payload(row), batch.id)
+    assert document.final_review_status == ReviewStatus.PENDING_REVIEW.value
+
+
+def test_numeric_product_name_correction_is_rejected(session, tmp_path: Path) -> None:
+    _, product = setup_product(session)
+    service, batch, row = export_one(session, tmp_path, DataType.PRODUCT_DOCUMENT.value)
+
+    with pytest.raises(ReviewDecisionError, match="invalid_correction_value"):
+        service.apply_decision(
+            session,
+            decision_payload(
+                row,
+                status=ReviewStatus.APPROVED_WITH_REVISION.value,
+                corrections={
+                    "records": [
+                        {
+                            "structured_record_id": product.id,
+                            "fields": {"product_name": 123},
+                        }
+                    ]
+                },
+            ),
+            batch.id,
+        )
+    assert product.product_name == "演示产品"
+
+
+def test_non_boolean_penalty_correction_is_rejected(session, tmp_path: Path) -> None:
+    _, penalty = setup_penalty(session)
+    service, batch, row = export_one(session, tmp_path, DataType.PENALTY.value)
+
+    with pytest.raises(ReviewDecisionError, match="invalid_correction_value"):
+        service.apply_decision(
+            session,
+            decision_payload(
+                row,
+                status=ReviewStatus.APPROVED_WITH_REVISION.value,
+                corrections={
+                    "records": [
+                        {
+                            "structured_record_id": penalty.id,
+                            "fields": {"original_sales_wording_disclosed": "yes"},
+                        }
+                    ]
+                },
+            ),
+            batch.id,
+        )
+    assert penalty.original_sales_wording_disclosed is False
+
+
+def test_iso_date_correction_is_saved_as_date(session, tmp_path: Path) -> None:
+    _, regulation, _ = setup_regulation(session)
+    service, batch, row = export_one(session, tmp_path, DataType.REGULATION.value)
+
+    service.apply_decision(
+        session,
+        decision_payload(
+            row,
+            status=ReviewStatus.APPROVED_WITH_REVISION.value,
+            corrections={
+                "records": [
+                    {
+                        "structured_record_id": regulation.id,
+                        "fields": {"effective_date": "2026-01-01"},
+                    }
+                ]
+            },
+        ),
+        batch.id,
+    )
+
+    assert regulation.effective_date == date(2026, 1, 1)
+    assert isinstance(regulation.effective_date, date)
+
+
+def test_invalid_date_correction_is_domain_error_and_rolls_back(session, tmp_path: Path) -> None:
+    document, penalty = setup_penalty(session)
+    service, batch, row = export_one(session, tmp_path, DataType.PENALTY.value)
+
+    with pytest.raises(ReviewDecisionError, match="invalid_correction_value"):
+        service.apply_decision(
+            session,
+            decision_payload(
+                row,
+                status=ReviewStatus.APPROVED_WITH_REVISION.value,
+                corrections={
+                    "records": [
+                        {
+                            "structured_record_id": penalty.id,
+                            "fields": {"decision_date": "不是日期"},
+                        }
+                    ]
+                },
+            ),
+            batch.id,
+        )
+    assert penalty.decision_date is None
+    assert document.final_review_status == ReviewStatus.PENDING_REVIEW.value
+
+
+def test_review_batch_contains_all_source_occurrences(session, tmp_path: Path) -> None:
+    document = setup_pending_public_product(session)
+    source = session.get(DataSource, document.source_id)
+    session.add(
+        DocumentOccurrence(
+            document_id=document.id,
+            source_id=source.id,
+            source_url="https://source.test/product-mirror",
+            final_url="https://cdn.source.test/product-mirror",
+            publisher="镜像发布机构",
+            response_metadata={"mirror": True},
+        )
+    )
+    session.commit()
+
+    _, _, row = export_one(session, tmp_path, DataType.PRODUCT_DOCUMENT.value)
+
+    assert len(row["source_occurrences"]) == 2
+    assert {item["publisher"] for item in row["source_occurrences"]} == {
+        "登记来源",
+        "镜像发布机构",
+    }
+
+
+def test_authenticity_log_binds_verified_occurrence_and_source(session, tmp_path: Path) -> None:
+    document = setup_pending_public_product(session)
+    service, batch, row = export_one(session, tmp_path, DataType.PRODUCT_DOCUMENT.value)
+    occurrence = row["source_occurrences"][0]
+    payload = decision_payload(row)
+    payload["authenticity_decision"] = {
+        "new_type": AuthenticityType.VERIFIED_PUBLIC.value,
+        "verified_occurrence_id": occurrence["occurrence_id"],
+        "reason": "已核对官方网站、文件原文及发布机构",
+    }
+
+    service.apply_decision(session, payload, batch.id)
+
+    log = session.query(AuthenticityDecisionLog).one()
+    assert log.document_id == document.id
+    assert log.source_id == occurrence["source_id"]
+    assert log.verified_occurrence_id == occurrence["occurrence_id"]
+    assert log.reason == "已核对官方网站、文件原文及发布机构"
+
+
+def test_portable_review_bundle_contains_source_and_relative_paths(session, tmp_path: Path) -> None:
+    document, _ = setup_product(session)
+    service, _, _ = export_one(session, tmp_path, DataType.PRODUCT_DOCUMENT.value)
+
+    batch, bundle_path = service.export_bundle(session, DataType.PRODUCT_DOCUMENT.value)
+
+    with zipfile.ZipFile(bundle_path) as bundle:
+        names = set(bundle.namelist())
+        manifest = json.loads(bundle.read("manifest.json"))
+        review = json.loads(bundle.read("review.jsonl"))
+        source_name = f"sources/{document.sha256}.txt"
+        assert {
+            "manifest.json",
+            "review.jsonl",
+            "review-results-template.jsonl",
+            source_name,
+        } <= names
+        assert review["raw_file_path"] == source_name
+        assert not review["raw_file_path"].startswith("/")
+        assert hashlib.sha256(bundle.read(source_name)).hexdigest() == document.sha256
+        assert manifest["items"][0]["payload_hash"] == payload_hash(review)
+        assert manifest["package_sha256"]
+    assert batch.bundle_sha256 == hashlib.sha256(bundle_path.read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize(
+    "member_name",
+    ["manifest.json", "review.jsonl", "source"],
+)
+def test_tampered_bundle_member_rejects_decision(session, tmp_path: Path, member_name: str) -> None:
+    setup_product(session)
+    service, _, _ = export_one(session, tmp_path, DataType.PRODUCT_DOCUMENT.value)
+    batch, bundle_path = service.export_bundle(session, DataType.PRODUCT_DOCUMENT.value)
+    with zipfile.ZipFile(bundle_path) as bundle:
+        row = json.loads(bundle.read("review.jsonl"))
+        target = row["raw_file_path"] if member_name == "source" else member_name
+        members = {name: bundle.read(name) for name in bundle.namelist()}
+    members[target] = b"tampered"
+    with zipfile.ZipFile(bundle_path, "w") as bundle:
+        for name, content in members.items():
+            bundle.writestr(name, content)
+
+    with pytest.raises(ReviewDecisionError, match="review_package_tampered"):
+        service.apply_decision(session, decision_payload(row), batch.id)

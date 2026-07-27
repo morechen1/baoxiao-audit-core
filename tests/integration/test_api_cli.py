@@ -4,6 +4,7 @@ from typer.testing import CliRunner
 from app.api.dependencies import get_db
 from app.cli.main import app as cli_app
 from app.main import app
+from app.models import DataSource, SourceDocument
 
 
 def test_health_api(session) -> None:
@@ -76,3 +77,38 @@ def test_cli_cannot_set_verified_public_during_collection(tmp_path) -> None:
     assert local.exit_code == 2
     assert "No such option" in network.output
     assert "No such option" in local.output
+
+
+def test_api_rejects_evaluation_sample_source_registration(session) -> None:
+    app.dependency_overrides[get_db] = lambda: session
+    try:
+        response = TestClient(app).post(
+            "/sources",
+            json={
+                "name": "非法评测来源",
+                "base_url": "https://example.test",
+                "source_type": "evaluation_sample",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+    assert session.query(DataSource).count() == 0
+
+
+def test_api_rejects_evaluation_sample_document_collection(session) -> None:
+    app.dependency_overrides[get_db] = lambda: session
+    try:
+        response = TestClient(app).post(
+            "/collection/local",
+            json={
+                "path": "data/import/evaluation.txt",
+                "source_type": "evaluation_sample",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+    assert session.query(SourceDocument).count() == 0

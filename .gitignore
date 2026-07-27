@@ -13,8 +13,10 @@ __pycache__/
 *.tmp
 *.part
 data/raw/*
+data/import/*
 data/parsed/*
 data/review_batches/*
+data/review_bundles/*
 data/review_results/*
 !data/raw/.gitkeep
 !data/parsed/.gitkeep

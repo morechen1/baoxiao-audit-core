@@ -60,6 +60,11 @@ class StructuredRecordService:
         document = session.get(SourceDocument, envelope.document_id)
         if not document:
             raise StructuredRecordError(f"Document {envelope.document_id} does not exist")
+        if document.final_review_status not in {
+            ReviewStatus.PARSED.value,
+            ReviewStatus.AUTO_VALIDATION_FAILED.value,
+        }:
+            raise StructuredRecordError("structured_record_locked")
         if document.parse_status != "parsed":
             raise StructuredRecordError("Document must be parsed before importing a draft")
         if envelope.record_type.value != document.data_type:

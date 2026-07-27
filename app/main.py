@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.api.routes import health_router, sources_router, workflow_router
+from app.core.exceptions import BaoxiaoError
 from app.core.logging import configure_logging, logger
 
 configure_logging()
@@ -14,6 +15,22 @@ app = FastAPI(
 app.include_router(health_router)
 app.include_router(sources_router)
 app.include_router(workflow_router)
+
+
+@app.exception_handler(BaoxiaoError)
+async def domain_exception(request: Request, exc: BaoxiaoError) -> JSONResponse:
+    code = str(exc) or exc.__class__.__name__
+    logger.warning("domain_exception", path=request.url.path, code=code)
+    return JSONResponse(
+        status_code=409,
+        content={
+            "error": {
+                "code": code,
+                "message": code,
+                "details": None,
+            }
+        },
+    )
 
 
 @app.exception_handler(Exception)

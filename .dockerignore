@@ -7,6 +7,8 @@ __pycache__
 .ruff_cache
 baoxiao.db
 data/raw/*
+data/import/*
 data/parsed/*
 data/review_batches/*
+data/review_bundles/*
 data/review_results/*

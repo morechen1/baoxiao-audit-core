@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from openpyxl import Workbook
 from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, StatementError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -21,6 +23,7 @@ from app.core.exceptions import (
 from app.models import (
     AuthenticityDecisionLog,
     DataSource,
+    DocumentOccurrence,
     EvaluationSample,
     ReviewBatch,
     ReviewBatchItem,
@@ -35,8 +38,19 @@ from app.models.enums import (
     ReviewStatus,
 )
 from app.repositories import DocumentRepository
-from app.schemas.review import EvaluationSampleRevision, StructuredRecordCorrections
+from app.schemas.review import (
+    AuthenticityDecisionInput,
+    EvaluationSampleRevision,
+    StructuredRecordCorrections,
+)
+from app.schemas.structured import (
+    PenaltyDraft,
+    ProductDocumentDraft,
+    RegulationDraft,
+    StrictDraft,
+)
 from app.services.collection import SafeUrlPolicy
+from app.services.integrity import RawArtifactIntegrityService
 from app.services.state_machine import StateMachineService
 from app.services.validation import ValidationService
 
@@ -107,6 +121,12 @@ CORRECTION_FIELDS: dict[str, frozenset[str]] = {
     ),
 }
 
+CORRECTION_MODELS: dict[str, type[StrictDraft]] = {
+    DataType.REGULATION.value: RegulationDraft,
+    DataType.PENALTY.value: PenaltyDraft,
+    DataType.PRODUCT_DOCUMENT.value: ProductDocumentDraft,
+}
+
 PROTECTED_CORRECTION_FIELDS = frozenset(
     {
         "id",
@@ -143,6 +163,10 @@ class ReviewService:
         if file_format not in {"jsonl", "xlsx"}:
             raise ValueError("format must be jsonl or xlsx")
         records = self._pending_records(session, data_type)
+        integrity = RawArtifactIntegrityService(self.settings)
+        for record in records:
+            if isinstance(record, SourceDocument):
+                integrity.verify(record)
         unique_name = f"{data_type}-{uuid4().hex}"
         output_dir = self.settings.data_dir.resolve() / "review_batches"
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -232,29 +256,96 @@ class ReviewService:
         output_dir = self.settings.data_dir.resolve() / "review_results"
         output_dir.mkdir(parents=True, exist_ok=True)
         path = output_dir / f"{batch.batch_name}-results.jsonl"
-        rows: list[dict[str, Any]] = [
-            {
-                "batch_id": batch.id,
-                "batch_item_id": item.id,
-                "reviewed_payload_hash": item.payload_hash,
-                "schema_version": batch.schema_version,
-                "record_id": item.record_id,
-                "record_type": item.record_type,
-                "final_status": "",
-                "field_reviews": {},
-                "corrections": {},
-                "authenticity_decision": None,
-                "evidence_quality": "",
-                "review_comment": "",
-                "reviewer": "",
-            }
-            for item in items
-        ]
+        rows = self._result_template_rows(batch, items)
         path.write_text(
             "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
             encoding="utf-8",
         )
         return path
+
+    def export_bundle(self, session: Session, data_type: str) -> tuple[ReviewBatch, Path]:
+        batch = self.export_batch(session, data_type, "jsonl")
+        items = list(
+            session.scalars(
+                select(ReviewBatchItem)
+                .where(ReviewBatchItem.batch_id == batch.id)
+                .order_by(ReviewBatchItem.id)
+            )
+        )
+        export_path = Path(batch.export_path)
+        rows = [
+            json.loads(line)
+            for line in export_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        source_members: dict[str, bytes] = {}
+        item_by_id = {item.id: item for item in items}
+        manifest_items: list[dict[str, Any]] = []
+        for row in rows:
+            document = session.get(SourceDocument, int(row["document_id"]))
+            if not document:
+                raise ReviewDecisionError("Review bundle document is missing")
+            RawArtifactIntegrityService(self.settings).verify(document)
+            source_path = Path(document.raw_file_path)
+            member = f"sources/{document.sha256}{source_path.suffix.lower()}"
+            source_bytes = source_path.read_bytes()
+            source_members.setdefault(member, source_bytes)
+            row["raw_file_path"] = member
+            row["raw_text_file"] = member
+            row["source_url"] = self._portable_url(row.get("source_url"))
+            row["final_url"] = self._portable_url(row.get("final_url"))
+            row["source_occurrences"] = self._portable_occurrences(row["source_occurrences"])
+            item = item_by_id[int(row["batch_item_id"])]
+            item.payload_hash = payload_hash(row)
+            manifest_items.append(
+                {
+                    "batch_item_id": item.id,
+                    "record_id": item.record_id,
+                    "payload_hash": item.payload_hash,
+                    "raw_file_sha256": document.sha256,
+                    "bundle_relative_path": member,
+                    "source_occurrences": row["source_occurrences"],
+                }
+            )
+        review_bytes = "".join(
+            json.dumps(row, ensure_ascii=False, default=str) + "\n" for row in rows
+        ).encode()
+        export_path.write_bytes(review_bytes)
+        batch.export_sha256 = hashlib.sha256(review_bytes).hexdigest()
+        template_rows = self._result_template_rows(batch, items)
+        template_bytes = "".join(
+            json.dumps(row, ensure_ascii=False) + "\n" for row in template_rows
+        ).encode()
+        package_payload_hash = self._bundle_payload_hash(
+            review_bytes, template_bytes, source_members
+        )
+        manifest = {
+            "schema_version": batch.schema_version,
+            "batch_id": batch.id,
+            "package_sha256": package_payload_hash,
+            "integrity_scheme": "member-sha256+server-pinned-zip-sha256",
+            "review_jsonl_sha256": hashlib.sha256(review_bytes).hexdigest(),
+            "result_template_sha256": hashlib.sha256(template_bytes).hexdigest(),
+            "items": manifest_items,
+        }
+        manifest_bytes = json.dumps(
+            manifest, ensure_ascii=False, indent=2, default=str, sort_keys=True
+        ).encode()
+        output_dir = self.settings.data_dir.resolve() / "review_bundles"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        bundle_path = output_dir / f"{batch.batch_name}.zip"
+        with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+            bundle.writestr("manifest.json", manifest_bytes)
+            bundle.writestr("review.jsonl", review_bytes)
+            bundle.writestr("review-results-template.jsonl", template_bytes)
+            for name, content in sorted(source_members.items()):
+                bundle.writestr(name, content)
+        batch.bundle_path = str(bundle_path)
+        batch.bundle_sha256 = hashlib.sha256(bundle_path.read_bytes()).hexdigest()
+        batch.bundle_manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
+        session.commit()
+        session.refresh(batch)
+        return batch, bundle_path
 
     def apply_decision(
         self,
@@ -331,9 +422,15 @@ class ReviewService:
         if not isinstance(reviewer_value, str) or not reviewer_value.strip():
             raise ReviewDecisionError("reviewer must not be empty")
         reviewer = reviewer_value.strip()
-        authenticity_decision = payload.get("authenticity_decision")
-        if authenticity_decision not in {None, AuthenticityType.VERIFIED_PUBLIC.value}:
-            raise ReviewDecisionError("Illegal authenticity_decision")
+        raw_authenticity_decision = payload.get("authenticity_decision")
+        try:
+            authenticity_decision = (
+                AuthenticityDecisionInput.model_validate(raw_authenticity_decision)
+                if raw_authenticity_decision is not None
+                else None
+            )
+        except PydanticValidationError as exc:
+            raise ReviewDecisionError("invalid_authenticity_decision") from exc
         if authenticity_decision and final_status not in APPROVABLE_STATUSES:
             raise ReviewDecisionError("Only approved decisions may verify public authenticity")
         if record_type == DataType.EVALUATION_SAMPLE.value:
@@ -356,10 +453,20 @@ class ReviewService:
         document = DocumentRepository(session).get(record_id)
         if not document or document.data_type != record_type or item.document_id != document.id:
             raise ReviewDecisionError("Decision does not identify the exported document")
+        RawArtifactIntegrityService(self.settings).verify(document)
         if document.final_review_status != ReviewStatus.PENDING_REVIEW.value:
             raise ReviewDecisionError(
                 f"Only pending_review records may be reviewed; "
                 f"current={document.final_review_status}"
+            )
+        if (
+            document.authenticity_type == AuthenticityType.PENDING_VERIFICATION.value
+            and final_status in APPROVABLE_STATUSES
+            and authenticity_decision is None
+        ):
+            raise ReviewDecisionError(
+                "pending_verification approval requires authenticity_decision; "
+                "use pending_source_verification"
             )
         current_payload = self._document_review_row(session, document, batch.id, item.id)
         if payload_hash(current_payload) != item.payload_hash:
@@ -368,19 +475,34 @@ class ReviewService:
         if not records:
             raise ReviewDecisionError("Structured record is missing")
         records_by_id = {record.id: record for record in records}
+        validated_updates: list[tuple[Any, dict[str, Any]]] = []
         for correction in correction_set.records if correction_set else []:
             target = records_by_id.get(correction.structured_record_id)
             if target is None:
                 raise ReviewDecisionError(
                     "structured_record_id does not belong to the reviewed document"
                 )
-            for key, value in correction.fields.items():
+            model = CORRECTION_MODELS[record_type]
+            candidate = {field: getattr(target, field) for field in model.model_fields}
+            candidate.update(correction.fields)
+            try:
+                validated = model.model_validate(candidate).model_dump()
+            except PydanticValidationError as exc:
+                raise ReviewDecisionError("invalid_correction_value") from exc
+            validated_updates.append(
+                (
+                    target,
+                    {key: validated[key] for key in correction.fields},
+                )
+            )
+        for target, updates in validated_updates:
+            for key, value in updates.items():
                 setattr(target, key, value)
         try:
             session.flush()
-        except IntegrityError as exc:
-            raise ReviewDecisionError("Corrections violate a database constraint") from exc
-        validation = ValidationService().evaluate_document(session, document, records)
+        except (IntegrityError, StatementError) as exc:
+            raise ReviewDecisionError("invalid_correction_value") from exc
+        validation = ValidationService(self.settings).evaluate_document(session, document, records)
         if not validation.valid:
             codes = ",".join(issue.code for issue in validation.issues)
             raise ReviewDecisionError(f"Corrections failed deterministic validation: {codes}")
@@ -408,7 +530,13 @@ class ReviewService:
             raise ReviewDecisionError("Decision violates a database constraint") from exc
         item.decision_id = decision.id
         if authenticity_decision:
-            self._verify_authenticity(session, document, decision, reviewer)
+            self._verify_authenticity(
+                session,
+                document,
+                decision,
+                reviewer,
+                authenticity_decision,
+            )
         self._complete_batch_if_ready(session, batch)
         if commit:
             session.commit()
@@ -541,8 +669,7 @@ class ReviewService:
                     raise ReviewDecisionError(f"Unknown correction field: {key}")
         return correction_set
 
-    @staticmethod
-    def _verify_review_package(batch: ReviewBatch) -> None:
+    def _verify_review_package(self, batch: ReviewBatch) -> None:
         path = Path(batch.export_path)
         if (
             not path.is_file()
@@ -550,15 +677,25 @@ class ReviewService:
             or hashlib.sha256(path.read_bytes()).hexdigest() != batch.export_sha256
         ):
             raise ReviewDecisionError("review_package_tampered")
+        if batch.bundle_path:
+            self._verify_bundle(batch, path.read_bytes())
 
-    @staticmethod
     def _verify_authenticity(
+        self,
         session: Session,
         document: SourceDocument,
         decision: ReviewDecision,
         reviewer: str,
+        authenticity_decision: AuthenticityDecisionInput,
     ) -> None:
-        source = session.get(DataSource, document.source_id)
+        occurrence = session.get(DocumentOccurrence, authenticity_decision.verified_occurrence_id)
+        if not occurrence or occurrence.document_id != document.id:
+            raise ReviewDecisionError(
+                "verified occurrence does not belong to the reviewed document"
+            )
+        if occurrence.source_id is None:
+            raise ReviewDecisionError("verified occurrence has no registered source")
+        source = session.get(DataSource, occurrence.source_id)
         if (
             not source
             or not source.enabled
@@ -572,17 +709,23 @@ class ReviewService:
             raise ReviewDecisionError(
                 "Only pending_verification documents may be verified as public"
             )
+        RawArtifactIntegrityService(self.settings).verify(document)
         allowed_domains = source.crawl_policy.get("allowed_domains", [])
         if not isinstance(allowed_domains, list) or any(
             not isinstance(value, str) for value in allowed_domains
         ):
             raise ReviewDecisionError("Registered source allowed_domains is invalid")
         allowed_hosts = SafeUrlPolicy.allowed_hosts(source.base_url, allowed_domains)
-        urls = [document.source_url, document.final_url]
+        urls = [occurrence.source_url, occurrence.final_url]
         if any(
-            not url or not SafeUrlPolicy.host_allowed_for_hosts(url, allowed_hosts) for url in urls
+            not url
+            or urlparse(url).scheme not in {"http", "https"}
+            or not SafeUrlPolicy.host_allowed_for_hosts(url, allowed_hosts)
+            for url in urls
         ):
-            raise ReviewDecisionError("Document URL does not match the registered source allowlist")
+            raise ReviewDecisionError(
+                "Occurrence URL does not match the registered source allowlist"
+            )
         records = StateMachineService.structured_records(session, document)
         if not records or any(
             not getattr(record, "source_quote", None)
@@ -599,7 +742,9 @@ class ReviewService:
                 new_authenticity_type=AuthenticityType.VERIFIED_PUBLIC.value,
                 reviewer=reviewer,
                 review_decision_id=decision.id,
-                reason="Human reviewer verified registered public source",
+                source_id=source.id,
+                verified_occurrence_id=occurrence.id,
+                reason=authenticity_decision.reason,
             )
         )
 
@@ -654,6 +799,18 @@ class ReviewService:
                 for record in records
                 if getattr(record, "source_quote", None)
             ],
+            "source_occurrences": [
+                {
+                    "occurrence_id": occurrence.id,
+                    "source_id": occurrence.source_id,
+                    "source_url": occurrence.source_url,
+                    "final_url": occurrence.final_url,
+                    "publisher": occurrence.publisher,
+                    "collected_at": occurrence.collected_at,
+                    "response_metadata": occurrence.response_metadata,
+                }
+                for occurrence in sorted(document.occurrences, key=lambda value: value.id)
+            ],
             "automatic_validation": document.metadata_json.get("automatic_validation", {}),
             "parsing_warnings": document.metadata_json.get("parsing", {}).get("warnings", []),
             "authenticity_type": document.authenticity_type,
@@ -687,11 +844,139 @@ class ReviewService:
                 "split": sample.split,
             },
             "source_quotes": [],
+            "source_occurrences": [],
             "automatic_validation": {"valid": True, "issues": []},
             "parsing_warnings": [],
             "authenticity_type": sample.authenticity_type,
             "current_status": sample.final_review_status,
         }
+
+    @staticmethod
+    def _result_template_rows(
+        batch: ReviewBatch, items: list[ReviewBatchItem]
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "batch_id": batch.id,
+                "batch_item_id": item.id,
+                "reviewed_payload_hash": item.payload_hash,
+                "schema_version": batch.schema_version,
+                "record_id": item.record_id,
+                "record_type": item.record_type,
+                "final_status": "",
+                "field_reviews": {},
+                "corrections": {},
+                "authenticity_decision": None,
+                "evidence_quality": "",
+                "review_comment": "",
+                "reviewer": "",
+            }
+            for item in items
+        ]
+
+    @classmethod
+    def _portable_occurrences(cls, occurrences: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [
+            {
+                **occurrence,
+                "source_url": cls._portable_url(occurrence.get("source_url")),
+                "final_url": cls._portable_url(occurrence.get("final_url")),
+                "response_metadata": {
+                    key: value
+                    for key, value in (occurrence.get("response_metadata") or {}).items()
+                    if "path" not in key.lower()
+                },
+            }
+            for occurrence in occurrences
+        ]
+
+    @staticmethod
+    def _portable_url(value: Any) -> Any:
+        if not isinstance(value, str) or not value.startswith("file://"):
+            return value
+        return f"local-unattributed://{Path(urlparse(value).path).name}"
+
+    @staticmethod
+    def _bundle_payload_hash(
+        review_bytes: bytes,
+        template_bytes: bytes,
+        source_members: dict[str, bytes],
+    ) -> str:
+        digest = hashlib.sha256()
+        for name, content in [
+            ("review.jsonl", review_bytes),
+            ("review-results-template.jsonl", template_bytes),
+            *sorted(source_members.items()),
+        ]:
+            digest.update(name.encode())
+            digest.update(b"\0")
+            digest.update(hashlib.sha256(content).digest())
+        return digest.hexdigest()
+
+    def _verify_bundle(self, batch: ReviewBatch, expected_review: bytes) -> None:
+        try:
+            bundle_path = Path(batch.bundle_path or "")
+            if (
+                not bundle_path.is_file()
+                or not batch.bundle_sha256
+                or hashlib.sha256(bundle_path.read_bytes()).hexdigest() != batch.bundle_sha256
+            ):
+                raise ValueError
+            with zipfile.ZipFile(bundle_path) as bundle:
+                names = set(bundle.namelist())
+                if any(name.startswith("/") or ".." in Path(name).parts for name in names):
+                    raise ValueError
+                manifest_bytes = bundle.read("manifest.json")
+                review_bytes = bundle.read("review.jsonl")
+                template_bytes = bundle.read("review-results-template.jsonl")
+                manifest = json.loads(manifest_bytes)
+                if (
+                    not batch.bundle_manifest_sha256
+                    or hashlib.sha256(manifest_bytes).hexdigest() != batch.bundle_manifest_sha256
+                    or review_bytes != expected_review
+                    or manifest["batch_id"] != batch.id
+                    or manifest["schema_version"] != batch.schema_version
+                    or hashlib.sha256(review_bytes).hexdigest() != manifest["review_jsonl_sha256"]
+                    or hashlib.sha256(template_bytes).hexdigest()
+                    != manifest["result_template_sha256"]
+                ):
+                    raise ValueError
+                rows = {
+                    int(row["batch_item_id"]): row
+                    for row in (
+                        json.loads(line)
+                        for line in review_bytes.decode().splitlines()
+                        if line.strip()
+                    )
+                }
+                source_members: dict[str, bytes] = {}
+                for item in manifest["items"]:
+                    row = rows[int(item["batch_item_id"])]
+                    if (
+                        payload_hash(row) != item["payload_hash"]
+                        or row["raw_file_path"] != item["bundle_relative_path"]
+                    ):
+                        raise ValueError
+                    member = item["bundle_relative_path"]
+                    content = bundle.read(member)
+                    if hashlib.sha256(content).hexdigest() != item["raw_file_sha256"]:
+                        raise ValueError
+                    source_members[member] = content
+                if (
+                    self._bundle_payload_hash(review_bytes, template_bytes, source_members)
+                    != manifest["package_sha256"]
+                ):
+                    raise ValueError
+        except (
+            KeyError,
+            TypeError,
+            ValueError,
+            OSError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+            zipfile.BadZipFile,
+        ) as exc:
+            raise ReviewDecisionError("review_package_tampered") from exc
 
     @staticmethod
     def _write_export(path: Path, file_format: str, rows: list[dict[str, Any]]) -> None:

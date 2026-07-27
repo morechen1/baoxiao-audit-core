@@ -1,7 +1,7 @@
 import pytest
 
 from app.core.exceptions import InvalidStateTransition
-from app.models import ProductDocument, SourceDocument
+from app.models import ProductDocument, SourceDocument, StatusHistory
 from app.models.enums import DataType, ReviewStatus
 from app.services.state_machine import StateMachineService
 
@@ -81,4 +81,49 @@ def test_status_consistency_repair_defaults_to_dry_run(session) -> None:
     assert len(reported) == 1
     assert product.final_review_status == ReviewStatus.PENDING_REVIEW.value
     StateMachineService.repair_consistency(session, apply=True)
-    assert product.final_review_status == ReviewStatus.APPROVED.value
+    assert product.final_review_status == ReviewStatus.PENDING_REVIEW.value
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        ReviewStatus.PENDING_SOURCE_VERIFICATION.value,
+        ReviewStatus.REQUIRES_EXPERT_REVIEW.value,
+    ],
+)
+def test_eligible_document_can_be_explicitly_resubmitted(session, status: str) -> None:
+    document = document_in_status(status)
+    session.add(document)
+    session.commit()
+
+    StateMachineService.resubmit_document(
+        session,
+        document,
+        "已补充可核验官方来源",
+    )
+
+    assert document.final_review_status == ReviewStatus.PARSED.value
+    history = session.query(StatusHistory).one()
+    assert history.from_status == status
+    assert history.to_status == ReviewStatus.PARSED.value
+    assert "已补充可核验官方来源" in history.reason
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        ReviewStatus.REJECTED_HALLUCINATION.value,
+        ReviewStatus.REJECTED_DUPLICATE.value,
+        ReviewStatus.REJECTED_OUTDATED.value,
+    ],
+)
+def test_rejected_document_cannot_be_resubmitted(session, status: str) -> None:
+    document = document_in_status(status)
+    session.add(document)
+    session.commit()
+
+    with pytest.raises(InvalidStateTransition, match="record_not_resubmittable"):
+        StateMachineService.resubmit_document(session, document, "试图重开")
+
+    assert document.final_review_status == status
+    assert session.query(StatusHistory).count() == 0

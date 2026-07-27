@@ -2,9 +2,11 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from app.core.config import Settings, get_settings
 from app.models import DocumentChunk, SourceDocument
 from app.models.enums import ReviewStatus
 from app.repositories import DocumentRepository
+from app.services.integrity import RawArtifactIntegrityService
 from app.services.parsing.base import DocumentParser, ParsedDocument
 from app.services.parsing.docx import DocxParser
 from app.services.parsing.html import HtmlParser
@@ -21,18 +23,28 @@ class ParsingService:
         ".txt": TextParser(),
     }
 
+    def __init__(self, settings: Settings | None = None) -> None:
+        self.settings = settings or get_settings()
+
     def parse_document(self, session: Session, document: SourceDocument) -> ParsedDocument:
+        RawArtifactIntegrityService(self.settings).verify(document)
         path = Path(document.raw_file_path)
         parser = self.parsers.get(path.suffix.lower())
         if not parser:
             raise ValueError(f"Unsupported document type: {path.suffix}")
         parsed = parser.parse(path)
-        document.raw_text = parsed.plain_text
-        document.source_title = document.source_title or parsed.title
-        document.parse_status = "parsed"
         metadata = dict(document.metadata_json)
         metadata["parsing"] = {"metadata": parsed.metadata, "warnings": parsed.warnings}
         document.metadata_json = metadata
+        if parsed.metadata.get("requires_ocr") is True:
+            document.raw_text = None
+            document.parse_status = "requires_ocr"
+            document.chunks.clear()
+            session.commit()
+            return parsed
+        document.raw_text = parsed.plain_text
+        document.source_title = document.source_title or parsed.title
+        document.parse_status = "parsed"
         document.chunks.clear()
         offset = 0
         chunk_index = 0
@@ -57,20 +69,22 @@ class ParsingService:
         session.commit()
         return parsed
 
-    def parse_pending(self, session: Session) -> tuple[int, list[str]]:
+    def parse_pending(self, session: Session) -> tuple[int, int, list[str]]:
         pending = [
             doc for doc in DocumentRepository(session).list() if doc.parse_status == "pending"
         ]
         count = 0
+        requires_ocr = 0
         errors: list[str] = []
         for document in pending:
             try:
                 self.parse_document(session, document)
-                count += 1
+                count += int(document.parse_status == "parsed")
+                requires_ocr += int(document.parse_status == "requires_ocr")
             except Exception as exc:
                 session.rollback()
                 errors.append(f"{document.id}: {exc}")
-        return count, errors
+        return count, requires_ocr, errors
 
 
 def _chunk_text(text: str, max_chars: int = 1200) -> list[str]:

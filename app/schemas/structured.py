@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
 
 from app.models.enums import DataType
 
@@ -11,28 +11,28 @@ class StrictDraft(BaseModel):
 
 
 class RegulationDraft(StrictDraft):
-    title: str = Field(min_length=1)
-    document_number: str | None = None
-    issuing_authority: str | None = None
+    title: StrictStr = Field(min_length=1)
+    document_number: StrictStr | None = None
+    issuing_authority: StrictStr | None = None
     effective_date: date | None = None
     expiry_date: date | None = None
-    validity_status: str | None = None
-    article_number: str | None = None
-    article_text: str = Field(min_length=1)
-    source_quote: str = Field(min_length=1)
+    validity_status: StrictStr | None = None
+    article_number: StrictStr | None = None
+    article_text: StrictStr = Field(min_length=1)
+    source_quote: StrictStr = Field(min_length=1)
 
 
 class PenaltyDraft(StrictDraft):
-    punished_entity: str | None = None
-    authority: str | None = None
-    document_number: str | None = None
+    punished_entity: StrictStr | None = None
+    authority: StrictStr | None = None
+    document_number: StrictStr | None = None
     decision_date: date | None = None
-    illegal_facts: str = Field(min_length=1)
-    legal_basis: str | None = None
-    penalty_result: str | None = None
-    original_sales_wording_disclosed: bool
-    original_sales_wording: str | None = None
-    source_quote: str = Field(min_length=1)
+    illegal_facts: StrictStr = Field(min_length=1)
+    legal_basis: StrictStr | None = None
+    penalty_result: StrictStr | None = None
+    original_sales_wording_disclosed: bool = Field(strict=True)
+    original_sales_wording: StrictStr | None = None
+    source_quote: StrictStr = Field(min_length=1)
 
     @model_validator(mode="after")
     def validate_original_wording(self) -> "PenaltyDraft":
@@ -44,18 +44,18 @@ class PenaltyDraft(StrictDraft):
 
 
 class ProductDocumentDraft(StrictDraft):
-    company_name: str | None = None
-    product_name: str = Field(min_length=1)
-    product_type: str | None = None
-    waiting_period: str | None = None
-    cooling_off_period: str | None = None
-    insurance_responsibility: str | None = None
-    exclusions: str | None = None
-    cash_value_description: str | None = None
-    guaranteed_benefit: str | None = None
-    non_guaranteed_benefit: str | None = None
-    surrender_risk: str | None = None
-    source_quote: str = Field(min_length=1)
+    company_name: StrictStr | None = None
+    product_name: StrictStr = Field(min_length=1)
+    product_type: StrictStr | None = None
+    waiting_period: StrictStr | None = None
+    cooling_off_period: StrictStr | None = None
+    insurance_responsibility: StrictStr | None = None
+    exclusions: StrictStr | None = None
+    cash_value_description: StrictStr | None = None
+    guaranteed_benefit: StrictStr | None = None
+    non_guaranteed_benefit: StrictStr | None = None
+    surrender_risk: StrictStr | None = None
+    source_quote: StrictStr = Field(min_length=1)
 
 
 class StructuredDraftEnvelope(StrictDraft):

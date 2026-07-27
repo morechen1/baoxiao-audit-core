@@ -1,3 +1,6 @@
+import hashlib
+
+from app.core.config import Settings
 from app.models import ProductDocument, SourceDocument
 from app.models.enums import (
     AuthenticityType,
@@ -38,10 +41,22 @@ def persist_pair(session, status: str, *, authenticity: str):
     document, product = make_document(status, authenticity=authenticity)
     session.add(document)
     session.flush()
+    raw_dir = session.info["data_dir"] / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    content = f"{document.raw_text}\nartifact-id={document.id}".encode()
+    digest = hashlib.sha256(content).hexdigest()
+    raw_path = raw_dir / f"{digest}.txt"
+    raw_path.write_bytes(content)
+    document.raw_file_path = str(raw_path)
+    document.sha256 = digest
     product.document_id = document.id
     session.add(product)
     session.commit()
     return document, product
+
+
+def knowledge_service(session) -> KnowledgeIndexService:
+    return KnowledgeIndexService(Settings(data_dir=session.info["data_dir"]))
 
 
 def test_unreviewed_data_cannot_be_indexed(session) -> None:
@@ -51,7 +66,7 @@ def test_unreviewed_data_cannot_be_indexed(session) -> None:
         authenticity=AuthenticityType.VERIFIED_PUBLIC.value,
     )
 
-    summary = KnowledgeIndexService().index_approved(session)
+    summary = knowledge_service(session).index_approved(session)
 
     assert summary.indexed == 0
     assert "review_status_not_approved" in summary.rejected[document.id]
@@ -64,7 +79,7 @@ def test_indexing_keeps_review_status_and_sets_index_fields(session) -> None:
         authenticity=AuthenticityType.VERIFIED_PUBLIC.value,
     )
 
-    summary = KnowledgeIndexService().index_approved(session)
+    summary = knowledge_service(session).index_approved(session)
 
     assert summary.indexed == 1
     assert document.final_review_status == ReviewStatus.APPROVED.value
@@ -79,7 +94,7 @@ def test_only_verified_public_can_be_indexed(session) -> None:
         authenticity=AuthenticityType.DEMO_ONLY.value,
     )
 
-    summary = KnowledgeIndexService().index_approved(session)
+    summary = knowledge_service(session).index_approved(session)
 
     assert summary.indexed == 0
     assert summary.rejected[document.id] == ["authenticity_not_verified_public"]
@@ -92,7 +107,7 @@ def test_constructed_document_cannot_be_indexed(session) -> None:
         authenticity=AuthenticityType.CONSTRUCTED_FOR_EVALUATION.value,
     )
 
-    summary = KnowledgeIndexService().index_approved(session)
+    summary = knowledge_service(session).index_approved(session)
 
     assert summary.indexed == 0
     assert "authenticity_not_verified_public" in summary.rejected[document.id]
@@ -107,7 +122,7 @@ def test_structured_status_mismatch_blocks_indexing(session) -> None:
     product.final_review_status = ReviewStatus.PENDING_REVIEW.value
     session.commit()
 
-    summary = KnowledgeIndexService().index_approved(session)
+    summary = knowledge_service(session).index_approved(session)
 
     assert summary.indexed == 0
     assert "structured_status_mismatch" in summary.rejected[document.id]

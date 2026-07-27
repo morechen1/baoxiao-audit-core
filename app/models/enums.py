@@ -8,6 +8,12 @@ class DataType(StrEnum):
     EVALUATION_SAMPLE = "evaluation_sample"
 
 
+class DocumentDataType(StrEnum):
+    REGULATION = "regulation"
+    PENALTY = "penalty"
+    PRODUCT_DOCUMENT = "product_document"
+
+
 class AuthenticityType(StrEnum):
     VERIFIED_PUBLIC = "verified_public"
     CONSTRUCTED_FOR_EVALUATION = "constructed_for_evaluation"
@@ -69,3 +75,4 @@ HUMAN_REVIEW_STATUS_VALUES = tuple(
 )
 AUTHENTICITY_TYPE_VALUES = tuple(value.value for value in AuthenticityType)
 KNOWLEDGE_INDEX_STATUS_VALUES = tuple(value.value for value in KnowledgeIndexStatus)
+DOCUMENT_DATA_TYPE_VALUES = tuple(value.value for value in DocumentDataType)

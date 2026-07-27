@@ -2,6 +2,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from app.models import (
+    DataSource,
     DocumentChunk,
     EvaluationSample,
     Penalty,
@@ -120,6 +121,36 @@ def test_review_decision_rejects_non_human_status(session) -> None:
             reviewer="reviewer",
             reviewed_payload_hash="b" * 64,
             schema_version="2.0",
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
+def test_data_source_rejects_evaluation_sample_type(session) -> None:
+    session.add(
+        DataSource(
+            name="非法评测来源",
+            base_url="https://example.test",
+            source_type=DataType.EVALUATION_SAMPLE.value,
+            enabled=True,
+            crawl_policy={},
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
+def test_source_document_rejects_evaluation_sample_type(session) -> None:
+    session.add(
+        SourceDocument(
+            data_type=DataType.EVALUATION_SAMPLE.value,
+            source_url="https://example.test/evaluation",
+            raw_file_path="/tmp/evaluation.txt",
+            sha256="8" * 64,
+            final_review_status=ReviewStatus.COLLECTED.value,
         )
     )
 

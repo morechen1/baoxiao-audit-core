@@ -3,9 +3,11 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import Settings, get_settings
 from app.models import Penalty, ProductDocument, Regulation, SourceDocument
 from app.models.enums import DataType, ReviewStatus
 from app.repositories import DocumentRepository
+from app.services.integrity import RawArtifactIntegrityService
 from app.services.validation.validators import (
     AuthenticityValidator,
     DateValidator,
@@ -33,6 +35,9 @@ class ValidationService:
         OriginalWordingValidator(),
     )
 
+    def __init__(self, settings: Settings | None = None) -> None:
+        self.settings = settings or get_settings()
+
     def validate_document(
         self, session: Session, document: SourceDocument, record: object | None = None
     ) -> ValidationResult:
@@ -40,6 +45,7 @@ class ValidationService:
             raise ValueError(
                 f"Only parsed documents may be validated; current={document.final_review_status}"
             )
+        RawArtifactIntegrityService(self.settings).verify(document)
         result = self.evaluate_document(session, document, [record] if record is not None else None)
         repository = DocumentRepository(session)
         metadata = dict(document.metadata_json)
@@ -63,6 +69,7 @@ class ValidationService:
         document: SourceDocument,
         records: list[object] | None = None,
     ) -> ValidationResult:
+        RawArtifactIntegrityService(self.settings).verify(document)
         records = records if records is not None else self._structured_records(session, document)
         issues = self._document_issues(session, document)
         if document.data_type != DataType.EVALUATION_SAMPLE.value and not records:
