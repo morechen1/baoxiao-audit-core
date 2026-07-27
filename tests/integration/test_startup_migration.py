@@ -28,9 +28,13 @@ def test_database_migration(tmp_path: Path, monkeypatch) -> None:
     get_settings.cache_clear()
     try:
         command.upgrade(Config("alembic.ini"), "head")
+        command.downgrade(Config("alembic.ini"), "base")
+        command.upgrade(Config("alembic.ini"), "head")
     finally:
         get_settings.cache_clear()
 
     tables = inspect(create_engine(url)).get_table_names()
     assert "source_documents" in tables
     assert "review_decisions" in tables
+    assert "review_batch_items" in tables
+    assert "document_occurrences" in tables

@@ -1,11 +1,13 @@
 from app.models.entities import (
     DataSource,
     DocumentChunk,
+    DocumentOccurrence,
     EvaluationSample,
     Penalty,
     ProductDocument,
     Regulation,
     ReviewBatch,
+    ReviewBatchItem,
     ReviewDecision,
     SourceDocument,
     StatusHistory,
@@ -13,12 +15,14 @@ from app.models.entities import (
 
 __all__ = [
     "DataSource",
+    "DocumentOccurrence",
     "DocumentChunk",
     "EvaluationSample",
     "Penalty",
     "ProductDocument",
     "Regulation",
     "ReviewBatch",
+    "ReviewBatchItem",
     "ReviewDecision",
     "SourceDocument",
     "StatusHistory",

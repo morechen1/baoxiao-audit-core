@@ -8,3 +8,23 @@ class ValidationError(BaoxiaoError):
 
 class UnsafePathError(BaoxiaoError):
     """Raised when a path escapes its allowed root."""
+
+
+class InvalidStateTransition(BaoxiaoError):
+    """Raised when a record attempts an illegal state transition."""
+
+
+class TrustGateError(BaoxiaoError):
+    """Raised when data does not meet trusted-index requirements."""
+
+
+class StructuredRecordError(BaoxiaoError):
+    """Raised when a structured draft is invalid."""
+
+
+class ReviewDecisionError(BaoxiaoError):
+    """Raised when an auditable review decision cannot be applied."""
+
+
+class UnsafeUrlError(BaoxiaoError):
+    """Raised when a URL can reach a prohibited network target."""

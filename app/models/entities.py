@@ -3,10 +3,33 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-from app.models.enums import AuthenticityType, ReviewStatus
+from app.models.enums import (
+    AUTHENTICITY_TYPE_VALUES,
+    KNOWLEDGE_INDEX_STATUS_VALUES,
+    REVIEW_STATUS_VALUES,
+    AuthenticityType,
+    KnowledgeIndexStatus,
+    ReviewStatus,
+)
+
+
+def sql_values(values: tuple[str, ...]) -> str:
+    return ", ".join(f"'{value}'" for value in values)
 
 
 def utcnow() -> datetime:
@@ -40,9 +63,33 @@ class DataSource(TimestampMixin, Base):
 
 class SourceDocument(TimestampMixin, Base):
     __tablename__ = "source_documents"
+    __table_args__ = (
+        CheckConstraint(
+            f"authenticity_type IN ({sql_values(AUTHENTICITY_TYPE_VALUES)})",
+            name="ck_source_documents_authenticity",
+        ),
+        CheckConstraint(
+            f"final_review_status IN ({sql_values(REVIEW_STATUS_VALUES)})",
+            name="ck_source_documents_review_status",
+        ),
+        CheckConstraint(
+            f"knowledge_index_status IN ({sql_values(KNOWLEDGE_INDEX_STATUS_VALUES)})",
+            name="ck_source_documents_index_status",
+        ),
+        CheckConstraint(
+            "collection_status IN ('collected')",
+            name="ck_source_documents_collection_status",
+        ),
+        CheckConstraint(
+            "parse_status IN ('pending', 'parsed', 'failed', 'requires_ocr')",
+            name="ck_source_documents_parse_status",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    source_id: Mapped[int | None] = mapped_column(ForeignKey("data_sources.id"))
+    source_id: Mapped[int | None] = mapped_column(
+        ForeignKey("data_sources.id", ondelete="SET NULL")
+    )
     data_type: Mapped[str] = mapped_column(String(50), index=True)
     source_url: Mapped[str | None] = mapped_column(String(4096))
     final_url: Mapped[str | None] = mapped_column(String(4096))
@@ -65,11 +112,16 @@ class SourceDocument(TimestampMixin, Base):
     )
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     corrected_fields_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    knowledge_index_status: Mapped[str] = mapped_column(String(50), default="not_indexed")
+    knowledge_index_status: Mapped[str] = mapped_column(
+        String(50), default=KnowledgeIndexStatus.NOT_INDEXED.value
+    )
     indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     source: Mapped[DataSource | None] = relationship(back_populates="documents")
     chunks: Mapped[list[DocumentChunk]] = relationship(
+        back_populates="document", cascade="all, delete-orphan"
+    )
+    occurrences: Mapped[list[DocumentOccurrence]] = relationship(
         back_populates="document", cascade="all, delete-orphan"
     )
 
@@ -78,7 +130,9 @@ class DocumentChunk(Base):
     __tablename__ = "document_chunks"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    document_id: Mapped[int] = mapped_column(ForeignKey("source_documents.id"), index=True)
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("source_documents.id", ondelete="CASCADE"), index=True
+    )
     page_number: Mapped[int | None] = mapped_column(Integer)
     section_title: Mapped[str | None] = mapped_column(String(1000))
     chunk_index: Mapped[int] = mapped_column(Integer)
@@ -93,9 +147,17 @@ class DocumentChunk(Base):
 
 class Regulation(Base):
     __tablename__ = "regulations"
+    __table_args__ = (
+        CheckConstraint(
+            f"final_review_status IN ({sql_values(REVIEW_STATUS_VALUES)})",
+            name="ck_regulations_review_status",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    document_id: Mapped[int] = mapped_column(ForeignKey("source_documents.id"), index=True)
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("source_documents.id", ondelete="CASCADE"), index=True
+    )
     title: Mapped[str] = mapped_column(String(1000))
     document_number: Mapped[str | None] = mapped_column(String(255))
     issuing_authority: Mapped[str | None] = mapped_column(String(255))
@@ -110,9 +172,26 @@ class Regulation(Base):
 
 class Penalty(Base):
     __tablename__ = "penalties"
+    __table_args__ = (
+        UniqueConstraint("document_id", name="uq_penalties_document_id"),
+        CheckConstraint(
+            f"final_review_status IN ({sql_values(REVIEW_STATUS_VALUES)})",
+            name="ck_penalties_review_status",
+        ),
+        CheckConstraint(
+            "(original_sales_wording_disclosed = true "
+            "AND original_sales_wording IS NOT NULL "
+            "AND length(trim(original_sales_wording)) > 0) "
+            "OR (original_sales_wording_disclosed = false "
+            "AND original_sales_wording IS NULL)",
+            name="ck_penalties_original_wording",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    document_id: Mapped[int] = mapped_column(ForeignKey("source_documents.id"), index=True)
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("source_documents.id", ondelete="CASCADE"), index=True
+    )
     punished_entity: Mapped[str | None] = mapped_column(String(500))
     authority: Mapped[str | None] = mapped_column(String(255))
     document_number: Mapped[str | None] = mapped_column(String(255))
@@ -128,9 +207,18 @@ class Penalty(Base):
 
 class ProductDocument(Base):
     __tablename__ = "product_documents"
+    __table_args__ = (
+        UniqueConstraint("document_id", name="uq_product_documents_document_id"),
+        CheckConstraint(
+            f"final_review_status IN ({sql_values(REVIEW_STATUS_VALUES)})",
+            name="ck_product_documents_review_status",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    document_id: Mapped[int] = mapped_column(ForeignKey("source_documents.id"), index=True)
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("source_documents.id", ondelete="CASCADE"), index=True
+    )
     company_name: Mapped[str | None] = mapped_column(String(500))
     product_name: Mapped[str] = mapped_column(String(500))
     product_type: Mapped[str | None] = mapped_column(String(255))
@@ -148,6 +236,16 @@ class ProductDocument(Base):
 
 class EvaluationSample(Base):
     __tablename__ = "evaluation_samples"
+    __table_args__ = (
+        CheckConstraint(
+            f"authenticity_type IN ({sql_values(AUTHENTICITY_TYPE_VALUES)})",
+            name="ck_evaluation_samples_authenticity",
+        ),
+        CheckConstraint(
+            f"final_review_status IN ({sql_values(REVIEW_STATUS_VALUES)})",
+            name="ck_evaluation_samples_review_status",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     sample_text: Mapped[str] = mapped_column(Text)
@@ -163,12 +261,20 @@ class EvaluationSample(Base):
 
 class ReviewBatch(Base):
     __tablename__ = "review_batches"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('exported', 'completed')",
+            name="ck_review_batches_status",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     batch_name: Mapped[str] = mapped_column(String(255))
     data_type: Mapped[str] = mapped_column(String(50))
     record_count: Mapped[int] = mapped_column(Integer)
     export_path: Mapped[str] = mapped_column(String(2048))
+    export_sha256: Mapped[str | None] = mapped_column(String(64))
+    schema_version: Mapped[str] = mapped_column(String(32), default="1.0")
     status: Mapped[str] = mapped_column(String(50), default="exported")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -176,9 +282,21 @@ class ReviewBatch(Base):
 
 class ReviewDecision(Base):
     __tablename__ = "review_decisions"
+    __table_args__ = (
+        CheckConstraint(
+            "evidence_quality IN ('A', 'B', 'C', 'D')",
+            name="ck_review_decisions_evidence_quality",
+        ),
+        CheckConstraint(
+            f"decision IN ({sql_values(REVIEW_STATUS_VALUES)})",
+            name="ck_review_decisions_decision",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    batch_id: Mapped[int | None] = mapped_column(ForeignKey("review_batches.id"))
+    batch_id: Mapped[int | None] = mapped_column(
+        ForeignKey("review_batches.id", ondelete="RESTRICT")
+    )
     record_type: Mapped[str] = mapped_column(String(50))
     record_id: Mapped[int] = mapped_column(Integer)
     decision: Mapped[str] = mapped_column(String(50))
@@ -200,3 +318,59 @@ class StatusHistory(Base):
     to_status: Mapped[str] = mapped_column(String(50))
     reason: Mapped[str | None] = mapped_column(Text)
     changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ReviewBatchItem(Base):
+    __tablename__ = "review_batch_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "batch_id", "record_type", "record_id", name="uq_review_batch_items_record"
+        ),
+        CheckConstraint(
+            f"exported_status IN ({sql_values(REVIEW_STATUS_VALUES)})",
+            name="ck_review_batch_items_exported_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    batch_id: Mapped[int] = mapped_column(
+        ForeignKey("review_batches.id", ondelete="CASCADE"), index=True
+    )
+    record_type: Mapped[str] = mapped_column(String(50))
+    record_id: Mapped[int] = mapped_column(Integer)
+    document_id: Mapped[int | None] = mapped_column(
+        ForeignKey("source_documents.id", ondelete="CASCADE"), index=True
+    )
+    exported_status: Mapped[str] = mapped_column(String(50))
+    payload_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    decision_id: Mapped[int | None] = mapped_column(
+        ForeignKey("review_decisions.id", ondelete="SET NULL"), unique=True
+    )
+
+
+class DocumentOccurrence(Base):
+    __tablename__ = "document_occurrences"
+    __table_args__ = (
+        UniqueConstraint(
+            "document_id",
+            "source_url",
+            "final_url",
+            name="uq_document_occurrences_location",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("source_documents.id", ondelete="CASCADE"), index=True
+    )
+    source_id: Mapped[int | None] = mapped_column(
+        ForeignKey("data_sources.id", ondelete="SET NULL"), index=True
+    )
+    source_url: Mapped[str | None] = mapped_column(String(4096))
+    final_url: Mapped[str | None] = mapped_column(String(4096))
+    publisher: Mapped[str | None] = mapped_column(String(255))
+    http_status: Mapped[int | None] = mapped_column(Integer)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    response_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    document: Mapped[SourceDocument] = relationship(back_populates="occurrences")

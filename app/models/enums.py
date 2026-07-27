@@ -28,7 +28,12 @@ class ReviewStatus(StrEnum):
     REJECTED_DUPLICATE = "rejected_duplicate"
     REJECTED_OUTDATED = "rejected_outdated"
     REQUIRES_EXPERT_REVIEW = "requires_expert_review"
+
+
+class KnowledgeIndexStatus(StrEnum):
+    NOT_INDEXED = "not_indexed"
     INDEXED = "indexed"
+    INDEX_FAILED = "index_failed"
 
 
 class SampleCategory(StrEnum):
@@ -49,3 +54,7 @@ APPROVABLE_STATUSES = {
     ReviewStatus.APPROVED.value,
     ReviewStatus.APPROVED_WITH_REVISION.value,
 }
+
+REVIEW_STATUS_VALUES = tuple(status.value for status in ReviewStatus)
+AUTHENTICITY_TYPE_VALUES = tuple(value.value for value in AuthenticityType)
+KNOWLEDGE_INDEX_STATUS_VALUES = tuple(value.value for value in KnowledgeIndexStatus)
