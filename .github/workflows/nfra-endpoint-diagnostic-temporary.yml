@@ -362,6 +362,107 @@ jobs:
           print("DIAGNOSTIC_PRIVACY_BOUNDARY_OK")
           PY
 
+      - name: Verify official API repeatability without browser state
+        run: |
+          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY
+          unset http_proxy https_proxy all_proxy
+          node <<'JS'
+          const crypto = require("crypto");
+          const fs = require("fs");
+          const path = require("path");
+
+          const root = process.env.DIAGNOSTIC_ROOT;
+          const diagnostic = JSON.parse(
+            fs.readFileSync(path.join(root, "network-diagnostic.json"), "utf8"),
+          );
+
+          function sha256(buffer) {
+            return crypto.createHash("sha256").update(buffer).digest("hex");
+          }
+
+          function normalize(value) {
+            return String(value || "").normalize("NFKC").replace(/\s+/g, "").toLowerCase();
+          }
+
+          async function fetchOnce(url) {
+            const response = await fetch(url, {
+              method: "GET",
+              redirect: "manual",
+              headers: { "User-Agent": "baoxiao-audit-core/0.1" },
+            });
+            const body = Buffer.from(await response.arrayBuffer());
+            const contentType = response.headers.get("content-type") || "";
+            if (response.status !== 200 || !/application\/json/i.test(contentType)) {
+              throw new Error(`official_api_invalid_response:${response.status}:${contentType}`);
+            }
+            return {
+              status: response.status,
+              content_type: contentType,
+              content_length: body.length,
+              sha256: sha256(body),
+              json: JSON.parse(body.toString("utf8")),
+            };
+          }
+
+          async function main() {
+            const records = [];
+            for (const target of diagnostic.targets) {
+              const candidate = target.responses.find((response) =>
+                response.request_url.includes("/cn/static/data/DocInfo/SelectByDocId/"),
+              );
+              if (!candidate) throw new Error(`${target.pilot_id}:official_api_not_found`);
+              const url = new URL(candidate.request_url);
+              if (
+                url.protocol !== "https:" ||
+                url.hostname !== "www.nfra.gov.cn" ||
+                url.pathname !==
+                  `/cn/static/data/DocInfo/SelectByDocId/data_docId=${target.doc_id}.json`
+              ) {
+                throw new Error(`${target.pilot_id}:official_api_not_canonical`);
+              }
+
+              const first = await fetchOnce(url.href);
+              const second = await fetchOnce(url.href);
+              const data = first.json?.data;
+              if (
+                first.sha256 !== second.sha256 ||
+                String(data?.docId) !== target.doc_id ||
+                !normalize(data?.docTitle).includes(normalize(target.expected_title)) ||
+                normalize(data?.docClob).length < 200
+              ) {
+                throw new Error(`${target.pilot_id}:official_api_not_stable`);
+              }
+              records.push({
+                pilot_id: target.pilot_id,
+                landing_url: target.landing_url,
+                retrieval_url: url.href,
+                doc_id: target.doc_id,
+                first_status: first.status,
+                second_status: second.status,
+                content_type: first.content_type,
+                content_length: first.content_length,
+                first_sha256: first.sha256,
+                second_sha256: second.sha256,
+                hashes_match: true,
+                doc_id_matches: true,
+                title_matches: true,
+                body_present: true,
+                request_cookie_set: false,
+              });
+            }
+            fs.writeFileSync(
+              path.join(root, "official-api-repeatability.json"),
+              JSON.stringify({ result: "OFFICIAL_API_REPEATABILITY_OK", records }, null, 2) + "\n",
+            );
+            console.log("OFFICIAL_API_REPEATABILITY_OK");
+          }
+
+          main().catch((error) => {
+            console.error(error);
+            process.exitCode = 1;
+          });
+          JS
+
       - name: Upload diagnostic report
         uses: actions/upload-artifact@v4
         with:
