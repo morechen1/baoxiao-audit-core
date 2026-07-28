@@ -30,9 +30,9 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgresql+psycopg://baoxiao:temporary_ci_password@localhost:5432/baoxiao_pilot_v1
-      DATA_DIR: ${{ runner.temp }}/baoxiao-pilot-data
-      PACKAGE_ROOT: ${{ runner.temp }}/baoxiao-pilot-first-batch-v1-success
-      RUN_REPORTS: ${{ runner.temp }}/baoxiao-pilot-run-reports
+      DATA_DIR: /tmp/baoxiao-pilot-data
+      PACKAGE_ROOT: /tmp/baoxiao-pilot-first-batch-v1-success
+      RUN_REPORTS: /tmp/baoxiao-pilot-run-reports
       HTTP_PROXY: ""
       HTTPS_PROXY: ""
       ALL_PROXY: ""
