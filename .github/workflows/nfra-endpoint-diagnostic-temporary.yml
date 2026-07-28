@@ -456,6 +456,107 @@ jobs:
           });
           JS
 
+      - name: Diagnose approved NFRA response fields without storing bodies
+        run: |
+          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY
+          unset http_proxy https_proxy all_proxy
+          node <<'JS'
+          const fs = require("fs");
+          const path = require("path");
+
+          const manifests = [
+            "pilot/manifests/regulations.jsonl",
+            "pilot/manifests/penalties.jsonl",
+            "pilot/manifests/regulatory_cases.jsonl",
+          ];
+          const normalize = (value) =>
+            String(value || "").normalize("NFKC").replace(/\s+/g, "").toLowerCase();
+          const textLength = (html) =>
+            String(html || "")
+              .replace(/<script[\s\S]*?<\/script>/gi, "")
+              .replace(/<style[\s\S]*?<\/style>/gi, "")
+              .replace(/<[^>]+>/g, " ")
+              .replace(/&nbsp;|&#160;/gi, " ")
+              .replace(/\s+/g, " ")
+              .trim().length;
+
+          async function main() {
+            const rows = manifests.flatMap((filename) =>
+              fs.readFileSync(filename, "utf8")
+                .split(/\r?\n/)
+                .filter(Boolean)
+                .map((line) => JSON.parse(line)),
+            );
+            const records = [];
+            for (const row of rows) {
+              const landing = new URL(row.source_url);
+              const docId = landing.searchParams.get("docId");
+              if (!docId || !/^\d+$/.test(docId)) {
+                throw new Error(`${row.pilot_id}:invalid_doc_id`);
+              }
+              const retrievalUrl =
+                "https://www.nfra.gov.cn/cn/static/data/DocInfo/SelectByDocId/" +
+                `data_docId=${docId}.json`;
+              const response = await fetch(retrievalUrl, {
+                method: "GET",
+                redirect: "manual",
+                headers: { "User-Agent": "baoxiao-audit-core/0.1" },
+              });
+              const payload = await response.json();
+              const data = payload?.data || {};
+              const expected = normalize(row.expected_title);
+              const matchingFields = Object.entries(data)
+                .filter(([, value]) => typeof value === "string")
+                .filter(([, value]) => normalize(value).includes(expected))
+                .map(([key]) => key)
+                .sort();
+              const attachments = Array.isArray(data.attachmentInfoVOList)
+                ? data.attachmentInfoVOList.map((item) => ({
+                    keys: Object.keys(item || {}).sort(),
+                    file_name: item?.fileName || item?.attachName || item?.name || null,
+                    file_url:
+                      item?.fileUrl || item?.attachUrl || item?.url || item?.filePath || null,
+                  }))
+                : [];
+              records.push({
+                pilot_id: row.pilot_id,
+                expected_title: row.expected_title,
+                doc_id: docId,
+                retrieval_url: retrievalUrl,
+                status: response.status,
+                content_type: response.headers.get("content-type"),
+                rpt_code: payload?.rptCode ?? null,
+                doc_title: data.docTitle ?? null,
+                doc_source: data.docSource ?? null,
+                publish_date: data.publishDate ?? null,
+                document_number: data.documentNo ?? null,
+                doc_clob_length: String(data.docClob || "").length,
+                doc_clob_text_length: textLength(data.docClob),
+                remark2_length: String(data.remark2 || "").length,
+                doc_file_url: data.docFileUrl || null,
+                pdf_file_url: data.pdfFileUrl || null,
+                matching_string_fields: matchingFields,
+                attachment_count: attachments.length,
+                attachments,
+                request_cookie_set: false,
+              });
+            }
+            fs.writeFileSync(
+              path.join(
+                process.env.DIAGNOSTIC_ROOT,
+                "nfra-all-manifest-diagnostic.json",
+              ),
+              JSON.stringify({ records }, null, 2) + "\n",
+            );
+            console.log(`NFRA_MANIFEST_DIAGNOSTIC_OK count=${records.length}`);
+          }
+
+          main().catch((error) => {
+            console.error(error);
+            process.exitCode = 1;
+          });
+          JS
+
       - name: Migrate fresh PostgreSQL and validate all manifests
         run: |
           unset HTTP_PROXY HTTPS_PROXY ALL_PROXY
@@ -465,6 +566,7 @@ jobs:
           cp "$DIAGNOSTIC_ROOT/public-dns.txt" "$PACKAGE_ROOT/preflight/"
           cp "$DIAGNOSTIC_ROOT/network-diagnostic.json" "$PACKAGE_ROOT/preflight/"
           cp "$DIAGNOSTIC_ROOT/official-api-repeatability.json" "$PACKAGE_ROOT/preflight/"
+          cp "$DIAGNOSTIC_ROOT/nfra-all-manifest-diagnostic.json" "$PACKAGE_ROOT/preflight/"
           uv run alembic upgrade head
           uv run python -m app.cli.main pilot-validate-manifests \
             --path pilot/manifests | tee "$RUN_REPORTS/manifest-validation.txt"
