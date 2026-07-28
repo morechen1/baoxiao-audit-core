@@ -13,18 +13,51 @@ permissions:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: baoxiao_pilot_v1
+          POSTGRES_USER: baoxiao
+          POSTGRES_PASSWORD: temporary_ci_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U baoxiao -d baoxiao_pilot_v1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       HTTP_PROXY: ""
       HTTPS_PROXY: ""
       ALL_PROXY: ""
       DIAGNOSTIC_ROOT: /tmp/nfra-endpoint-diagnostic
+      DATABASE_URL: postgresql+psycopg://baoxiao:temporary_ci_password@localhost:5432/baoxiao_pilot_v1
+      DATA_DIR: /tmp/baoxiao-pilot-data
+      PACKAGE_ROOT: /tmp/baoxiao-pilot-first-batch-v1-success
+      RUN_REPORTS: /tmp/baoxiao-pilot-run-reports
+      LLM_ENABLED: "false"
+      EMBEDDING_ENABLED: "false"
+      OCR_ENABLED: "false"
     steps:
       - uses: actions/checkout@v5
 
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.32"
+          enable-cache: true
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install locked Python dependencies
+        run: uv sync --frozen --extra dev
 
       - name: Install pinned Playwright Chromium
         run: |
@@ -327,6 +360,490 @@ jobs:
           });
           JS
 
+      - name: Gate collection on repeatable official API responses
+        run: |
+          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY
+          unset http_proxy https_proxy all_proxy
+          node <<'JS'
+          const crypto = require("crypto");
+          const fs = require("fs");
+          const path = require("path");
+
+          const root = process.env.DIAGNOSTIC_ROOT;
+          const diagnostic = JSON.parse(
+            fs.readFileSync(path.join(root, "network-diagnostic.json"), "utf8"),
+          );
+          const normalize = (value) =>
+            String(value || "").normalize("NFKC").replace(/\s+/g, "").toLowerCase();
+          const sha256 = (value) =>
+            crypto.createHash("sha256").update(value).digest("hex");
+
+          async function fetchOnce(url) {
+            const response = await fetch(url, {
+              method: "GET",
+              redirect: "manual",
+              headers: { "User-Agent": "baoxiao-audit-core/0.1" },
+            });
+            const body = Buffer.from(await response.arrayBuffer());
+            const contentType = response.headers.get("content-type") || "";
+            if (response.status !== 200 || !/application\/json/i.test(contentType)) {
+              throw new Error(`official_api_invalid_response:${response.status}:${contentType}`);
+            }
+            return {
+              status: response.status,
+              content_type: contentType,
+              content_length: body.length,
+              sha256: sha256(body),
+              json: JSON.parse(body.toString("utf8")),
+            };
+          }
+
+          async function main() {
+            const records = [];
+            for (const target of diagnostic.targets) {
+              const candidate = target.responses.find((response) =>
+                response.request_url.includes("/cn/static/data/DocInfo/SelectByDocId/"),
+              );
+              if (!candidate) throw new Error(`${target.pilot_id}:official_api_not_found`);
+              const url = new URL(candidate.request_url);
+              if (
+                url.protocol !== "https:" ||
+                url.hostname !== "www.nfra.gov.cn" ||
+                url.pathname !==
+                  `/cn/static/data/DocInfo/SelectByDocId/data_docId=${target.doc_id}.json`
+              ) {
+                throw new Error(`${target.pilot_id}:official_api_not_canonical`);
+              }
+              const first = await fetchOnce(url.href);
+              const second = await fetchOnce(url.href);
+              const data = first.json?.data;
+              if (
+                first.sha256 !== second.sha256 ||
+                String(data?.docId) !== target.doc_id ||
+                !normalize(data?.docTitle).includes(normalize(target.expected_title)) ||
+                normalize(data?.docClob).length < 200
+              ) {
+                throw new Error(`${target.pilot_id}:official_api_not_stable`);
+              }
+              records.push({
+                pilot_id: target.pilot_id,
+                landing_url: target.landing_url,
+                retrieval_url: url.href,
+                doc_id: target.doc_id,
+                first_status: first.status,
+                second_status: second.status,
+                content_type: first.content_type,
+                content_length: first.content_length,
+                first_sha256: first.sha256,
+                second_sha256: second.sha256,
+                hashes_match: true,
+                doc_id_matches: true,
+                title_matches: true,
+                body_present: true,
+                request_cookie_set: false,
+              });
+            }
+            fs.writeFileSync(
+              path.join(root, "official-api-repeatability.json"),
+              JSON.stringify({ result: "OFFICIAL_API_REPEATABILITY_OK", records }, null, 2) + "\n",
+            );
+            console.log("OFFICIAL_API_REPEATABILITY_OK");
+          }
+
+          main().catch((error) => {
+            console.error(error);
+            process.exitCode = 1;
+          });
+          JS
+
+      - name: Migrate fresh PostgreSQL and validate all manifests
+        run: |
+          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY
+          unset http_proxy https_proxy all_proxy
+          mkdir -p "$DATA_DIR" "$RUN_REPORTS" "$PACKAGE_ROOT/preflight"
+          cp "$DIAGNOSTIC_ROOT/public-dns.json" "$PACKAGE_ROOT/preflight/"
+          cp "$DIAGNOSTIC_ROOT/public-dns.txt" "$PACKAGE_ROOT/preflight/"
+          cp "$DIAGNOSTIC_ROOT/network-diagnostic.json" "$PACKAGE_ROOT/preflight/"
+          cp "$DIAGNOSTIC_ROOT/official-api-repeatability.json" "$PACKAGE_ROOT/preflight/"
+          uv run alembic upgrade head
+          uv run python -m app.cli.main pilot-validate-manifests \
+            --path pilot/manifests | tee "$RUN_REPORTS/manifest-validation.txt"
+          grep -Fx "valid=20 failed=0" "$RUN_REPORTS/manifest-validation.txt"
+
+      - name: Collect four approved manifest groups
+        run: |
+          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY
+          unset http_proxy https_proxy all_proxy
+          set +e
+          : > "$RUN_REPORTS/collection-exit-codes.txt"
+          for manifest_name in regulations penalties regulatory_cases; do
+            uv run python -m app.cli.main pilot-collect \
+              --manifest "pilot/manifests/${manifest_name}.jsonl" \
+              --requested-by github_hosted_runner \
+              2>&1 | tee "$RUN_REPORTS/collect-${manifest_name}.txt"
+            command_status=${PIPESTATUS[0]}
+            echo "${manifest_name}=${command_status}" \
+              | tee -a "$RUN_REPORTS/collection-exit-codes.txt"
+          done
+          exit 0
+
+      - name: Parse pending documents and export run reports
+        run: |
+          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY
+          unset http_proxy https_proxy all_proxy
+          uv run python -m app.cli.main parse-pending \
+            | tee "$RUN_REPORTS/parse-pending.txt"
+          uv run python -m app.cli.main pilot-status \
+            | tee "$RUN_REPORTS/pilot-status.txt"
+          uv run python -m app.cli.main pilot-quality-report \
+            --output "$RUN_REPORTS/pilot-first-batch-quality.json"
+          cp pilot/reports/pilot-collection-run-*.jsonl "$RUN_REPORTS/"
+
+      - name: Export fresh database snapshot
+        env:
+          PGPASSWORD: temporary_ci_password
+        run: |
+          pg_dump \
+            --host localhost \
+            --username baoxiao \
+            --dbname baoxiao_pilot_v1 \
+            --no-owner \
+            --no-privileges \
+            | gzip -9 > "${RUNNER_TEMP}/pilot-first-batch-v1.sql.gz"
+
+      - name: Build portable pilot material package
+        run: |
+          uv run python - <<'PY'
+          from __future__ import annotations
+
+          import hashlib
+          import json
+          import os
+          import shutil
+          import unicodedata
+          import zipfile
+          from collections import Counter
+          from datetime import UTC, datetime
+          from pathlib import Path
+
+          from sqlalchemy import func, select
+
+          from app.core.database import SessionLocal
+          from app.models import (
+              AuthenticityDecisionLog,
+              DocumentOccurrence,
+              PilotCollectionItem,
+              PilotCollectionRun,
+              ReviewDecision,
+              SourceDocument,
+          )
+          from app.models.enums import AuthenticityType, KnowledgeIndexStatus
+
+          root = Path(os.environ["PACKAGE_ROOT"])
+          reports = Path(os.environ["RUN_REPORTS"])
+          for name in (
+              "source-registry",
+              "manifests",
+              "preflight",
+              "reports",
+              "mapping",
+              "sources",
+              "parsed",
+          ):
+              (root / name).mkdir(parents=True, exist_ok=True)
+          for path in Path("pilot/source_registry").glob("*.yaml"):
+              shutil.copy2(path, root / "source-registry" / path.name)
+          for path in Path("pilot/manifests").glob("*.jsonl"):
+              shutil.copy2(path, root / "manifests" / path.name)
+          for path in reports.iterdir():
+              if path.is_file():
+                  shutil.copy2(path, root / "reports" / path.name)
+
+          def digest(path: Path) -> str:
+              value = hashlib.sha256()
+              with path.open("rb") as handle:
+                  for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                      value.update(chunk)
+              return value.hexdigest()
+
+          def normalize(value: str) -> str:
+              return "".join(unicodedata.normalize("NFKC", value).split()).lower()
+
+          mapping = []
+          hash_failures = []
+          title_failures = []
+          raw_count = 0
+          parsed_count = 0
+          requires_ocr_count = 0
+
+          with SessionLocal() as session:
+              items = list(
+                  session.scalars(select(PilotCollectionItem).order_by(PilotCollectionItem.id))
+              )
+              runs = list(
+                  session.scalars(select(PilotCollectionRun).order_by(PilotCollectionRun.id))
+              )
+              documents = list(
+                  session.scalars(select(SourceDocument).order_by(SourceDocument.id))
+              )
+              review_count = int(
+                  session.scalar(select(func.count()).select_from(ReviewDecision)) or 0
+              )
+              authenticity_decision_count = int(
+                  session.scalar(
+                      select(func.count()).select_from(AuthenticityDecisionLog)
+                  )
+                  or 0
+              )
+              occurrence_count = int(
+                  session.scalar(select(func.count()).select_from(DocumentOccurrence)) or 0
+              )
+
+              for item in items:
+                  document = session.get(SourceDocument, item.document_id) if item.document_id else None
+                  occurrence = (
+                      session.get(DocumentOccurrence, item.occurrence_id)
+                      if item.occurrence_id
+                      else None
+                  )
+                  raw_relative = None
+                  parsed_relative = None
+                  raw_sha256 = None
+                  parsed_sha256 = None
+                  title_found = False
+
+                  if document:
+                      raw_source = Path(document.raw_file_path)
+                      raw_relative = f"sources/{item.pilot_id}{raw_source.suffix.lower()}"
+                      raw_target = root / raw_relative
+                      shutil.copy2(raw_source, raw_target)
+                      raw_count += 1
+                      raw_sha256 = digest(raw_target)
+                      if raw_sha256 != document.sha256:
+                          hash_failures.append(f"{item.pilot_id}:raw_sha256_mismatch")
+
+                      searchable = "\n".join(
+                          value for value in (document.source_title, document.raw_text) if value
+                      )
+                      title_found = bool(item.expected_title) and normalize(
+                          item.expected_title or ""
+                      ) in normalize(searchable)
+                      if not title_found:
+                          title_failures.append(item.pilot_id)
+
+                      if document.parse_status == "requires_ocr":
+                          requires_ocr_count += 1
+                      elif document.parse_status == "parsed" and document.parsed_artifact_path:
+                          parsed_relative = f"parsed/{item.pilot_id}.json"
+                          parsed_target = root / parsed_relative
+                          shutil.copy2(Path(document.parsed_artifact_path), parsed_target)
+                          parsed_count += 1
+                          parsed_sha256 = digest(parsed_target)
+                          if parsed_sha256 != document.parsed_artifact_sha256:
+                              hash_failures.append(
+                                  f"{item.pilot_id}:parsed_artifact_sha256_mismatch"
+                              )
+                          payload = json.loads(parsed_target.read_text(encoding="utf-8"))
+                          text_sha256 = hashlib.sha256(
+                              payload["plain_text"].encode("utf-8")
+                          ).hexdigest()
+                          if text_sha256 != document.parsed_text_sha256:
+                              hash_failures.append(
+                                  f"{item.pilot_id}:parsed_text_sha256_mismatch"
+                              )
+
+                  mapping.append(
+                      {
+                          "pilot_id": item.pilot_id,
+                          "source_type": item.source_type,
+                          "expected_title": item.expected_title,
+                          "source_url": item.source_url,
+                          "collection_status": item.status,
+                          "error_code": item.last_error_code,
+                          "document_id": item.document_id,
+                          "occurrence_id": item.occurrence_id,
+                          "http_status": document.http_status if document else None,
+                          "final_url": document.final_url if document else None,
+                          "content_type": document.content_type if document else None,
+                          "raw_relative_path": raw_relative,
+                          "raw_sha256": raw_sha256,
+                          "parsed_relative_path": parsed_relative,
+                          "parsed_artifact_sha256": parsed_sha256,
+                          "parse_status": document.parse_status if document else "not_collected",
+                          "authenticity_type": (
+                              document.authenticity_type if document else None
+                          ),
+                          "knowledge_index_status": (
+                              document.knowledge_index_status if document else None
+                          ),
+                          "expected_title_found": title_found,
+                          "occurrence_source_url": occurrence.source_url if occurrence else None,
+                          "occurrence_final_url": occurrence.final_url if occurrence else None,
+                      }
+                  )
+
+              statuses = Counter(item.status for item in items)
+              errors = Counter(item.last_error_code for item in items if item.last_error_code)
+              summary = {
+                  "generated_at": datetime.now(UTC).isoformat(),
+                  "run_ids": [run.id for run in runs],
+                  "planned_count": sum(run.planned_count for run in runs),
+                  "pilot_item_count": len(items),
+                  "item_statuses": dict(sorted(statuses.items())),
+                  "error_codes": dict(sorted(errors.items())),
+                  "source_document_count": len(documents),
+                  "occurrence_count": occurrence_count,
+                  "raw_file_count": raw_count,
+                  "parsed_artifact_file_count": parsed_count,
+                  "requires_ocr_count": requires_ocr_count,
+                  "hash_failures": hash_failures,
+                  "title_failures": title_failures,
+                  "review_decision_count": review_count,
+                  "authenticity_decision_count": authenticity_decision_count,
+                  "indexed_count": sum(
+                      document.knowledge_index_status
+                      == KnowledgeIndexStatus.INDEXED.value
+                      for document in documents
+                  ),
+                  "all_documents_pending_verification": all(
+                      document.authenticity_type
+                      == AuthenticityType.PENDING_VERIFICATION.value
+                      for document in documents
+                  ),
+                  "raw_count_matches_collected_items": (
+                      raw_count == statuses.get("collected", 0)
+                  ),
+                  "parsed_count_matches_source_documents": (
+                      parsed_count + requires_ocr_count == len(documents)
+                  ),
+              }
+
+          (root / "mapping/pilot-document-mapping.json").write_text(
+              json.dumps(mapping, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          (root / "reports/summary.json").write_text(
+              json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          (root / "README.md").write_text(
+              "\n".join(
+                  [
+                      "# 保销智审首批真实公开数据试采集 V1 材料包",
+                      "",
+                      "由 GitHub Hosted Ubuntu Runner 在无代理环境变量、真实公网 DNS、",
+                      "全新 PostgreSQL 16 数据库和空数据目录中生成。",
+                      "",
+                      f"- 计划条目：{summary['planned_count']}",
+                      f"- 条目状态：{summary['item_statuses']}",
+                      f"- 固定错误码：{summary['error_codes']}",
+                      f"- 原件：{summary['raw_file_count']}",
+                      f"- 解析产物：{summary['parsed_artifact_file_count']}",
+                      f"- requires_ocr：{summary['requires_ocr_count']}",
+                      "",
+                      "本 Runner 制品只包含本轮重新执行的 18 份 NFRA 官方公开 JSON。",
+                      "最终材料包另行保留上一轮已成功并核验的两份 CPIC 官方 PDF。",
+                      "所有文档保持 pending_verification，未执行结构化导入、人工审核、",
+                      "真实性升级或索引。数据库导出作为 Actions artifact 独立文件提供。",
+                  ]
+              )
+              + "\n",
+              encoding="utf-8",
+          )
+          zip_path = Path(os.environ["RUNNER_TEMP"]) / (
+              "baoxiao-pilot-first-batch-v1-success.zip"
+          )
+          with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+              for path in sorted(root.rglob("*")):
+                  relative = path.relative_to(root.parent).as_posix()
+                  if path.is_dir():
+                      archive.writestr(f"{relative.rstrip('/')}/", b"")
+                  else:
+                      archive.write(path, relative)
+          zip_sha256 = digest(zip_path)
+          (
+              Path(os.environ["RUNNER_TEMP"])
+              / "baoxiao-pilot-first-batch-v1-success.sha256"
+          ).write_text(
+              f"{zip_sha256}  {zip_path.name}\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(summary, ensure_ascii=False, indent=2))
+          print(f"package_sha256={zip_sha256}")
+          PY
+
+      - name: Verify material package trust boundary
+        run: |
+          uv run python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          import zipfile
+          from pathlib import Path, PurePosixPath
+
+          runner_temp = Path(os.environ["RUNNER_TEMP"])
+          zip_path = runner_temp / "baoxiao-pilot-first-batch-v1-success.zip"
+          expected = (
+              runner_temp / "baoxiao-pilot-first-batch-v1-success.sha256"
+          ).read_text().split()[0]
+          actual = hashlib.sha256(zip_path.read_bytes()).hexdigest()
+          if actual != expected:
+              raise SystemExit("package_sha256_mismatch")
+
+          secret_pattern = re.compile(
+              rb"sk-[A-Za-z0-9_-]{16,}|ghp_[A-Za-z0-9]{20,}|github_pat_|"
+              rb"BEGIN (?:RSA|OPENSSH|EC) PRIVATE KEY|Authorization: Bearer|"
+              rb"Cookie:|/home/runner/|/Users/|[A-Za-z]:\\\\Users\\\\"
+          )
+          with zipfile.ZipFile(zip_path) as archive:
+              bad = archive.testzip()
+              if bad:
+                  raise SystemExit(f"zip_integrity_failure:{bad}")
+              for info in archive.infolist():
+                  member = PurePosixPath(info.filename)
+                  if member.is_absolute() or ".." in member.parts:
+                      raise SystemExit(f"unsafe_archive_path:{info.filename}")
+                  if not info.is_dir() and secret_pattern.search(archive.read(info)):
+                      raise SystemExit(f"sensitive_content:{info.filename}")
+              summary = json.loads(
+                  archive.read(
+                      "baoxiao-pilot-first-batch-v1-success/reports/summary.json"
+                  )
+              )
+
+          required = {
+              "planned_count": 18,
+              "pilot_item_count": 18,
+              "source_document_count": 18,
+              "raw_file_count": 18,
+              "occurrence_count": 18,
+              "review_decision_count": 0,
+              "authenticity_decision_count": 0,
+              "indexed_count": 0,
+              "all_documents_pending_verification": True,
+              "raw_count_matches_collected_items": True,
+              "parsed_count_matches_source_documents": True,
+          }
+          failures = {
+              key: {"expected": expected_value, "actual": summary.get(key)}
+              for key, expected_value in required.items()
+              if summary.get(key) != expected_value
+          }
+          if summary.get("item_statuses") != {"collected": 18}:
+              failures["item_statuses"] = summary.get("item_statuses")
+          if summary.get("hash_failures"):
+              failures["hash_failures"] = summary["hash_failures"]
+          if summary.get("title_failures"):
+              failures["title_failures"] = summary["title_failures"]
+          if failures:
+              raise SystemExit(f"material_quality_gate_failed:{failures}")
+          print(f"ZIP_INTEGRITY_OK sha256={actual}")
+          print("RELATIVE_PATHS_OK")
+          print("HASH_AND_COUNT_CONSISTENCY_OK")
+          print("SENSITIVE_DATA_SCAN_OK")
+          PY
+
       - name: Validate diagnostic privacy boundary
         run: |
           python - <<'PY'
@@ -464,9 +981,22 @@ jobs:
           JS
 
       - name: Upload diagnostic report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: nfra-endpoint-diagnostic
           path: /tmp/nfra-endpoint-diagnostic/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload successful pilot material
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: baoxiao-pilot-first-batch-v1-success
+          path: |
+            ${{ runner.temp }}/baoxiao-pilot-first-batch-v1-success.zip
+            ${{ runner.temp }}/baoxiao-pilot-first-batch-v1-success.sha256
+            ${{ runner.temp }}/pilot-first-batch-v1.sql.gz
           if-no-files-found: error
           retention-days: 7
