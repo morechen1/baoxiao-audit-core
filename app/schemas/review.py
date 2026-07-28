@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.enums import AuthenticityType, DatasetSplit, SampleCategory
 from app.schemas.structured import FieldEvidenceItem
@@ -13,9 +13,16 @@ class StrictReviewModel(BaseModel):
 
 
 class StructuredRecordCorrection(StrictReviewModel):
-    structured_record_id: int = Field(gt=0)
+    structured_record_id: int | None = Field(default=None, gt=0)
+    portable_record_key: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     fields: dict[str, Any] = Field(min_length=1)
     field_evidence: dict[str, list[FieldEvidenceItem]] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def require_record_locator(self) -> StructuredRecordCorrection:
+        if self.structured_record_id is None and self.portable_record_key is None:
+            raise ValueError("structured record locator is required")
+        return self
 
 
 class StructuredRecordCorrections(StrictReviewModel):
@@ -23,12 +30,19 @@ class StructuredRecordCorrections(StrictReviewModel):
 
     @field_validator("records")
     @classmethod
-    def record_ids_must_be_unique(
+    def record_locators_must_be_unique(
         cls, records: list[StructuredRecordCorrection]
     ) -> list[StructuredRecordCorrection]:
-        ids = [record.structured_record_id for record in records]
-        if len(ids) != len(set(ids)):
-            raise ValueError("structured_record_id values must be unique")
+        locators = [
+            (
+                f"portable:{record.portable_record_key}"
+                if record.portable_record_key is not None
+                else f"database:{record.structured_record_id}"
+            )
+            for record in records
+        ]
+        if len(locators) != len(set(locators)):
+            raise ValueError("structured record locators must be unique")
         return records
 
 

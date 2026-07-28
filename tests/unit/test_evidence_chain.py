@@ -2,6 +2,7 @@ import hashlib
 import json
 import shutil
 import zipfile
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -269,6 +270,121 @@ def test_normalized_value_must_follow_declared_transform(session) -> None:
         )
 
 
+def test_split_chinese_date_whitespace_is_deterministically_normalized(session) -> None:
+    text = "本办法自\n202\n4\n年\n3\n月\n1\n日起施行。"
+    document = make_document(session, DataType.REGULATION.value, text)
+
+    validated = FieldEvidenceService(settings_for(session)).validate(
+        session,
+        document,
+        {"effective_date": date(2024, 3, 1)},
+        {
+            "effective_date": evidence(
+                document,
+                text,
+                mode="normalized",
+                note="collapse_unicode_whitespace_for_chinese_date_v1",
+            )
+        },
+    )
+
+    assert validated["effective_date"][0]["quote"] == text
+    assert validated["effective_date"][0]["transformation_note"] == (
+        "collapse_unicode_whitespace_for_chinese_date_v1"
+    )
+
+
+def test_split_chinese_date_requires_exact_quote_and_single_sentence(session) -> None:
+    text = "本办法自\n202\n4\n年\n3\n月\n1\n日起施行。"
+    document = make_document(session, DataType.REGULATION.value, text)
+    fabricated_quote = "本办法自2024年3月1日起施行。"
+    fabricated = {
+        "effective_date": [
+            {
+                "quote": fabricated_quote,
+                "page_number": 1,
+                "start_offset": 0,
+                "end_offset": len(fabricated_quote),
+                "mode": "normalized",
+                "transformation_note": "collapse_unicode_whitespace_for_chinese_date_v1",
+            }
+        ]
+    }
+
+    with pytest.raises(FieldEvidenceError, match="evidence_offset_mismatch"):
+        FieldEvidenceService(settings_for(session)).validate(
+            session,
+            document,
+            {"effective_date": date(2024, 3, 1)},
+            fabricated,
+        )
+
+    cross_sentence = "本办法自202\n4年。另文3月1日起施行"
+    other = make_document(session, DataType.REGULATION.value, cross_sentence)
+    with pytest.raises(FieldEvidenceError, match="field_not_supported_by_evidence"):
+        FieldEvidenceService(settings_for(session)).validate(
+            session,
+            other,
+            {"effective_date": date(2024, 3, 1)},
+            {
+                "effective_date": evidence(
+                    other,
+                    cross_sentence,
+                    mode="normalized",
+                    note="collapse_unicode_whitespace_for_chinese_date_v1",
+                )
+            },
+        )
+
+
+def test_nfra_caption_is_narrowly_scoped_document_number_metadata(session) -> None:
+    text = "保险销售行为管理办法"
+    document = make_document(session, DataType.REGULATION.value, text)
+    caption = "中国银行保险监督管理委员会令2022年第9号"
+    ParsedArtifactService(settings_for(session)).persist(
+        session,
+        document,
+        ParsedDocument(
+            title=text,
+            plain_text=text,
+            pages=[ParsedPage(page_number=1, text=text)],
+            metadata={"nfra": {"caption": caption}},
+        ),
+        parser_name="NfraJsonParser",
+    )
+    session.commit()
+    metadata_evidence = {
+        "document_number": [
+            {
+                "quote": text,
+                "page_number": 1,
+                "start_offset": 0,
+                "end_offset": len(text),
+                "mode": "document_metadata",
+                "metadata_field": "nfra.caption",
+            }
+        ]
+    }
+
+    FieldEvidenceService(settings_for(session)).validate(
+        session,
+        document,
+        {"document_number": caption},
+        metadata_evidence,
+    )
+
+    for forbidden_field in ("expected_title", "nfra.arbitrary"):
+        rejected = json.loads(json.dumps(metadata_evidence))
+        rejected["document_number"][0]["metadata_field"] = forbidden_field
+        with pytest.raises(FieldEvidenceError, match="field_not_supported_by_evidence"):
+            FieldEvidenceService(settings_for(session)).validate(
+                session,
+                document,
+                {"document_number": caption},
+                rejected,
+            )
+
+
 def test_summary_evidence_routes_demo_record_to_expert_review(session) -> None:
     document = make_document(
         session,
@@ -328,6 +444,7 @@ def decision(
         "batch_id": batch.id,
         "batch_item_id": row["batch_item_id"],
         "reviewed_payload_hash": payload_hash(row),
+        "review_payload_schema_version": row["review_payload_schema_version"],
         "schema_version": batch.schema_version,
         "record_id": row["record_id"],
         "record_type": row["record_type"],

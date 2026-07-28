@@ -46,6 +46,7 @@ def nfra_json(
     doc_id: str = "123456",
     title: str = EXPECTED_TITLE,
     body: str | None = None,
+    caption: str | None = None,
 ) -> bytes:
     content = body or ("第一条 保险销售行为应当依法合规。" * 30)
     return json.dumps(
@@ -57,6 +58,7 @@ def nfra_json(
                 "docSource": "国家金融监督管理总局",
                 "publishDate": "2026-07-28 10:30:00",
                 "documentNo": "金规〔2026〕1号",
+                "caption": caption,
                 "attachmentInfoVOList": [],
             },
             "msg": "success",
@@ -373,7 +375,19 @@ def test_nfra_json_parser_is_deterministic_and_removes_markup(tmp_path: Path) ->
     assert first.plain_text.startswith(f"{EXPECTED_TITLE}\n金规〔2026〕1号")
     assert "<script>" not in first.plain_text
     assert "danger()" not in first.plain_text
-    assert first.metadata["doc_id"] == "123456"
+    assert first.metadata["nfra"]["doc_id"] == "123456"
+
+
+def test_nfra_json_parser_exposes_only_valid_verbatim_caption(tmp_path: Path) -> None:
+    caption = "中国银行保险监督管理委员会令2022年第9号"
+    path = tmp_path / "document.json"
+    path.write_bytes(nfra_json(caption=f"(2022年12月26日{caption}公布 自2023年3月1日起施行)"))
+
+    parsed = NfraJsonParser().parse(path)
+
+    assert parsed.metadata["nfra"]["caption"] == caption
+    path.write_bytes(nfra_json(caption=f"{caption}，另见国家金融监督管理总局令2023年第1号"))
+    assert NfraJsonParser().parse(path).metadata["nfra"]["caption"] is None
 
 
 def test_nfra_json_enters_existing_immutable_parsed_hash_chain(

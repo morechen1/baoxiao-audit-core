@@ -16,7 +16,7 @@ from app.services.integrity import RawArtifactIntegrityService
 if TYPE_CHECKING:
     from app.services.parsing.base import ParsedDocument
 
-PARSED_ARTIFACT_SCHEMA_VERSION = "1.0"
+PARSED_ARTIFACT_SCHEMA_VERSION = "2.0"
 PARSER_VERSION = "1.0"
 
 
@@ -51,11 +51,9 @@ class ParsedArtifactService:
         parsed_at = datetime.now(UTC)
         payload = {
             "schema_version": PARSED_ARTIFACT_SCHEMA_VERSION,
-            "document_id": document.id,
             "raw_sha256": document.sha256,
             "parser_name": parser_name,
             "parser_version": parser_version,
-            "parsed_at": parsed_at.isoformat(),
             "title": parsed.title,
             "plain_text": parsed.plain_text,
             "pages": self._pages_with_offsets(parsed),
@@ -142,9 +140,13 @@ class ParsedArtifactIntegrityService:
             payload = cast(dict[str, Any], json.loads(content))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ParsedArtifactIntegrityError("parsed_artifact_hash_mismatch") from exc
+        schema_version = payload.get("schema_version")
+        if schema_version not in {"1.0", PARSED_ARTIFACT_SCHEMA_VERSION}:
+            raise ParsedArtifactIntegrityError("parsed_artifact_hash_mismatch")
+        if schema_version == "1.0" and payload.get("document_id") != document.id:
+            raise ParsedArtifactIntegrityError("parsed_raw_hash_mismatch")
         if (
-            payload.get("document_id") != document.id
-            or payload.get("raw_sha256") != document.sha256
+            payload.get("raw_sha256") != document.sha256
             or document.parsed_from_raw_sha256 != document.sha256
         ):
             raise ParsedArtifactIntegrityError("parsed_raw_hash_mismatch")

@@ -187,6 +187,7 @@ def decision_payload(row, *, status=ReviewStatus.APPROVED.value, corrections=Non
         "batch_id": row["batch_id"],
         "batch_item_id": row["batch_item_id"],
         "reviewed_payload_hash": payload_hash(row),
+        "review_payload_schema_version": row["review_payload_schema_version"],
         "schema_version": "2.0",
         "record_id": row["record_id"],
         "record_type": row["record_type"],
@@ -1156,6 +1157,112 @@ def test_portable_review_bundle_includes_expert_review_documents(session, tmp_pa
         review = json.loads(bundle.read("review.jsonl"))
     assert review["current_status"] == ReviewStatus.REQUIRES_EXPERT_REVIEW.value
     assert review["can_index"] is False
+
+
+def test_portable_review_bundle_decision_uses_v2_payload_hash(session, tmp_path: Path) -> None:
+    document, product = setup_product(session)
+    service = materialize_documents(session, DataType.PRODUCT_DOCUMENT.value)
+    batch, bundle_path = service.export_bundle(session, DataType.PRODUCT_DOCUMENT.value)
+
+    with zipfile.ZipFile(bundle_path) as bundle:
+        row = json.loads(bundle.read("review.jsonl"))
+
+    service.apply_decision(session, decision_payload(row), batch.id)
+
+    assert document.final_review_status == ReviewStatus.APPROVED.value
+    assert product.final_review_status == ReviewStatus.APPROVED.value
+
+
+def test_portable_correction_key_must_resolve(session, tmp_path: Path) -> None:
+    document, _ = setup_product(session)
+    service = materialize_documents(session, DataType.PRODUCT_DOCUMENT.value)
+    batch, bundle_path = service.export_bundle(session, DataType.PRODUCT_DOCUMENT.value)
+    with zipfile.ZipFile(bundle_path) as bundle:
+        row = json.loads(bundle.read("review.jsonl"))
+
+    corrections = {
+        "records": [
+            {
+                "portable_record_key": "0" * 64,
+                "fields": {"waiting_period": "三十日"},
+                "field_evidence": {"waiting_period": correction_evidence(document, "三十日")},
+            }
+        ]
+    }
+    with pytest.raises(ReviewDecisionError, match="portable_record_not_found"):
+        service.apply_decision(
+            session,
+            decision_payload(
+                row,
+                status=ReviewStatus.APPROVED_WITH_REVISION.value,
+                corrections=corrections,
+            ),
+            batch.id,
+        )
+
+
+def test_portable_correction_key_ambiguity_fails_closed(
+    session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document, _, _ = setup_regulation(session)
+    service = materialize_documents(session, DataType.REGULATION.value)
+    ambiguous_key = "a" * 64
+    monkeypatch.setattr(
+        "app.services.review.service.portable_record_key",
+        lambda *_args, **_kwargs: ambiguous_key,
+    )
+    batch, bundle_path = service.export_bundle(session, DataType.REGULATION.value)
+    with zipfile.ZipFile(bundle_path) as bundle:
+        row = json.loads(bundle.read("review.jsonl"))
+
+    corrections = {
+        "records": [
+            {
+                "portable_record_key": ambiguous_key,
+                "fields": {"article_text": "修订甲"},
+                "field_evidence": {"article_text": correction_evidence(document, "修订甲")},
+            }
+        ]
+    }
+    with pytest.raises(ReviewDecisionError, match="portable_record_ambiguous"):
+        service.apply_decision(
+            session,
+            decision_payload(
+                row,
+                status=ReviewStatus.APPROVED_WITH_REVISION.value,
+                corrections=corrections,
+            ),
+            batch.id,
+        )
+
+
+def test_v1_portable_review_bundle_is_explicitly_rejected(session, tmp_path: Path) -> None:
+    setup_product(session)
+    service = materialize_documents(session, DataType.PRODUCT_DOCUMENT.value)
+    batch, bundle_path = service.export_bundle(session, DataType.PRODUCT_DOCUMENT.value)
+    with zipfile.ZipFile(bundle_path) as bundle:
+        row = json.loads(bundle.read("review.jsonl"))
+        members = {name: bundle.read(name) for name in bundle.namelist()}
+    manifest = json.loads(members["manifest.json"])
+    manifest.pop("review_payload_schema_version")
+    manifest_bytes = json.dumps(
+        manifest,
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    ).encode()
+    members["manifest.json"] = manifest_bytes
+    with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+        for name, content in members.items():
+            bundle.writestr(name, content)
+    batch.bundle_manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
+    batch.bundle_sha256 = hashlib.sha256(bundle_path.read_bytes()).hexdigest()
+    session.commit()
+
+    with pytest.raises(ReviewDecisionError, match="review_payload_schema_unsupported"):
+        service.apply_decision(session, decision_payload(row), batch.id)
 
 
 @pytest.mark.parametrize(

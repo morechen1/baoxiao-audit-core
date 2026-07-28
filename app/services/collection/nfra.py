@@ -43,6 +43,16 @@ _CAPTCHA_MARKERS = ("验证码", "captcha")
 _ANGULAR_SHELL_MARKERS = ("{{data.", "ng-bind", "ng-view")
 _INSURANCE_MARKERS = ("保险", "人寿", "财产险", "保险代理", "保险经纪")
 _RISK_ALERT_MARKERS = ("风险提示", "消费提示", "警惕", "防范", "维护自身合法权益")
+_NFRA_DOCUMENT_NUMBER = re.compile(
+    r"(?:"
+    r"国家金融监督管理总局|"
+    r"中国银行保险监督管理委员会|"
+    r"中国保险监督管理委员会|"
+    r"中国人民银行|"
+    r"[\u4e00-\u9fff]{2,20}(?:金融监督管理局|金融监管局|监管局|监管分局)"
+    r")令(?:〔|\[)?[0-9]{4}(?:〕|\])?年?第?[0-9]+号",
+    flags=re.ASCII,
+)
 
 
 @dataclass(frozen=True)
@@ -54,6 +64,7 @@ class NfraPublicPayload:
     publisher: str | None
     published_at: date | None
     document_number: str | None
+    caption_document_number: str | None
 
 
 class NfraPublicDocumentCollector(BaseCollector):
@@ -250,6 +261,7 @@ def parse_nfra_public_payload(
         publisher=_optional_text(data.get("docSource")),
         published_at=_parse_date(data.get("publishDate")),
         document_number=_optional_text(data.get("documentNo")),
+        caption_document_number=_caption_document_number(data.get("caption")),
     )
 
 
@@ -364,6 +376,16 @@ def _parse_date(value: Any) -> date | None:
         return date.fromisoformat(text[:10])
     except ValueError:
         return None
+
+
+def _caption_document_number(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    caption = value.strip()
+    if not caption or len(caption) > 500 or "{{" in caption or "}}" in caption or "${" in caption:
+        return None
+    matches = _NFRA_DOCUMENT_NUMBER.findall(caption)
+    return matches[0] if len(matches) == 1 else None
 
 
 def _is_allowed_landing_path(path: str) -> bool:
