@@ -993,6 +993,11 @@ def test_portable_review_bundle_contains_source_and_relative_paths(session, tmp_
         } <= names
         assert review["raw_file_path"] == source_name
         assert review["parsed_artifact_path"] == parsed_name
+        assert review["pilot_id"] is None
+        assert review["pilot_ids"] == []
+        assert review["knowledge_index_status"] == "not_indexed"
+        assert review["can_index"] is False
+        assert "review_status_not_approved" in review["index_rejection_reasons"]
         assert not review["raw_file_path"].startswith("/")
         assert hashlib.sha256(bundle.read(source_name)).hexdigest() == document.sha256
         assert (

@@ -77,8 +77,11 @@ def test_import_structured_penalty_draft(session, tmp_path: Path) -> None:
     path.write_text(
         json.dumps(
             {
+                "pilot_id": "PEN-001",
                 "document_id": document.id,
                 "record_type": "penalty",
+                "draft_generation_method": "manual_rules_from_official_text",
+                "draft_generation_version": "first-batch-v1",
                 "fields": {
                     "illegal_facts": "演示违法事实",
                     "original_sales_wording_disclosed": False,
@@ -108,6 +111,16 @@ def test_import_structured_penalty_draft(session, tmp_path: Path) -> None:
     assert imported == 1
     assert errors == []
     assert session.query(Penalty).filter_by(document_id=document.id).count() == 1
+
+
+def test_structured_draft_generation_provenance_must_be_complete() -> None:
+    with pytest.raises(ValueError, match="draft generation provenance must be complete"):
+        StructuredDraftEnvelope(
+            pilot_id="PEN-001",
+            document_id=1,
+            record_type=DataType.PENALTY,
+            fields={},
+        )
 
 
 def test_record_type_must_match_document(session) -> None:

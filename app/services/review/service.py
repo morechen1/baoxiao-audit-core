@@ -26,6 +26,7 @@ from app.models import (
     DataSource,
     DocumentOccurrence,
     EvaluationSample,
+    PilotCollectionItem,
     RegulatoryCase,
     ReviewBatch,
     ReviewBatchItem,
@@ -57,6 +58,7 @@ from app.schemas.structured import (
 from app.services.collection import SafeUrlPolicy
 from app.services.field_evidence import EVIDENCE_FIELDS, FieldEvidenceService
 from app.services.integrity import RawArtifactIntegrityService
+from app.services.knowledge import KnowledgeIndexService
 from app.services.parsed_artifacts import ParsedArtifactIntegrityService
 from app.services.state_machine import StateMachineService
 from app.services.validation import ValidationService
@@ -931,14 +933,24 @@ class ReviewService:
             status=ReviewStatus.PENDING_REVIEW.value, data_type=data_type
         )
 
-    @staticmethod
     def _document_review_row(
+        self,
         session: Session,
         document: SourceDocument,
         batch_id: int,
         batch_item_id: int,
     ) -> dict[str, Any]:
         records = StateMachineService.structured_records(session, document)
+        pilot_ids = list(
+            session.scalars(
+                select(PilotCollectionItem.pilot_id)
+                .where(PilotCollectionItem.document_id == document.id)
+                .order_by(PilotCollectionItem.id)
+            )
+        )
+        index_rejection_reasons = KnowledgeIndexService(self.settings).rejection_reasons(
+            session, document
+        )
         parsed_records = [
             {
                 (
@@ -956,6 +968,8 @@ class ReviewService:
         return {
             "batch_id": batch_id,
             "batch_item_id": batch_item_id,
+            "pilot_id": pilot_ids[0] if len(pilot_ids) == 1 else None,
+            "pilot_ids": pilot_ids,
             "document_id": document.id,
             "record_id": document.id,
             "record_type": document.data_type,
@@ -996,6 +1010,9 @@ class ReviewService:
             "parsing_warnings": document.metadata_json.get("parsing", {}).get("warnings", []),
             "authenticity_type": document.authenticity_type,
             "current_status": document.final_review_status,
+            "knowledge_index_status": document.knowledge_index_status,
+            "can_index": not index_rejection_reasons,
+            "index_rejection_reasons": index_rejection_reasons,
         }
 
     @staticmethod
