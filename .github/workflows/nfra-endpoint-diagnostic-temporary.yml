@@ -640,6 +640,7 @@ jobs:
               SourceDocument,
           )
           from app.models.enums import AuthenticityType, KnowledgeIndexStatus
+          from app.services.collection.nfra import nfra_title_supported
 
           root = Path(os.environ["PACKAGE_ROOT"])
           reports = Path(os.environ["RUN_REPORTS"])
@@ -727,9 +728,20 @@ jobs:
                       searchable = "\n".join(
                           value for value in (document.source_title, document.raw_text) if value
                       )
-                      title_found = bool(item.expected_title) and normalize(
-                          item.expected_title or ""
-                      ) in normalize(searchable)
+                      if (
+                          document.metadata_json.get("collector")
+                          == "NfraPublicDocumentCollector"
+                      ):
+                          title_found = bool(item.expected_title) and nfra_title_supported(
+                              item.expected_title or "",
+                              document.source_title or "",
+                              document.raw_text or "",
+                              item.source_type,
+                          )
+                      else:
+                          title_found = bool(item.expected_title) and normalize(
+                              item.expected_title or ""
+                          ) in normalize(searchable)
                       if not title_found:
                           title_failures.append(item.pilot_id)
 

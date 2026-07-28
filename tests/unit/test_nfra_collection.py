@@ -282,7 +282,7 @@ def test_adapter_persists_full_json_with_pending_authenticity(
 
 def test_nfra_json_parser_is_deterministic_and_removes_markup(tmp_path: Path) -> None:
     path = tmp_path / "document.json"
-    path.write_bytes(nfra_json(body="<script>danger()</script>保险销售应当合规。" * 30))
+    path.write_bytes(nfra_json(body="<script>danger()</script>保险销售应当合规。" * 12))
     parser = NfraJsonParser()
 
     first = parser.parse(path)

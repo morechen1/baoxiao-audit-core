@@ -261,7 +261,7 @@ def require_nfra_document_quality(
         len(normalized_body) < 300 and any(marker in normalized_body for marker in _ERROR_MARKERS)
     ):
         raise CollectionError("nfra_error_page")
-    minimum_body_length = 80 if source_type == "penalty" else 200
+    minimum_body_length = 80 if source_type in {None, "penalty"} else 200
     if len(normalized_body) < minimum_body_length:
         raise CollectionError("nfra_empty_document_body")
     classifications: list[str] = []
@@ -279,7 +279,7 @@ def require_nfra_document_quality(
         classifications.append("consumer_risk_alert")
     elif source_type == "regulation":
         classifications.append("valid_regulation")
-    if expected_title and not _title_supported(
+    if expected_title and not nfra_title_supported(
         expected_title,
         payload.title,
         payload.plain_text,
@@ -306,7 +306,7 @@ def _normalize(value: str) -> str:
     )
 
 
-def _title_supported(
+def nfra_title_supported(
     expected_title: str,
     actual_title: str,
     plain_text: str,
