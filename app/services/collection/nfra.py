@@ -28,6 +28,10 @@ _ERROR_MARKERS = (
     "系统错误",
     "统一错误页",
 )
+_CAPTCHA_MARKERS = ("验证码", "captcha")
+_ANGULAR_SHELL_MARKERS = ("{{data.", "ng-bind", "ng-view")
+_INSURANCE_MARKERS = ("保险", "人寿", "财产险", "保险代理", "保险经纪")
+_RISK_ALERT_MARKERS = ("风险提示", "消费提示", "警惕", "防范", "维护自身合法权益")
 
 
 @dataclass(frozen=True)
@@ -51,6 +55,7 @@ class NfraPublicDocumentCollector(BaseCollector):
         allowed_hosts: frozenset[str],
         allow_subdomains: bool = False,
         expected_title: str | None = None,
+        source_type: str | None = None,
         transport: httpx.BaseTransport | None = None,
         url_policy: SafeUrlPolicy | None = None,
     ) -> None:
@@ -58,6 +63,7 @@ class NfraPublicDocumentCollector(BaseCollector):
         self.allowed_hosts = allowed_hosts
         self.allow_subdomains = allow_subdomains
         self.expected_title = expected_title
+        self.source_type = source_type
         self.transport = transport
         self.url_policy = url_policy or SafeUrlPolicy()
 
@@ -141,7 +147,11 @@ class NfraPublicDocumentCollector(BaseCollector):
 
         raw = bytes(content)
         payload = parse_nfra_public_payload(raw, expected_doc_id=doc_id)
-        require_nfra_document_quality(payload, self.expected_title)
+        classifications = require_nfra_document_quality(
+            payload,
+            self.expected_title,
+            self.source_type,
+        )
         return CollectionResult(
             content=raw,
             source_url=landing_url,
@@ -167,6 +177,7 @@ class NfraPublicDocumentCollector(BaseCollector):
                 ),
                 "validated_peer_scope": NFRA_PUBLIC_HOST,
                 "quality_gate": "passed",
+                "page_classifications": list(classifications),
             },
         )
 
@@ -230,7 +241,8 @@ def parse_nfra_public_payload(
 def require_nfra_document_quality(
     payload: NfraPublicPayload,
     expected_title: str | None,
-) -> None:
+    source_type: str | None = None,
+) -> tuple[str, ...]:
     normalized_title = _normalize(payload.title)
     normalized_body = _normalize(payload.plain_text)
     if len(normalized_body) < 200:
@@ -240,8 +252,28 @@ def require_nfra_document_quality(
         if expected not in normalized_title and expected not in normalized_body:
             raise CollectionError("nfra_title_mismatch")
     combined = f"{normalized_title}\n{normalized_body}"
+    if any(marker in combined for marker in _ANGULAR_SHELL_MARKERS):
+        raise CollectionError("nfra_angular_template_shell")
+    if any(marker in combined for marker in _CAPTCHA_MARKERS):
+        raise CollectionError("nfra_captcha_page")
     if any(marker in combined for marker in _ERROR_MARKERS):
         raise CollectionError("nfra_error_page")
+    classifications: list[str] = []
+    if source_type == "penalty":
+        if "行政许可" in combined:
+            raise CollectionError("nfra_administrative_license")
+        if "任职资格" in combined:
+            raise CollectionError("nfra_appointment_qualification")
+        if not any(marker in combined for marker in _INSURANCE_MARKERS):
+            raise CollectionError("nfra_non_insurance_penalty")
+        classifications.append("penalty_publication")
+    elif source_type == "regulatory_case" and any(
+        marker in combined for marker in _RISK_ALERT_MARKERS
+    ):
+        classifications.append("consumer_risk_alert")
+    elif source_type == "regulation":
+        classifications.append("valid_regulation")
+    return tuple(classifications)
 
 
 def _html_to_text(value: str) -> str:

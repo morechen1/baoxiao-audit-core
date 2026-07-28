@@ -22,6 +22,10 @@ JavaScript，不设置 Cookie，也不会携带登录状态。
 `final_url` 保存取回地址，`metadata_json` 同时记录两者和 `docId`。只有响应为 JSON、
 响应 `docId` 一致、正文非空且预期标题可由正式标题或正文支持时才计为采集成功。
 错误模板、访问拒绝、标题无关或空正文使用固定错误码失败，不进入解析。
+质量门还会识别 Angular 模板壳、验证码、行政许可、任职资格和非保险处罚页；通过后
+记录 `consumer_risk_alert`、`penalty_publication` 或 `valid_regulation` 页面分类。
+其中 `valid_regulation` 仅表示页面符合本批资料类型和内容质量要求，绝不表示法规
+当前效力已被确认，法规效力状态仍保持 `unknown`。
 
 解析阶段只对已保存 JSON 的 `docTitle`、`documentNo` 与 `docClob` 做确定性文本转换，
 并进入现有不可变解析产物和 SHA-256 链。该通道不改变真实性：所有新文档仍为

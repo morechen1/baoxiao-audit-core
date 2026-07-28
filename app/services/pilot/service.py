@@ -77,12 +77,17 @@ SAFE_URL_ERROR_CODES = frozenset(
 )
 SAFE_COLLECTION_ERROR_CODES = frozenset(
     {
+        "nfra_administrative_license",
+        "nfra_angular_template_shell",
+        "nfra_appointment_qualification",
+        "nfra_captcha_page",
         "nfra_doc_id_mismatch",
         "nfra_empty_document_body",
         "nfra_error_page",
         "nfra_error_payload",
         "nfra_invalid_json",
         "nfra_invalid_landing_url",
+        "nfra_non_insurance_penalty",
         "nfra_retrieval_url_changed",
         "nfra_title_mismatch",
         "nfra_title_missing",
@@ -484,6 +489,7 @@ class PilotService:
                 allowed_hosts=allowed_hosts,
                 allow_subdomains=registration.allow_subdomains,
                 expected_title=entry.expected_title,
+                source_type=entry.source_type.value,
             )
         else:
             collector = self.collector_factory(

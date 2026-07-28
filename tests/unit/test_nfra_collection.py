@@ -71,6 +71,7 @@ def collector_for(
     handler,
     *,
     expected_title: str | None = EXPECTED_TITLE,
+    source_type: str | None = None,
     policy: SafeUrlPolicy | None = None,
 ) -> NfraPublicDocumentCollector:
     return NfraPublicDocumentCollector(
@@ -78,6 +79,7 @@ def collector_for(
         allowed_hosts=frozenset({NFRA_PUBLIC_HOST}),
         allow_subdomains=False,
         expected_title=expected_title,
+        source_type=source_type,
         transport=httpx.MockTransport(handler),
         url_policy=policy or RecordingPublicPolicy(),
     )
@@ -191,22 +193,54 @@ def test_adapter_accepts_expected_title_supported_by_body(tmp_path: Path) -> Non
             headers={"content-type": "application/json"},
             content=nfra_json(
                 title="正式文件附件",
-                body=f"{EXPECTED_TITLE}，具体内容如下。" * 30,
+                body=f"{EXPECTED_TITLE}，风险提示具体内容如下。" * 30,
             ),
         )
 
-    result = collector_for(tmp_path, handler).collect(LANDING_URL)
+    result = collector_for(
+        tmp_path,
+        handler,
+        source_type="regulatory_case",
+    ).collect(LANDING_URL)
 
     assert result.metadata["quality_gate"] == "passed"
+    assert result.metadata["page_classifications"] == ["consumer_risk_alert"]
 
 
 def test_adapter_rejects_long_access_denied_template(tmp_path: Path) -> None:
-    payload = parse_nfra_public_payload(
-        nfra_json(body=f"{EXPECTED_TITLE} 访问被拒绝，请稍后重试。" * 30)
+    cases = (
+        ("访问被拒绝，请稍后重试。", "nfra_error_page", None),
+        ("请输入验证码后继续访问。", "nfra_captcha_page", None),
+        ("{{data.docClob}} ng-bind", "nfra_angular_template_shell", None),
+        ("行政许可事项决定公告。", "nfra_administrative_license", "penalty"),
+        ("任职资格批复公告。", "nfra_appointment_qualification", "penalty"),
     )
+    for body, error_code, source_type in cases:
+        payload = parse_nfra_public_payload(nfra_json(body=f"{EXPECTED_TITLE} {body}" * 30))
+        with pytest.raises(CollectionError, match=error_code):
+            require_nfra_document_quality(payload, EXPECTED_TITLE, source_type)
 
-    with pytest.raises(CollectionError, match="nfra_error_page"):
-        require_nfra_document_quality(payload, EXPECTED_TITLE)
+    non_insurance = parse_nfra_public_payload(
+        nfra_json(
+            title="行政处罚决定",
+            body="某银行行政处罚决定。" * 30,
+        )
+    )
+    with pytest.raises(CollectionError, match="nfra_non_insurance_penalty"):
+        require_nfra_document_quality(
+            non_insurance,
+            "行政处罚决定",
+            "penalty",
+        )
+
+    penalty = parse_nfra_public_payload(
+        nfra_json(body=f"{EXPECTED_TITLE} 某保险公司行政处罚决定。" * 30)
+    )
+    assert require_nfra_document_quality(
+        penalty,
+        EXPECTED_TITLE,
+        "penalty",
+    ) == ("penalty_publication",)
 
 
 def test_adapter_persists_full_json_with_pending_authenticity(
@@ -224,7 +258,7 @@ def test_adapter_persists_full_json_with_pending_authenticity(
             content=raw,
         )
 
-    collector = collector_for(tmp_path, handler)
+    collector = collector_for(tmp_path, handler, source_type="regulation")
     document, created = collector.persist(
         session,
         collector.collect(LANDING_URL),
@@ -238,6 +272,7 @@ def test_adapter_persists_full_json_with_pending_authenticity(
     assert document.authenticity_type == AuthenticityType.PENDING_VERIFICATION.value
     assert document.source_url == LANDING_URL
     assert document.final_url == RETRIEVAL_URL
+    assert document.metadata_json["page_classifications"] == ["valid_regulation"]
 
 
 def test_nfra_json_parser_is_deterministic_and_removes_markup(tmp_path: Path) -> None:
