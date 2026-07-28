@@ -1,0 +1,371 @@
+name: nfra-endpoint-diagnostic-temporary
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [data/pilot-first-batch-v1]
+    paths:
+      - .github/workflows/nfra-endpoint-diagnostic-temporary.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      ALL_PROXY: ""
+      DIAGNOSTIC_ROOT: /tmp/nfra-endpoint-diagnostic
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Install pinned Playwright Chromium
+        run: |
+          npm install --no-save --no-package-lock playwright@1.54.2
+          npx playwright install --with-deps chromium
+
+      - name: Verify proxy-free public DNS
+        run: |
+          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY
+          unset http_proxy https_proxy all_proxy
+          mkdir -p "$DIAGNOSTIC_ROOT"
+          python - <<'PY' | tee "$DIAGNOSTIC_ROOT/public-dns.txt"
+          import ipaddress
+          import json
+          import os
+          import socket
+          from datetime import UTC, datetime
+          from pathlib import Path
+
+          hosts = ["www.nfra.gov.cn"]
+          proxy_keys = [
+              "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+              "http_proxy", "https_proxy", "all_proxy",
+          ]
+          active = {key: os.environ[key] for key in proxy_keys if os.environ.get(key)}
+          if active:
+              raise SystemExit(f"Proxy environment is still active: {sorted(active)}")
+
+          results = {}
+          for host in hosts:
+              addresses = {
+                  ipaddress.ip_address(item[4][0])
+                  for item in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+              }
+              print(host, sorted(str(value) for value in addresses))
+              if not addresses:
+                  raise SystemExit(f"{host}: no DNS result")
+              for address in addresses:
+                  if (
+                      not address.is_global
+                      or address.is_private
+                      or address.is_loopback
+                      or address.is_link_local
+                      or address.is_multicast
+                      or address.is_reserved
+                      or address.is_unspecified
+                  ):
+                      raise SystemExit(f"{host}: prohibited DNS address {address}")
+              results[host] = sorted(str(value) for value in addresses)
+
+          payload = {
+              "checked_at": datetime.now(UTC).isoformat(),
+              "proxy_environment_active": False,
+              "hosts": results,
+              "result": "PUBLIC_DNS_PREFLIGHT_OK",
+          }
+          Path(os.environ["DIAGNOSTIC_ROOT"], "public-dns.json").write_text(
+              json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          print("PUBLIC_DNS_PREFLIGHT_OK")
+          PY
+
+      - name: Diagnose three approved NFRA landing pages
+        run: |
+          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY
+          unset http_proxy https_proxy all_proxy
+          node <<'JS'
+          const crypto = require("crypto");
+          const fs = require("fs");
+          const path = require("path");
+          const { chromium } = require("playwright");
+
+          const outputRoot = process.env.DIAGNOSTIC_ROOT;
+          const selected = new Map([
+            ["REG-001", "pilot/manifests/regulations.jsonl"],
+            ["PEN-001", "pilot/manifests/penalties.jsonl"],
+            ["CASE-002", "pilot/manifests/regulatory_cases.jsonl"],
+          ]);
+
+          function approvedTarget(pilotId, filename) {
+            const rows = fs.readFileSync(filename, "utf8")
+              .split(/\r?\n/)
+              .filter(Boolean)
+              .map((line) => JSON.parse(line));
+            const row = rows.find((item) => item.pilot_id === pilotId);
+            if (!row || row.status !== "approved_for_collection") {
+              throw new Error(`${pilotId}: approved manifest row not found`);
+            }
+            const url = new URL(row.source_url);
+            if (url.protocol !== "https:" || !isNfraHost(url.hostname)) {
+              throw new Error(`${pilotId}: landing URL is not approved NFRA HTTPS`);
+            }
+            const docId = url.searchParams.get("docId");
+            if (!docId || !/^\d+$/.test(docId)) {
+              throw new Error(`${pilotId}: invalid docId`);
+            }
+            return {
+              pilot_id: pilotId,
+              landing_url: row.source_url,
+              expected_title: row.expected_title,
+              doc_id: docId,
+            };
+          }
+
+          function isNfraHost(hostname) {
+            const host = hostname.toLowerCase().replace(/\.$/, "");
+            return host === "nfra.gov.cn" || host.endsWith(".nfra.gov.cn");
+          }
+
+          function sha256(buffer) {
+            return crypto.createHash("sha256").update(buffer).digest("hex");
+          }
+
+          function normalize(value) {
+            return String(value || "").normalize("NFKC").replace(/\s+/g, "").toLowerCase();
+          }
+
+          function jsonShape(value, prefix = "", depth = 0, result = []) {
+            if (depth > 4 || result.length >= 100) return result;
+            if (Array.isArray(value)) {
+              result.push(`${prefix || "$"}[]`);
+              if (value.length) jsonShape(value[0], `${prefix || "$"}[]`, depth + 1, result);
+              return result;
+            }
+            if (value && typeof value === "object") {
+              for (const key of Object.keys(value).sort()) {
+                if (result.length >= 100) break;
+                const next = prefix ? `${prefix}.${key}` : key;
+                result.push(next);
+                jsonShape(value[key], next, depth + 1, result);
+              }
+            }
+            return result;
+          }
+
+          async function main() {
+            const targets = [...selected].map(([id, file]) => approvedTarget(id, file));
+            const browser = await chromium.launch({ headless: true });
+            const result = {
+              generated_at: new Date().toISOString(),
+              browser: "playwright-chromium",
+              artificial_cookie_set: false,
+              tls_verification_disabled: false,
+              third_party_requests_recorded: false,
+              targets: [],
+            };
+
+            for (const target of targets) {
+              const context = await browser.newContext();
+              await context.clearCookies();
+              await context.route("**/*", async (route) => {
+                const requestUrl = new URL(route.request().url());
+                if (
+                  requestUrl.protocol === "data:" ||
+                  requestUrl.protocol === "blob:" ||
+                  isNfraHost(requestUrl.hostname)
+                ) {
+                  await route.continue();
+                } else {
+                  await route.abort("blockedbyclient");
+                }
+              });
+
+              const page = await context.newPage();
+              const responseRecords = [];
+              const responseTasks = [];
+
+              page.on("response", (response) => {
+                const task = (async () => {
+                  const request = response.request();
+                  const responseUrl = new URL(response.url());
+                  if (!isNfraHost(responseUrl.hostname)) return;
+
+                  const headers = response.headers();
+                  const contentType = headers["content-type"] || "";
+                  const contentLengthHeader = headers["content-length"];
+                  let body = Buffer.alloc(0);
+                  let bodyError = null;
+                  try {
+                    body = await response.body();
+                  } catch (error) {
+                    bodyError = error.constructor?.name || "response_body_unavailable";
+                  }
+
+                  const utf8 = (
+                    /json|javascript|text|html|xml/i.test(contentType) &&
+                    body.length <= 10 * 1024 * 1024
+                  ) ? body.toString("utf8") : "";
+                  const normalizedBody = normalize(utf8);
+                  const postData = request.postData() || "";
+                  const containsDocId = (
+                    response.url().includes(target.doc_id) ||
+                    postData.includes(target.doc_id) ||
+                    utf8.includes(target.doc_id)
+                  );
+                  const containsExpectedTitle = (
+                    normalizedBody.includes(normalize(target.expected_title))
+                  );
+                  const containsDocumentBody = (
+                    containsExpectedTitle &&
+                    (
+                      /docClob|docTitle|publishDate|docSource|documentNo/.test(utf8) ||
+                      normalize(utf8).length >= 500
+                    )
+                  );
+                  let parsedJsonShape = [];
+                  if (/json/i.test(contentType) || /^[\s]*[\[{]/.test(utf8)) {
+                    try {
+                      parsedJsonShape = jsonShape(JSON.parse(utf8));
+                    } catch {}
+                  }
+
+                  responseRecords.push({
+                    landing_url: target.landing_url,
+                    request_url: response.url(),
+                    method: request.method(),
+                    status: response.status(),
+                    resource_type: request.resourceType(),
+                    content_type: contentType,
+                    content_length: contentLengthHeader
+                      ? Number(contentLengthHeader)
+                      : body.length,
+                    response_sha256: body.length ? sha256(body) : null,
+                    contains_doc_id: containsDocId,
+                    contains_expected_title: containsExpectedTitle,
+                    contains_document_body: containsDocumentBody,
+                    request_has_post_data: Boolean(postData),
+                    request_has_cookie: Boolean(request.headers()["cookie"]),
+                    response_body_error: bodyError,
+                    json_shape: parsedJsonShape,
+                  });
+                })();
+                responseTasks.push(task);
+              });
+
+              let navigationError = null;
+              try {
+                await page.goto(target.landing_url, {
+                  waitUntil: "domcontentloaded",
+                  timeout: 45000,
+                });
+                try {
+                  await page.waitForLoadState("networkidle", { timeout: 20000 });
+                } catch {}
+                await page.waitForTimeout(3000);
+              } catch (error) {
+                navigationError = error.constructor?.name || "navigation_failed";
+              }
+              await Promise.allSettled(responseTasks);
+
+              const rendered = await page.evaluate(({ expectedTitle }) => {
+                const bodyText = document.body?.innerText || "";
+                const titleNode = document.querySelector(".wenzhang-title");
+                const bodyNode = document.querySelector("#wenzhang-content");
+                const titleText = titleNode?.textContent || "";
+                const bodyContent = bodyNode?.textContent || "";
+                const normalizeText = (value) => String(value || "")
+                  .normalize("NFKC")
+                  .replace(/\s+/g, "")
+                  .toLowerCase();
+                return {
+                  final_url: location.href,
+                  document_title: document.title,
+                  rendered_title_present: Boolean(titleNode),
+                  rendered_body_present: Boolean(bodyNode),
+                  rendered_title_matches: normalizeText(titleText)
+                    .includes(normalizeText(expectedTitle)),
+                  rendered_body_length: bodyContent.trim().length,
+                  angular_template_shell: (
+                    /\{\{[^}]+\}\}/.test(bodyText) ||
+                    normalizeText(bodyText).includes("{{data.")
+                  ),
+                };
+              }, { expectedTitle: target.expected_title });
+
+              result.targets.push({
+                ...target,
+                navigation_error: navigationError,
+                rendered,
+                official_response_count: responseRecords.length,
+                responses: responseRecords.sort((a, b) =>
+                  a.request_url.localeCompare(b.request_url)
+                ),
+              });
+              await context.close();
+            }
+
+            await browser.close();
+            fs.writeFileSync(
+              path.join(outputRoot, "network-diagnostic.json"),
+              JSON.stringify(result, null, 2) + "\n",
+            );
+            console.log(JSON.stringify(result, null, 2));
+          }
+
+          main().catch((error) => {
+            console.error(error);
+            process.exitCode = 1;
+          });
+          JS
+
+      - name: Validate diagnostic privacy boundary
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+          from urllib.parse import urlsplit
+
+          root = Path(os.environ["DIAGNOSTIC_ROOT"])
+          report = json.loads((root / "network-diagnostic.json").read_text())
+          if len(report["targets"]) != 3:
+              raise SystemExit("unexpected_target_count")
+
+          for target in report["targets"]:
+              for response in target["responses"]:
+                  host = (urlsplit(response["request_url"]).hostname or "").lower()
+                  if host != "nfra.gov.cn" and not host.endswith(".nfra.gov.cn"):
+                      raise SystemExit("third_party_response_recorded")
+                  forbidden = {
+                      "cookie", "authorization", "request_headers", "response_headers"
+                  }
+                  if forbidden.intersection(response):
+                      raise SystemExit("forbidden_header_material_recorded")
+
+          payload = (root / "network-diagnostic.json").read_bytes()
+          sensitive = re.compile(
+              rb"ghp_[A-Za-z0-9]{20,}|github_pat_|Authorization:|Cookie:|"
+              rb"/home/runner/|/Users/|[A-Za-z]:\\\\Users\\\\"
+          )
+          if sensitive.search(payload):
+              raise SystemExit("sensitive_diagnostic_content")
+          print("DIAGNOSTIC_PRIVACY_BOUNDARY_OK")
+          PY
+
+      - name: Upload diagnostic report
+        uses: actions/upload-artifact@v4
+        with:
+          name: nfra-endpoint-diagnostic
+          path: /tmp/nfra-endpoint-diagnostic/
+          if-no-files-found: error
+          retention-days: 7
