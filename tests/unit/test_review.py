@@ -1008,6 +1008,20 @@ def test_portable_review_bundle_contains_source_and_relative_paths(session, tmp_
     assert batch.bundle_sha256 == hashlib.sha256(bundle_path.read_bytes()).hexdigest()
 
 
+def test_portable_review_bundle_includes_expert_review_documents(session, tmp_path: Path) -> None:
+    document, product = setup_product(session)
+    document.final_review_status = ReviewStatus.REQUIRES_EXPERT_REVIEW.value
+    product.final_review_status = ReviewStatus.REQUIRES_EXPERT_REVIEW.value
+    service = materialize_documents(session, DataType.PRODUCT_DOCUMENT.value)
+
+    _, bundle_path = service.export_bundle(session, DataType.PRODUCT_DOCUMENT.value)
+
+    with zipfile.ZipFile(bundle_path) as bundle:
+        review = json.loads(bundle.read("review.jsonl"))
+    assert review["current_status"] == ReviewStatus.REQUIRES_EXPERT_REVIEW.value
+    assert review["can_index"] is False
+
+
 @pytest.mark.parametrize(
     "member_name",
     ["manifest.json", "review.jsonl", "source", "parsed"],

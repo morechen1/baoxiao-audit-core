@@ -921,16 +921,27 @@ class ReviewService:
 
     @staticmethod
     def _pending_records(session: Session, data_type: str) -> list[Any]:
+        reviewable_statuses = (
+            ReviewStatus.PENDING_REVIEW.value,
+            ReviewStatus.REQUIRES_EXPERT_REVIEW.value,
+        )
         if data_type == DataType.EVALUATION_SAMPLE.value:
             return list(
                 session.scalars(
                     select(EvaluationSample).where(
-                        EvaluationSample.final_review_status == ReviewStatus.PENDING_REVIEW.value
+                        EvaluationSample.final_review_status.in_(reviewable_statuses)
                     )
                 )
             )
-        return DocumentRepository(session).list(
-            status=ReviewStatus.PENDING_REVIEW.value, data_type=data_type
+        return list(
+            session.scalars(
+                select(SourceDocument)
+                .where(
+                    SourceDocument.final_review_status.in_(reviewable_statuses),
+                    SourceDocument.data_type == data_type,
+                )
+                .order_by(SourceDocument.id)
+            )
         )
 
     def _document_review_row(
