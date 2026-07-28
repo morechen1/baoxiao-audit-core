@@ -29,7 +29,12 @@ from app.models import (
     PilotSourceRegistration,
 )
 from app.models.enums import AuthenticityType
-from app.services.collection import SafeUrlPolicy, WebPageCollector
+from app.services.collection import (
+    BaseCollector,
+    NfraPublicDocumentCollector,
+    SafeUrlPolicy,
+    WebPageCollector,
+)
 from app.services.pilot.models import (
     PilotManifestEntry,
     PilotManifestStatus,
@@ -72,6 +77,16 @@ SAFE_URL_ERROR_CODES = frozenset(
 )
 SAFE_COLLECTION_ERROR_CODES = frozenset(
     {
+        "nfra_doc_id_mismatch",
+        "nfra_empty_document_body",
+        "nfra_error_page",
+        "nfra_error_payload",
+        "nfra_invalid_json",
+        "nfra_invalid_landing_url",
+        "nfra_retrieval_url_changed",
+        "nfra_title_mismatch",
+        "nfra_title_missing",
+        "nfra_unexpected_response_type",
         "unsupported_document_data_type",
         "duplicate_content_type_conflict",
         "stored_artifact_corrupt",
@@ -115,7 +130,7 @@ class PilotCollectionResult:
     outcomes: list[PilotCollectionOutcome]
 
 
-CollectorFactory = Callable[[frozenset[str], bool], WebPageCollector]
+CollectorFactory = Callable[[frozenset[str], bool], BaseCollector]
 SleepFunction = Callable[[float], None]
 ClockFunction = Callable[[], datetime]
 
@@ -130,6 +145,7 @@ class PilotService:
         clock: ClockFunction | None = None,
     ) -> None:
         self.settings = settings or get_settings()
+        self._custom_collector_factory = collector_factory is not None
         self.collector_factory = collector_factory or self._collector
         self.sleep = sleep
         self.clock = clock or (lambda: datetime.now(UTC))
@@ -459,8 +475,22 @@ class PilotService:
         allowed_hosts = SafeUrlPolicy.allowed_hosts(
             registration.base_url, registration.allowed_domains_json
         )
-        collector = self.collector_factory(allowed_hosts, registration.allow_subdomains)
-        result = collector.collect(str(entry.source_url))
+        source_url = str(entry.source_url)
+        if not self._custom_collector_factory and NfraPublicDocumentCollector.supports(
+            source_url, allowed_hosts
+        ):
+            collector: BaseCollector = NfraPublicDocumentCollector(
+                self.settings,
+                allowed_hosts=allowed_hosts,
+                allow_subdomains=registration.allow_subdomains,
+                expected_title=entry.expected_title,
+            )
+        else:
+            collector = self.collector_factory(
+                allowed_hosts,
+                registration.allow_subdomains,
+            )
+        result = collector.collect(source_url)
         document, created = collector.persist(
             session,
             result,
