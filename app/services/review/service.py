@@ -962,8 +962,24 @@ class ReviewService:
         index_rejection_reasons = KnowledgeIndexService(self.settings).rejection_reasons(
             session, document
         )
-        parsed_records = [
-            {
+        raw_provenance = document.metadata_json.get("structured_draft_provenance", [])
+        provenance_by_record_id = {
+            item["structured_record_id"]: {
+                key: value
+                for key, value in item.items()
+                if key
+                in {
+                    "pilot_id",
+                    "draft_generation_method",
+                    "draft_generation_version",
+                }
+            }
+            for item in raw_provenance
+            if isinstance(item, dict) and isinstance(item.get("structured_record_id"), int)
+        }
+        parsed_records = []
+        for record in records:
+            parsed_record = {
                 (
                     "structured_record_id"
                     if key == "id"
@@ -974,8 +990,8 @@ class ReviewService:
                 for key, value in vars(record).items()
                 if not key.startswith("_") and key != "document_id"
             }
-            for record in records
-        ]
+            parsed_record["draft_provenance"] = provenance_by_record_id.get(record.id)
+            parsed_records.append(parsed_record)
         return {
             "batch_id": batch_id,
             "batch_item_id": batch_item_id,
