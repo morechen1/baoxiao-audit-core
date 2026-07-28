@@ -12,6 +12,7 @@ from app.core.config import Settings, get_settings
 from app.core.exceptions import StructuredRecordError
 from app.models import (
     Penalty,
+    PilotCollectionItem,
     ProductDocument,
     Regulation,
     RegulatoryCase,
@@ -101,6 +102,7 @@ class StructuredRecordService:
             and draft.case_usage != RegulatoryCaseUsage.EXTERNAL_TEST_CANDIDATE
         ):
             raise StructuredRecordError("case_usage_requires_human_review")
+        pilot_ids = self._validate_pilot_provenance(session, document, envelope)
         if document.data_type in {
             DataType.PENALTY.value,
             DataType.PRODUCT_DOCUMENT.value,
@@ -114,6 +116,20 @@ class StructuredRecordService:
                     f"{document.data_type} already has a primary structured record"
                 )
         values = draft.model_dump()
+        if document.data_type == DataType.REGULATION.value:
+            duplicates = session.scalars(
+                select(Regulation).where(Regulation.document_id == document.id)
+            )
+            if any(
+                all(getattr(existing, field_name) == value for field_name, value in values.items())
+                for existing in duplicates
+            ):
+                raise StructuredRecordError("structured_draft_duplicate")
+        existing_provenance = self._existing_provenance(
+            session,
+            document,
+            pilot_ids,
+        )
         evidence = envelope.field_evidence
         if evidence is None:
             if document.authenticity_type != AuthenticityType.DEMO_ONLY.value:
@@ -135,21 +151,87 @@ class StructuredRecordService:
             field_evidence_json=validated_evidence,
             **values,
         )
-        session.add(record)
-        session.flush()
-        if document.final_review_status == ReviewStatus.AUTO_VALIDATION_FAILED.value:
-            metadata = dict(document.metadata_json)
-            metadata.pop("automatic_validation", None)
-            document.metadata_json = metadata
-            StateMachineService.transition_document(
-                session,
-                document,
-                ReviewStatus.PARSED.value,
-                "structured draft imported after validation failure",
-            )
-        session.commit()
+        try:
+            session.add(record)
+            session.flush()
+            if envelope.pilot_id is not None:
+                metadata = dict(document.metadata_json)
+                metadata["structured_draft_provenance"] = [
+                    *existing_provenance,
+                    {
+                        "structured_record_id": record.id,
+                        "record_type": document.data_type,
+                        "pilot_id": envelope.pilot_id,
+                        "draft_generation_method": envelope.draft_generation_method,
+                        "draft_generation_version": envelope.draft_generation_version,
+                    },
+                ]
+                document.metadata_json = metadata
+            if document.final_review_status == ReviewStatus.AUTO_VALIDATION_FAILED.value:
+                metadata = dict(document.metadata_json)
+                metadata.pop("automatic_validation", None)
+                document.metadata_json = metadata
+                StateMachineService.transition_document(
+                    session,
+                    document,
+                    ReviewStatus.PARSED.value,
+                    "structured draft imported after validation failure",
+                )
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
         session.refresh(record)
         return cast(Regulation | Penalty | ProductDocument | RegulatoryCase, record)
+
+    @staticmethod
+    def _validate_pilot_provenance(
+        session: Session,
+        document: SourceDocument,
+        envelope: StructuredDraftEnvelope,
+    ) -> set[str]:
+        pilot_items = list(
+            session.scalars(
+                select(PilotCollectionItem).where(PilotCollectionItem.document_id == document.id)
+            )
+        )
+        if pilot_items:
+            if envelope.pilot_id is None or not any(
+                item.pilot_id == envelope.pilot_id for item in pilot_items
+            ):
+                raise StructuredRecordError("pilot_id_document_mismatch")
+            return {item.pilot_id for item in pilot_items}
+        if envelope.pilot_id is not None:
+            raise StructuredRecordError("pilot_id_document_mismatch")
+        return set()
+
+    @staticmethod
+    def _existing_provenance(
+        session: Session,
+        document: SourceDocument,
+        pilot_ids: set[str],
+    ) -> list[dict[str, Any]]:
+        raw_provenance = document.metadata_json.get("structured_draft_provenance", [])
+        existing_record_ids = {
+            record.id for record in StateMachineService.structured_records(session, document)
+        }
+        if not isinstance(raw_provenance, list) or not all(
+            isinstance(item, dict)
+            and isinstance(item.get("structured_record_id"), int)
+            and item["structured_record_id"] in existing_record_ids
+            and item.get("record_type") == document.data_type
+            and item.get("pilot_id") in pilot_ids
+            and isinstance(item.get("draft_generation_method"), str)
+            and bool(item["draft_generation_method"].strip())
+            and isinstance(item.get("draft_generation_version"), str)
+            and bool(item["draft_generation_version"].strip())
+            for item in raw_provenance
+        ):
+            raise StructuredRecordError("structured_draft_provenance_conflict")
+        record_ids = [item["structured_record_id"] for item in raw_provenance]
+        if len(record_ids) != len(set(record_ids)):
+            raise StructuredRecordError("structured_draft_provenance_conflict")
+        return [dict(item) for item in raw_provenance]
 
     @staticmethod
     def _legacy_demo_evidence(

@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 
 from app.core.config import Settings
-from app.core.exceptions import RawArtifactIntegrityError, ReviewDecisionError
+from app.core.exceptions import (
+    InvalidStateTransition,
+    RawArtifactIntegrityError,
+    ReviewDecisionError,
+)
 from app.models import (
     AuthenticityDecisionLog,
     DataSource,
@@ -688,6 +692,138 @@ def setup_pending_public_product(session):
     return document
 
 
+def mark_document_for_expert_review(session, document: SourceDocument) -> None:
+    document.final_review_status = ReviewStatus.REQUIRES_EXPERT_REVIEW.value
+    for record in document_records(session, document):
+        record.final_review_status = ReviewStatus.REQUIRES_EXPERT_REVIEW.value
+    session.commit()
+
+
+def test_expert_review_document_can_be_approved_with_authenticity_decision(
+    session, tmp_path: Path
+) -> None:
+    document = setup_pending_public_product(session)
+    mark_document_for_expert_review(session, document)
+    service, batch, row = export_one(session, tmp_path, DataType.PRODUCT_DOCUMENT.value)
+    payload = decision_payload(row)
+    payload["authenticity_decision"] = {
+        "new_type": AuthenticityType.VERIFIED_PUBLIC.value,
+        "verified_occurrence_id": row["source_occurrences"][0]["occurrence_id"],
+        "reason": "专家已核对官方网站、文件原文及发布机构",
+    }
+
+    service.apply_decision(session, payload, batch.id)
+
+    assert document.final_review_status == ReviewStatus.APPROVED.value
+    assert document.authenticity_type == AuthenticityType.VERIFIED_PUBLIC.value
+    assert session.query(AuthenticityDecisionLog).one().document_id == document.id
+
+
+def test_expert_review_document_can_be_approved_with_revision(session, tmp_path: Path) -> None:
+    document, product = setup_product(session)
+    mark_document_for_expert_review(session, document)
+    service, batch, row = export_one(session, tmp_path, DataType.PRODUCT_DOCUMENT.value)
+
+    service.apply_decision(
+        session,
+        decision_payload(
+            row,
+            status=ReviewStatus.APPROVED_WITH_REVISION.value,
+            corrections={
+                "records": [
+                    {
+                        "structured_record_id": product.id,
+                        "fields": {"waiting_period": "三十日"},
+                        "field_evidence": {
+                            "waiting_period": correction_evidence(document, "三十日")
+                        },
+                    }
+                ]
+            },
+        ),
+        batch.id,
+    )
+
+    assert document.final_review_status == ReviewStatus.APPROVED_WITH_REVISION.value
+    assert product.final_review_status == ReviewStatus.APPROVED_WITH_REVISION.value
+    assert product.waiting_period == "三十日"
+
+
+def test_expert_review_document_can_be_rejected(session, tmp_path: Path) -> None:
+    document, product = setup_product(session)
+    mark_document_for_expert_review(session, document)
+    service, batch, row = export_one(session, tmp_path, DataType.PRODUCT_DOCUMENT.value)
+
+    service.apply_decision(
+        session,
+        decision_payload(row, status=ReviewStatus.REJECTED.value),
+        batch.id,
+    )
+
+    assert document.final_review_status == ReviewStatus.REJECTED.value
+    assert product.final_review_status == ReviewStatus.REJECTED.value
+
+
+def test_expert_review_pending_authenticity_still_requires_decision(
+    session, tmp_path: Path
+) -> None:
+    document = setup_pending_public_product(session)
+    mark_document_for_expert_review(session, document)
+    service, batch, row = export_one(session, tmp_path, DataType.PRODUCT_DOCUMENT.value)
+
+    with pytest.raises(
+        ReviewDecisionError,
+        match="pending_verification approval requires authenticity_decision",
+    ):
+        service.apply_decision(session, decision_payload(row), batch.id)
+
+    assert document.final_review_status == ReviewStatus.REQUIRES_EXPERT_REVIEW.value
+    assert document.authenticity_type == AuthenticityType.PENDING_VERIFICATION.value
+
+
+def test_non_reviewable_document_statuses_cannot_receive_decisions(session, tmp_path: Path) -> None:
+    document, product = setup_product(session)
+    mark_document_for_expert_review(session, document)
+    service, batch, row = export_one(session, tmp_path, DataType.PRODUCT_DOCUMENT.value)
+
+    for status in (
+        ReviewStatus.PARSED.value,
+        ReviewStatus.AUTO_VALIDATION_FAILED.value,
+    ):
+        document.final_review_status = status
+        product.final_review_status = status
+        session.commit()
+
+        with pytest.raises(ReviewDecisionError, match="not reviewable"):
+            service.apply_decision(session, decision_payload(row), batch.id)
+
+        assert session.query(ReviewDecision).count() == 0
+
+
+def test_expert_evaluation_sample_accepts_decision_but_not_self_transition(
+    session, tmp_path: Path
+) -> None:
+    sample = setup_evaluation_sample(session)
+    sample.final_review_status = ReviewStatus.REQUIRES_EXPERT_REVIEW.value
+    session.commit()
+    service, batch, row = export_one(session, tmp_path, DataType.EVALUATION_SAMPLE.value)
+
+    with pytest.raises(InvalidStateTransition, match="Illegal human decision status"):
+        service.apply_decision(
+            session,
+            decision_payload(row, status=ReviewStatus.REQUIRES_EXPERT_REVIEW.value),
+            batch.id,
+        )
+
+    service.apply_decision(
+        session,
+        decision_payload(row, status=ReviewStatus.REJECTED.value),
+        batch.id,
+    )
+
+    assert sample.final_review_status == ReviewStatus.REJECTED.value
+
+
 def test_approved_review_can_audit_verified_public_authenticity(session, tmp_path: Path) -> None:
     document = setup_pending_public_product(session)
     service, batch, row = export_one(session, tmp_path, DataType.PRODUCT_DOCUMENT.value)
@@ -993,6 +1129,11 @@ def test_portable_review_bundle_contains_source_and_relative_paths(session, tmp_
         } <= names
         assert review["raw_file_path"] == source_name
         assert review["parsed_artifact_path"] == parsed_name
+        assert review["pilot_id"] is None
+        assert review["pilot_ids"] == []
+        assert review["knowledge_index_status"] == "not_indexed"
+        assert review["can_index"] is False
+        assert "review_status_not_approved" in review["index_rejection_reasons"]
         assert not review["raw_file_path"].startswith("/")
         assert hashlib.sha256(bundle.read(source_name)).hexdigest() == document.sha256
         assert (
@@ -1001,6 +1142,20 @@ def test_portable_review_bundle_contains_source_and_relative_paths(session, tmp_
         assert manifest["items"][0]["payload_hash"] == payload_hash(review)
         assert manifest["package_sha256"]
     assert batch.bundle_sha256 == hashlib.sha256(bundle_path.read_bytes()).hexdigest()
+
+
+def test_portable_review_bundle_includes_expert_review_documents(session, tmp_path: Path) -> None:
+    document, product = setup_product(session)
+    document.final_review_status = ReviewStatus.REQUIRES_EXPERT_REVIEW.value
+    product.final_review_status = ReviewStatus.REQUIRES_EXPERT_REVIEW.value
+    service = materialize_documents(session, DataType.PRODUCT_DOCUMENT.value)
+
+    _, bundle_path = service.export_bundle(session, DataType.PRODUCT_DOCUMENT.value)
+
+    with zipfile.ZipFile(bundle_path) as bundle:
+        review = json.loads(bundle.read("review.jsonl"))
+    assert review["current_status"] == ReviewStatus.REQUIRES_EXPERT_REVIEW.value
+    assert review["can_index"] is False
 
 
 @pytest.mark.parametrize(

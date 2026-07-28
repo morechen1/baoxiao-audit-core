@@ -26,6 +26,7 @@ from app.models import (
     DataSource,
     DocumentOccurrence,
     EvaluationSample,
+    PilotCollectionItem,
     RegulatoryCase,
     ReviewBatch,
     ReviewBatchItem,
@@ -57,11 +58,18 @@ from app.schemas.structured import (
 from app.services.collection import SafeUrlPolicy
 from app.services.field_evidence import EVIDENCE_FIELDS, FieldEvidenceService
 from app.services.integrity import RawArtifactIntegrityService
+from app.services.knowledge import KnowledgeIndexService
 from app.services.parsed_artifacts import ParsedArtifactIntegrityService
 from app.services.state_machine import StateMachineService
 from app.services.validation import ValidationService
 
 SCHEMA_VERSION = "2.0"
+REVIEWABLE_STATUSES = frozenset(
+    {
+        ReviewStatus.PENDING_REVIEW.value,
+        ReviewStatus.REQUIRES_EXPERT_REVIEW.value,
+    }
+)
 LEGAL_REVIEW_STATUSES = ALLOWED_HUMAN_DECISIONS = frozenset(
     {
         ReviewStatus.APPROVED.value,
@@ -556,10 +564,9 @@ class ReviewService:
             raise ReviewDecisionError("Decision does not identify the exported document")
         RawArtifactIntegrityService(self.settings).verify(document)
         ParsedArtifactIntegrityService(self.settings).verify(document, session=session)
-        if document.final_review_status != ReviewStatus.PENDING_REVIEW.value:
+        if document.final_review_status not in REVIEWABLE_STATUSES:
             raise ReviewDecisionError(
-                f"Only pending_review records may be reviewed; "
-                f"current={document.final_review_status}"
+                f"Record is not reviewable; current={document.final_review_status}"
             )
         if (
             document.authenticity_type == AuthenticityType.PENDING_VERIFICATION.value
@@ -712,8 +719,10 @@ class ReviewService:
         current_payload = self._evaluation_review_row(sample, batch.id, item.id)
         if payload_hash(current_payload) != item.payload_hash:
             raise ReviewDecisionError("Review payload changed after batch export")
-        if sample.final_review_status != ReviewStatus.PENDING_REVIEW.value:
-            raise ReviewDecisionError("Evaluation sample is not pending review")
+        if sample.final_review_status not in REVIEWABLE_STATUSES:
+            raise ReviewDecisionError(
+                f"Evaluation sample is not reviewable; current={sample.final_review_status}"
+            )
         candidate = {
             "sample_text": sample.sample_text,
             "sample_category": sample.sample_category,
@@ -923,24 +932,57 @@ class ReviewService:
             return list(
                 session.scalars(
                     select(EvaluationSample).where(
-                        EvaluationSample.final_review_status == ReviewStatus.PENDING_REVIEW.value
+                        EvaluationSample.final_review_status.in_(REVIEWABLE_STATUSES)
                     )
                 )
             )
-        return DocumentRepository(session).list(
-            status=ReviewStatus.PENDING_REVIEW.value, data_type=data_type
+        return list(
+            session.scalars(
+                select(SourceDocument)
+                .where(
+                    SourceDocument.final_review_status.in_(REVIEWABLE_STATUSES),
+                    SourceDocument.data_type == data_type,
+                )
+                .order_by(SourceDocument.id)
+            )
         )
 
-    @staticmethod
     def _document_review_row(
+        self,
         session: Session,
         document: SourceDocument,
         batch_id: int,
         batch_item_id: int,
     ) -> dict[str, Any]:
         records = StateMachineService.structured_records(session, document)
-        parsed_records = [
-            {
+        pilot_ids = list(
+            session.scalars(
+                select(PilotCollectionItem.pilot_id)
+                .where(PilotCollectionItem.document_id == document.id)
+                .order_by(PilotCollectionItem.id)
+            )
+        )
+        index_rejection_reasons = KnowledgeIndexService(self.settings).rejection_reasons(
+            session, document
+        )
+        raw_provenance = document.metadata_json.get("structured_draft_provenance", [])
+        provenance_by_record_id = {
+            item["structured_record_id"]: {
+                key: value
+                for key, value in item.items()
+                if key
+                in {
+                    "pilot_id",
+                    "draft_generation_method",
+                    "draft_generation_version",
+                }
+            }
+            for item in raw_provenance
+            if isinstance(item, dict) and isinstance(item.get("structured_record_id"), int)
+        }
+        parsed_records = []
+        for record in records:
+            parsed_record = {
                 (
                     "structured_record_id"
                     if key == "id"
@@ -951,11 +993,13 @@ class ReviewService:
                 for key, value in vars(record).items()
                 if not key.startswith("_") and key != "document_id"
             }
-            for record in records
-        ]
+            parsed_record["draft_provenance"] = provenance_by_record_id.get(record.id)
+            parsed_records.append(parsed_record)
         return {
             "batch_id": batch_id,
             "batch_item_id": batch_item_id,
+            "pilot_id": pilot_ids[0] if len(pilot_ids) == 1 else None,
+            "pilot_ids": pilot_ids,
             "document_id": document.id,
             "record_id": document.id,
             "record_type": document.data_type,
@@ -996,6 +1040,9 @@ class ReviewService:
             "parsing_warnings": document.metadata_json.get("parsing", {}).get("warnings", []),
             "authenticity_type": document.authenticity_type,
             "current_status": document.final_review_status,
+            "knowledge_index_status": document.knowledge_index_status,
+            "can_index": not index_rejection_reasons,
+            "index_rejection_reasons": index_rejection_reasons,
         }
 
     @staticmethod

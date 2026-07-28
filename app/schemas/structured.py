@@ -112,10 +112,26 @@ class RegulatoryCaseRevision(RegulatoryCaseDraft):
 
 
 class StructuredDraftEnvelope(StrictDraft):
+    pilot_id: StrictStr | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9_-]{2,63}$")
     document_id: int = Field(gt=0)
     record_type: DataType
     fields: dict[str, Any]
     field_evidence: dict[str, list[FieldEvidenceItem]] | None = None
+    draft_generation_method: StrictStr | None = Field(default=None, min_length=1)
+    draft_generation_version: StrictStr | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def validate_generation_provenance(self) -> "StructuredDraftEnvelope":
+        provenance = (
+            self.pilot_id,
+            self.draft_generation_method,
+            self.draft_generation_version,
+        )
+        if any(value is not None for value in provenance) and not all(
+            value is not None for value in provenance
+        ):
+            raise ValueError("draft generation provenance must be complete")
+        return self
 
 
 class StructuredDraftRevisionEnvelope(StrictDraft):
