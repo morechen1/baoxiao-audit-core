@@ -64,6 +64,12 @@ from app.services.state_machine import StateMachineService
 from app.services.validation import ValidationService
 
 SCHEMA_VERSION = "2.0"
+REVIEWABLE_STATUSES = frozenset(
+    {
+        ReviewStatus.PENDING_REVIEW.value,
+        ReviewStatus.REQUIRES_EXPERT_REVIEW.value,
+    }
+)
 LEGAL_REVIEW_STATUSES = ALLOWED_HUMAN_DECISIONS = frozenset(
     {
         ReviewStatus.APPROVED.value,
@@ -558,10 +564,9 @@ class ReviewService:
             raise ReviewDecisionError("Decision does not identify the exported document")
         RawArtifactIntegrityService(self.settings).verify(document)
         ParsedArtifactIntegrityService(self.settings).verify(document, session=session)
-        if document.final_review_status != ReviewStatus.PENDING_REVIEW.value:
+        if document.final_review_status not in REVIEWABLE_STATUSES:
             raise ReviewDecisionError(
-                f"Only pending_review records may be reviewed; "
-                f"current={document.final_review_status}"
+                f"Record is not reviewable; current={document.final_review_status}"
             )
         if (
             document.authenticity_type == AuthenticityType.PENDING_VERIFICATION.value
@@ -714,8 +719,10 @@ class ReviewService:
         current_payload = self._evaluation_review_row(sample, batch.id, item.id)
         if payload_hash(current_payload) != item.payload_hash:
             raise ReviewDecisionError("Review payload changed after batch export")
-        if sample.final_review_status != ReviewStatus.PENDING_REVIEW.value:
-            raise ReviewDecisionError("Evaluation sample is not pending review")
+        if sample.final_review_status not in REVIEWABLE_STATUSES:
+            raise ReviewDecisionError(
+                f"Evaluation sample is not reviewable; current={sample.final_review_status}"
+            )
         candidate = {
             "sample_text": sample.sample_text,
             "sample_category": sample.sample_category,
@@ -921,15 +928,11 @@ class ReviewService:
 
     @staticmethod
     def _pending_records(session: Session, data_type: str) -> list[Any]:
-        reviewable_statuses = (
-            ReviewStatus.PENDING_REVIEW.value,
-            ReviewStatus.REQUIRES_EXPERT_REVIEW.value,
-        )
         if data_type == DataType.EVALUATION_SAMPLE.value:
             return list(
                 session.scalars(
                     select(EvaluationSample).where(
-                        EvaluationSample.final_review_status.in_(reviewable_statuses)
+                        EvaluationSample.final_review_status.in_(REVIEWABLE_STATUSES)
                     )
                 )
             )
@@ -937,7 +940,7 @@ class ReviewService:
             session.scalars(
                 select(SourceDocument)
                 .where(
-                    SourceDocument.final_review_status.in_(reviewable_statuses),
+                    SourceDocument.final_review_status.in_(REVIEWABLE_STATUSES),
                     SourceDocument.data_type == data_type,
                 )
                 .order_by(SourceDocument.id)

@@ -17,6 +17,18 @@ from app.models import (
 )
 from app.models.enums import HUMAN_REVIEW_STATUS_VALUES, DataType, ReviewStatus
 
+HUMAN_DECISION_TARGETS = frozenset(
+    {
+        ReviewStatus.APPROVED.value,
+        ReviewStatus.APPROVED_WITH_REVISION.value,
+        ReviewStatus.REJECTED.value,
+        ReviewStatus.PENDING_SOURCE_VERIFICATION.value,
+        ReviewStatus.REJECTED_HALLUCINATION.value,
+        ReviewStatus.REJECTED_DUPLICATE.value,
+        ReviewStatus.REJECTED_OUTDATED.value,
+    }
+)
+
 ALLOWED_DOCUMENT_TRANSITIONS: dict[str, frozenset[str]] = {
     ReviewStatus.COLLECTED.value: frozenset({ReviewStatus.PARSED.value}),
     ReviewStatus.PARSED.value: frozenset(
@@ -26,21 +38,12 @@ ALLOWED_DOCUMENT_TRANSITIONS: dict[str, frozenset[str]] = {
             ReviewStatus.REQUIRES_EXPERT_REVIEW.value,
         }
     ),
-    ReviewStatus.PENDING_REVIEW.value: frozenset(
-        {
-            ReviewStatus.APPROVED.value,
-            ReviewStatus.APPROVED_WITH_REVISION.value,
-            ReviewStatus.REJECTED.value,
-            ReviewStatus.PENDING_SOURCE_VERIFICATION.value,
-            ReviewStatus.REJECTED_HALLUCINATION.value,
-            ReviewStatus.REJECTED_DUPLICATE.value,
-            ReviewStatus.REJECTED_OUTDATED.value,
-            ReviewStatus.REQUIRES_EXPERT_REVIEW.value,
-        }
-    ),
+    ReviewStatus.PENDING_REVIEW.value: HUMAN_DECISION_TARGETS
+    | frozenset({ReviewStatus.REQUIRES_EXPERT_REVIEW.value}),
     ReviewStatus.AUTO_VALIDATION_FAILED.value: frozenset({ReviewStatus.PARSED.value}),
     ReviewStatus.PENDING_SOURCE_VERIFICATION.value: frozenset({ReviewStatus.PARSED.value}),
-    ReviewStatus.REQUIRES_EXPERT_REVIEW.value: frozenset({ReviewStatus.PARSED.value}),
+    ReviewStatus.REQUIRES_EXPERT_REVIEW.value: HUMAN_DECISION_TARGETS
+    | frozenset({ReviewStatus.PARSED.value}),
 }
 
 
@@ -82,14 +85,16 @@ class StateMachineService:
         to_status: str,
         reason: str,
     ) -> None:
-        if sample.final_review_status != ReviewStatus.PENDING_REVIEW.value:
-            raise InvalidStateTransition(
-                f"Only pending_review evaluation samples may be reviewed; "
-                f"current={sample.final_review_status}"
-            )
-        if to_status not in ALLOWED_DOCUMENT_TRANSITIONS[ReviewStatus.PENDING_REVIEW.value]:
-            raise InvalidStateTransition(f"Illegal human decision status: {to_status}")
         from_status = sample.final_review_status
+        if from_status not in {
+            ReviewStatus.PENDING_REVIEW.value,
+            ReviewStatus.REQUIRES_EXPERT_REVIEW.value,
+        }:
+            raise InvalidStateTransition(
+                f"Evaluation sample is not reviewable; current={from_status}"
+            )
+        if to_status not in ALLOWED_DOCUMENT_TRANSITIONS[from_status]:
+            raise InvalidStateTransition(f"Illegal human decision status: {to_status}")
         sample.final_review_status = to_status
         session.add(
             StatusHistory(
