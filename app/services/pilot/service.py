@@ -78,6 +78,7 @@ SAFE_URL_ERROR_CODES = frozenset(
 SAFE_COLLECTION_ERROR_CODES = frozenset(
     {
         "nfra_administrative_license",
+        "nfra_api_status_error",
         "nfra_angular_template_shell",
         "nfra_appointment_qualification",
         "nfra_captcha_page",
@@ -481,16 +482,22 @@ class PilotService:
             registration.base_url, registration.allowed_domains_json
         )
         source_url = str(entry.source_url)
-        if not self._custom_collector_factory and NfraPublicDocumentCollector.supports(
-            source_url, allowed_hosts
-        ):
-            collector: BaseCollector = NfraPublicDocumentCollector(
-                self.settings,
-                allowed_hosts=allowed_hosts,
-                allow_subdomains=registration.allow_subdomains,
-                expected_title=entry.expected_title,
-                source_type=entry.source_type.value,
-            )
+        if NfraPublicDocumentCollector.is_dynamic_landing_candidate(source_url):
+            if not NfraPublicDocumentCollector.supports(source_url, allowed_hosts):
+                raise CollectionError("nfra_invalid_landing_url")
+            if not self._custom_collector_factory:
+                collector: BaseCollector = NfraPublicDocumentCollector(
+                    self.settings,
+                    allowed_hosts=allowed_hosts,
+                    allow_subdomains=registration.allow_subdomains,
+                    expected_title=entry.expected_title,
+                    source_type=entry.source_type.value,
+                )
+            else:
+                collector = self.collector_factory(
+                    allowed_hosts,
+                    registration.allow_subdomains,
+                )
         else:
             collector = self.collector_factory(
                 allowed_hosts,
@@ -710,6 +717,19 @@ class PilotService:
                     location,
                     "source_domain_not_allowed",
                     "source_url is outside the registered allowlist",
+                )
+            )
+        elif NfraPublicDocumentCollector.is_dynamic_landing_candidate(
+            url
+        ) and not NfraPublicDocumentCollector.supports(
+            url,
+            SafeUrlPolicy.allowed_hosts(str(source.base_url), list(source.allowed_domains)),
+        ):
+            issues.append(
+                PilotValidationIssue(
+                    location,
+                    "nfra_invalid_landing_url",
+                    "NFRA dynamic landing URL is invalid",
                 )
             )
         return issues

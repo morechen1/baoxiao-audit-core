@@ -20,6 +20,17 @@ from app.services.collection.security import SafeUrlPolicy
 
 NFRA_PUBLIC_HOST = "www.nfra.gov.cn"
 NFRA_DOCUMENT_PATH = "/cn/static/data/DocInfo/SelectByDocId/data_docId={doc_id}.json"
+_NFRA_CENTRAL_LANDING_PATHS = frozenset(
+    {
+        "/cn/view/pages/ItemDetail.html",
+        "/cn/view/pages/governmentDetail.html",
+        "/cn/view/pages/rulesDetail.html",
+    }
+)
+_NFRA_BRANCH_LANDING_PATH = re.compile(
+    r"/branch/[A-Za-z0-9_-]+/view/pages/common/ItemDetail[.]html",
+    flags=re.ASCII,
+)
 _ERROR_MARKERS = (
     "accessdenied",
     "requestrejected",
@@ -68,31 +79,25 @@ class NfraPublicDocumentCollector(BaseCollector):
         self.url_policy = url_policy or SafeUrlPolicy()
 
     @staticmethod
-    def supports(target: str, allowed_hosts: frozenset[str]) -> bool:
+    def is_dynamic_landing_candidate(target: str) -> bool:
         parsed = urlparse(target)
-        query = parse_qs(parsed.query, keep_blank_values=True)
-        doc_ids = query.get("docId", [])
-        return (
-            parsed.scheme == "https"
-            and (parsed.hostname or "").rstrip(".").lower() == NFRA_PUBLIC_HOST
-            and NFRA_PUBLIC_HOST in allowed_hosts
-            and len(doc_ids) == 1
-            and bool(re.fullmatch(r"\d+", doc_ids[0]))
+        return (parsed.hostname or "").lower() == NFRA_PUBLIC_HOST and _is_allowed_landing_path(
+            parsed.path
         )
 
     @staticmethod
+    def supports(target: str, allowed_hosts: frozenset[str]) -> bool:
+        if NFRA_PUBLIC_HOST not in allowed_hosts:
+            return False
+        try:
+            _validated_landing_doc_id(target)
+        except CollectionError:
+            return False
+        return True
+
+    @staticmethod
     def retrieval_url(target: str) -> tuple[str, str]:
-        parsed = urlparse(target)
-        query = parse_qs(parsed.query, keep_blank_values=True)
-        doc_ids = query.get("docId", [])
-        if (
-            parsed.scheme != "https"
-            or (parsed.hostname or "").rstrip(".").lower() != NFRA_PUBLIC_HOST
-            or len(doc_ids) != 1
-            or not re.fullmatch(r"\d+", doc_ids[0])
-        ):
-            raise CollectionError("nfra_invalid_landing_url")
-        doc_id = doc_ids[0]
+        doc_id = _validated_landing_doc_id(target)
         return (
             f"https://{NFRA_PUBLIC_HOST}{NFRA_DOCUMENT_PATH.format(doc_id=doc_id)}",
             doc_id,
@@ -214,11 +219,21 @@ def parse_nfra_public_payload(
         value = json.loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise CollectionError("nfra_invalid_json") from exc
+    if not isinstance(value, dict) or not _successful_api_status(value.get("rptCode")):
+        raise CollectionError("nfra_api_status_error")
     if not isinstance(value, dict) or not isinstance(value.get("data"), dict):
         raise CollectionError("nfra_error_payload")
     data: dict[str, Any] = value["data"]
-    doc_id = str(data.get("docId") or "").strip()
-    if not doc_id or (expected_doc_id is not None and doc_id != expected_doc_id):
+    raw_doc_id = data.get("docId")
+    if isinstance(raw_doc_id, str):
+        doc_id = raw_doc_id
+    elif type(raw_doc_id) is int:
+        doc_id = str(raw_doc_id)
+    else:
+        doc_id = ""
+    if not re.fullmatch(r"[0-9]+", doc_id, flags=re.ASCII) or (
+        expected_doc_id is not None and doc_id != expected_doc_id
+    ):
         raise CollectionError("nfra_doc_id_mismatch")
     title = _text_value(data.get("docTitle"))
     html_body = _text_value(data.get("docClob"))
@@ -349,3 +364,34 @@ def _parse_date(value: Any) -> date | None:
         return date.fromisoformat(text[:10])
     except ValueError:
         return None
+
+
+def _is_allowed_landing_path(path: str) -> bool:
+    return path in _NFRA_CENTRAL_LANDING_PATHS or bool(_NFRA_BRANCH_LANDING_PATH.fullmatch(path))
+
+
+def _validated_landing_doc_id(target: str) -> str:
+    parsed = urlparse(target)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise CollectionError("nfra_invalid_landing_url") from exc
+    query = parse_qs(parsed.query, keep_blank_values=True)
+    doc_ids = query.get("docId", [])
+    if (
+        parsed.scheme != "https"
+        or (parsed.hostname or "").lower() != NFRA_PUBLIC_HOST
+        or port not in {None, 443}
+        or parsed.username is not None
+        or parsed.password is not None
+        or bool(parsed.fragment)
+        or not _is_allowed_landing_path(parsed.path)
+        or len(doc_ids) != 1
+        or not re.fullmatch(r"[0-9]+", doc_ids[0], flags=re.ASCII)
+    ):
+        raise CollectionError("nfra_invalid_landing_url")
+    return doc_ids[0]
+
+
+def _successful_api_status(value: Any) -> bool:
+    return (isinstance(value, str) and value == "200") or (type(value) is int and value == 200)

@@ -19,6 +19,7 @@ from app.services.collection.nfra import (
 from app.services.collection.security import SafeUrlPolicy
 from app.services.parsed_artifacts import ParsedArtifactIntegrityService
 from app.services.parsing import NfraJsonParser, ParsingService
+from app.services.pilot.service import SAFE_COLLECTION_ERROR_CODES
 
 LANDING_URL = (
     "https://www.nfra.gov.cn/cn/view/pages/ItemDetail.html?docId=123456&generaltype=0&itemId=4098"
@@ -105,6 +106,51 @@ def test_adapter_only_supports_canonical_approved_nfra_landing_url() -> None:
     )
 
 
+def test_all_four_official_nfra_landing_path_families_are_supported() -> None:
+    allowed = frozenset({NFRA_PUBLIC_HOST})
+    paths = (
+        "/cn/view/pages/ItemDetail.html",
+        "/cn/view/pages/governmentDetail.html",
+        "/cn/view/pages/rulesDetail.html",
+        "/branch/hebei_1-test/view/pages/common/ItemDetail.html",
+    )
+
+    for path in paths:
+        target = f"https://{NFRA_PUBLIC_HOST}:443{path}?docId=123&itemId=4098"
+        assert NfraPublicDocumentCollector.is_dynamic_landing_candidate(target)
+        assert NfraPublicDocumentCollector.supports(target, allowed)
+        assert NfraPublicDocumentCollector.retrieval_url(target)[1] == "123"
+
+
+def test_nfra_landing_validation_rejects_untrusted_url_shapes() -> None:
+    allowed = frozenset({NFRA_PUBLIC_HOST})
+    invalid_targets = (
+        f"https://{NFRA_PUBLIC_HOST}/not-a-document?docId=123",
+        f"https://{NFRA_PUBLIC_HOST}:444/cn/view/pages/ItemDetail.html?docId=123",
+        f"https://{NFRA_PUBLIC_HOST}/cn/view/pages/ItemDetail.html#fragment?docId=123",
+        f"https://{NFRA_PUBLIC_HOST}/cn/view/pages/ItemDetail.html?docId=１２３",
+        f"https://{NFRA_PUBLIC_HOST}/cn/view/pages/ItemDetail.html?docId=123&docId=123",
+        f"https://user:password@{NFRA_PUBLIC_HOST}/cn/view/pages/ItemDetail.html?docId=123",
+        f"https://{NFRA_PUBLIC_HOST}./cn/view/pages/ItemDetail.html?docId=123",
+    )
+
+    for target in invalid_targets:
+        assert not NfraPublicDocumentCollector.supports(target, allowed)
+        with pytest.raises(CollectionError, match="nfra_invalid_landing_url"):
+            NfraPublicDocumentCollector.retrieval_url(target)
+
+
+def test_static_nfra_files_are_not_dynamic_landing_candidates() -> None:
+    targets = (
+        f"https://{NFRA_PUBLIC_HOST}/files/public-rule.pdf",
+        f"https://{NFRA_PUBLIC_HOST}/files/public-rule.docx",
+    )
+
+    assert all(
+        not NfraPublicDocumentCollector.is_dynamic_landing_candidate(target) for target in targets
+    )
+
+
 def test_adapter_derives_deterministic_get_endpoint_from_doc_id() -> None:
     retrieval_url, doc_id = NfraPublicDocumentCollector.retrieval_url(LANDING_URL)
 
@@ -161,6 +207,40 @@ def test_adapter_rejects_payload_for_different_doc_id(tmp_path: Path) -> None:
 
     with pytest.raises(CollectionError, match="nfra_doc_id_mismatch"):
         collector_for(tmp_path, handler).collect(LANDING_URL)
+
+
+def test_nfra_api_rejects_failed_or_missing_status() -> None:
+    base_payload = json.loads(nfra_json())
+    assert "nfra_api_status_error" in SAFE_COLLECTION_ERROR_CODES
+    for status in (500, "500", "", None):
+        payload = dict(base_payload)
+        if status is None:
+            payload.pop("rptCode")
+        else:
+            payload["rptCode"] = status
+
+        with pytest.raises(CollectionError, match="nfra_api_status_error"):
+            parse_nfra_public_payload(json.dumps(payload).encode())
+
+
+def test_nfra_api_accepts_string_and_integer_success_status() -> None:
+    base_payload = json.loads(nfra_json())
+    for status in ("200", 200):
+        payload = {**base_payload, "rptCode": status}
+
+        parsed = parse_nfra_public_payload(json.dumps(payload).encode())
+
+        assert parsed.doc_id == "123456"
+
+
+def test_nfra_payload_doc_id_is_always_ascii_numeric() -> None:
+    base_payload = json.loads(nfra_json())
+    for doc_id in ("arbitrary", "１２３", " 123 ", True):
+        payload = json.loads(json.dumps(base_payload))
+        payload["data"]["docId"] = doc_id
+
+        with pytest.raises(CollectionError, match="nfra_doc_id_mismatch"):
+            parse_nfra_public_payload(json.dumps(payload).encode())
 
 
 def test_adapter_rejects_unrelated_title_and_body(tmp_path: Path) -> None:
