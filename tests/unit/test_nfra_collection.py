@@ -180,7 +180,7 @@ def test_adapter_rejects_unrelated_title_and_body(tmp_path: Path) -> None:
 def test_adapter_rejects_short_error_template(tmp_path: Path) -> None:
     payload = parse_nfra_public_payload(nfra_json(body="访问被拒绝"))
 
-    with pytest.raises(CollectionError, match="nfra_empty_document_body"):
+    with pytest.raises(CollectionError, match="nfra_error_page"):
         require_nfra_document_quality(payload, EXPECTED_TITLE)
 
 
@@ -209,14 +209,16 @@ def test_adapter_accepts_expected_title_supported_by_body(tmp_path: Path) -> Non
 
 def test_adapter_rejects_long_access_denied_template(tmp_path: Path) -> None:
     cases = (
-        ("访问被拒绝，请稍后重试。", "nfra_error_page", None),
-        ("请输入验证码后继续访问。", "nfra_captcha_page", None),
-        ("{{data.docClob}} ng-bind", "nfra_angular_template_shell", None),
-        ("行政许可事项决定公告。", "nfra_administrative_license", "penalty"),
-        ("任职资格批复公告。", "nfra_appointment_qualification", "penalty"),
+        ("访问被拒绝，请稍后重试。", "nfra_error_page", None, False),
+        ("请输入验证码后继续访问。", "nfra_captcha_page", None, False),
+        ("{{data.docClob}} ng-bind", "nfra_angular_template_shell", None, True),
+        ("行政许可事项决定公告。", "nfra_administrative_license", "penalty", True),
+        ("任职资格批复公告。", "nfra_appointment_qualification", "penalty", True),
     )
-    for body, error_code, source_type in cases:
-        payload = parse_nfra_public_payload(nfra_json(body=f"{EXPECTED_TITLE} {body}" * 30))
+    for body, error_code, source_type, repeat in cases:
+        payload = parse_nfra_public_payload(
+            nfra_json(body=f"{EXPECTED_TITLE} {body}" * (30 if repeat else 1))
+        )
         with pytest.raises(CollectionError, match=error_code):
             require_nfra_document_quality(payload, EXPECTED_TITLE, source_type)
 
@@ -234,11 +236,14 @@ def test_adapter_rejects_long_access_denied_template(tmp_path: Path) -> None:
         )
 
     penalty = parse_nfra_public_payload(
-        nfra_json(body=f"{EXPECTED_TITLE} 某保险公司行政处罚决定。" * 30)
+        nfra_json(
+            title="国家金融监督管理总局巴南监管分局行政处罚信息公开表（巴南金管罚决字〔2025〕3号）",
+            body="某保险公司行政处罚决定，决定日期为2025年3月。" * 30,
+        )
     )
     assert require_nfra_document_quality(
         penalty,
-        EXPECTED_TITLE,
+        "巴南金管罚决字〔2025〕3号行政处罚信息公开表",
         "penalty",
     ) == ("penalty_publication",)
 

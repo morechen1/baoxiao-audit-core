@@ -245,19 +245,25 @@ def require_nfra_document_quality(
 ) -> tuple[str, ...]:
     normalized_title = _normalize(payload.title)
     normalized_body = _normalize(payload.plain_text)
-    if len(normalized_body) < 200:
-        raise CollectionError("nfra_empty_document_body")
-    if expected_title:
-        expected = _normalize(expected_title)
-        if expected not in normalized_title and expected not in normalized_body:
-            raise CollectionError("nfra_title_mismatch")
     combined = f"{normalized_title}\n{normalized_body}"
-    if any(marker in combined for marker in _ANGULAR_SHELL_MARKERS):
+    shell_text = re.sub(
+        r"\s+",
+        "",
+        unicodedata.normalize("NFKC", f"{payload.title}\n{payload.plain_text}"),
+    ).lower()
+    if any(marker in shell_text for marker in _ANGULAR_SHELL_MARKERS):
         raise CollectionError("nfra_angular_template_shell")
-    if any(marker in combined for marker in _CAPTCHA_MARKERS):
+    if any(marker in normalized_title for marker in _CAPTCHA_MARKERS) or (
+        len(normalized_body) < 300 and any(marker in normalized_body for marker in _CAPTCHA_MARKERS)
+    ):
         raise CollectionError("nfra_captcha_page")
-    if any(marker in combined for marker in _ERROR_MARKERS):
+    if any(marker in normalized_title for marker in _ERROR_MARKERS) or (
+        len(normalized_body) < 300 and any(marker in normalized_body for marker in _ERROR_MARKERS)
+    ):
         raise CollectionError("nfra_error_page")
+    minimum_body_length = 80 if source_type == "penalty" else 200
+    if len(normalized_body) < minimum_body_length:
+        raise CollectionError("nfra_empty_document_body")
     classifications: list[str] = []
     if source_type == "penalty":
         if "行政许可" in combined:
@@ -273,6 +279,13 @@ def require_nfra_document_quality(
         classifications.append("consumer_risk_alert")
     elif source_type == "regulation":
         classifications.append("valid_regulation")
+    if expected_title and not _title_supported(
+        expected_title,
+        payload.title,
+        payload.plain_text,
+        source_type,
+    ):
+        raise CollectionError("nfra_title_mismatch")
     return tuple(classifications)
 
 
@@ -286,7 +299,37 @@ def _html_to_text(value: str) -> str:
 
 
 def _normalize(value: str) -> str:
-    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", value)).lower()
+    return "".join(
+        character.lower()
+        for character in unicodedata.normalize("NFKC", value)
+        if not character.isspace() and not unicodedata.category(character).startswith("P")
+    )
+
+
+def _title_supported(
+    expected_title: str,
+    actual_title: str,
+    plain_text: str,
+    source_type: str | None,
+) -> bool:
+    expected = _normalize(expected_title)
+    actual = _normalize(actual_title)
+    body = _normalize(plain_text)
+    if expected in actual or expected in body:
+        return True
+    if source_type != "penalty":
+        return False
+    combined = f"{actual}{body}"
+    penalty_kind_supported = any(
+        marker in combined
+        for marker in ("行政处罚信息公开表", "行政处罚信息公示表", "行政处罚信息公示列表")
+    )
+    expected_numbers = re.findall(r"\d+", expected_title)
+    return (
+        penalty_kind_supported
+        and bool(expected_numbers)
+        and all(number in combined for number in expected_numbers)
+    )
 
 
 def _text_value(value: Any) -> str:
