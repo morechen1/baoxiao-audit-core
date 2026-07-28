@@ -1,2 +1,31 @@
-# 项目规划者确认来源后再添加条目；未经确认的来源必须保持 enabled: false。
-sources: []
+sources:
+  - source_key: nfra_penalties_v1
+    name: 国家金融监督管理总局行政处罚公开信息
+    publisher: 国家金融监督管理总局及派出机构
+    base_url: https://www.nfra.gov.cn
+    source_type: penalty
+    allowed_domains:
+      - www.nfra.gov.cn
+    enabled: true
+    confirmed_by: project_planner
+    crawl_policy:
+      rate_limit_seconds: 3
+      max_documents: 10
+      allow_subdomains: false
+    robots_review:
+      status: not_published_manual_review
+      checked_at: "2026-07-27"
+      checked_by: project_planner
+      reference_url: https://www.nfra.gov.cn/robots.txt
+      notes: 仅访问10个明确行政处罚页面
+    terms_review:
+      status: public_access_allowed
+      checked_at: "2026-07-27"
+      checked_by: project_planner
+      reference_url: https://www.nfra.gov.cn/cn/view/pages/index/falvshengming.html
+      notes: 保留处罚机关、文号、原文页面和引用出处
+    approval:
+      approved_by: project_planner
+      approved_at: "2026-07-27T14:00:00+08:00"
+      approval_reference: pilot-first-batch-v1-penalties
+    notes: 首批真实公开数据试采集V1，仅访问已批准的10个行政处罚URL

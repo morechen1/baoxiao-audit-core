@@ -154,6 +154,7 @@ class BaseCollector(ABC):
 
 def _suffix_for_content_type(content_type: str, url: str | None) -> str:
     mapping = {
+        "application/json": ".json",
         "application/pdf": ".pdf",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
         "text/html": ".html",

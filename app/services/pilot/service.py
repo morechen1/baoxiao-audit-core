@@ -29,7 +29,12 @@ from app.models import (
     PilotSourceRegistration,
 )
 from app.models.enums import AuthenticityType
-from app.services.collection import SafeUrlPolicy, WebPageCollector
+from app.services.collection import (
+    BaseCollector,
+    NfraPublicDocumentCollector,
+    SafeUrlPolicy,
+    WebPageCollector,
+)
 from app.services.pilot.models import (
     PilotManifestEntry,
     PilotManifestStatus,
@@ -72,6 +77,22 @@ SAFE_URL_ERROR_CODES = frozenset(
 )
 SAFE_COLLECTION_ERROR_CODES = frozenset(
     {
+        "nfra_administrative_license",
+        "nfra_api_status_error",
+        "nfra_angular_template_shell",
+        "nfra_appointment_qualification",
+        "nfra_captcha_page",
+        "nfra_doc_id_mismatch",
+        "nfra_empty_document_body",
+        "nfra_error_page",
+        "nfra_error_payload",
+        "nfra_invalid_json",
+        "nfra_invalid_landing_url",
+        "nfra_non_insurance_penalty",
+        "nfra_retrieval_url_changed",
+        "nfra_title_mismatch",
+        "nfra_title_missing",
+        "nfra_unexpected_response_type",
         "unsupported_document_data_type",
         "duplicate_content_type_conflict",
         "stored_artifact_corrupt",
@@ -115,7 +136,7 @@ class PilotCollectionResult:
     outcomes: list[PilotCollectionOutcome]
 
 
-CollectorFactory = Callable[[frozenset[str], bool], WebPageCollector]
+CollectorFactory = Callable[[frozenset[str], bool], BaseCollector]
 SleepFunction = Callable[[float], None]
 ClockFunction = Callable[[], datetime]
 
@@ -130,6 +151,7 @@ class PilotService:
         clock: ClockFunction | None = None,
     ) -> None:
         self.settings = settings or get_settings()
+        self._custom_collector_factory = collector_factory is not None
         self.collector_factory = collector_factory or self._collector
         self.sleep = sleep
         self.clock = clock or (lambda: datetime.now(UTC))
@@ -459,8 +481,29 @@ class PilotService:
         allowed_hosts = SafeUrlPolicy.allowed_hosts(
             registration.base_url, registration.allowed_domains_json
         )
-        collector = self.collector_factory(allowed_hosts, registration.allow_subdomains)
-        result = collector.collect(str(entry.source_url))
+        source_url = str(entry.source_url)
+        if NfraPublicDocumentCollector.is_dynamic_landing_candidate(source_url):
+            if not NfraPublicDocumentCollector.supports(source_url, allowed_hosts):
+                raise CollectionError("nfra_invalid_landing_url")
+            if not self._custom_collector_factory:
+                collector: BaseCollector = NfraPublicDocumentCollector(
+                    self.settings,
+                    allowed_hosts=allowed_hosts,
+                    allow_subdomains=registration.allow_subdomains,
+                    expected_title=entry.expected_title,
+                    source_type=entry.source_type.value,
+                )
+            else:
+                collector = self.collector_factory(
+                    allowed_hosts,
+                    registration.allow_subdomains,
+                )
+        else:
+            collector = self.collector_factory(
+                allowed_hosts,
+                registration.allow_subdomains,
+            )
+        result = collector.collect(source_url)
         document, created = collector.persist(
             session,
             result,
@@ -674,6 +717,19 @@ class PilotService:
                     location,
                     "source_domain_not_allowed",
                     "source_url is outside the registered allowlist",
+                )
+            )
+        elif NfraPublicDocumentCollector.is_dynamic_landing_candidate(
+            url
+        ) and not NfraPublicDocumentCollector.supports(
+            url,
+            SafeUrlPolicy.allowed_hosts(str(source.base_url), list(source.allowed_domains)),
+        ):
+            issues.append(
+                PilotValidationIssue(
+                    location,
+                    "nfra_invalid_landing_url",
+                    "NFRA dynamic landing URL is invalid",
                 )
             )
         return issues

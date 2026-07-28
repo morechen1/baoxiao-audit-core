@@ -1,2 +1,31 @@
-# 项目规划者确认来源后再添加条目；不得用搜索摘要或转载站代替官方原文。
-sources: []
+sources:
+  - source_key: nfra_regulations_v1
+    name: 国家金融监督管理总局政策法规
+    publisher: 国家金融监督管理总局
+    base_url: https://www.nfra.gov.cn
+    source_type: regulation
+    allowed_domains:
+      - www.nfra.gov.cn
+    enabled: true
+    confirmed_by: project_planner
+    crawl_policy:
+      rate_limit_seconds: 3
+      max_documents: 3
+      allow_subdomains: false
+    robots_review:
+      status: not_published_manual_review
+      checked_at: "2026-07-27"
+      checked_by: project_planner
+      reference_url: https://www.nfra.gov.cn/robots.txt
+      notes: 仅访问3个已逐项确认的公开页面，不遍历栏目
+    terms_review:
+      status: public_access_allowed
+      checked_at: "2026-07-27"
+      checked_by: project_planner
+      reference_url: https://www.nfra.gov.cn/cn/view/pages/index/falvshengming.html
+      notes: 仅用于项目内部证据核验，保留来源和原文链接
+    approval:
+      approved_by: project_planner
+      approved_at: "2026-07-27T14:00:00+08:00"
+      approval_reference: pilot-first-batch-v1-regulations
+    notes: 首批真实公开数据试采集V1，仅访问已批准的3个监管制度URL

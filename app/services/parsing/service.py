@@ -11,6 +11,7 @@ from app.services.parsed_artifacts import ParsedArtifactService
 from app.services.parsing.base import DocumentParser, ParsedDocument
 from app.services.parsing.docx import DocxParser
 from app.services.parsing.html import HtmlParser
+from app.services.parsing.nfra_json import NfraJsonParser
 from app.services.parsing.pdf import PdfParser
 from app.services.parsing.text import TextParser
 from app.services.state_machine import StateMachineService
@@ -22,6 +23,7 @@ class ParsingService:
         ".docx": DocxParser(),
         ".html": HtmlParser(),
         ".htm": HtmlParser(),
+        ".json": NfraJsonParser(),
         ".txt": TextParser(),
     }
 

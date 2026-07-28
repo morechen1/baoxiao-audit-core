@@ -261,6 +261,33 @@ def test_invalid_line_prevents_partial_collection(session, tmp_path: Path) -> No
     assert session.query(PilotCollectionRun).count() == 0
 
 
+def test_invalid_nfra_dynamic_landing_fails_without_request_or_database_write(
+    session, tmp_path: Path
+) -> None:
+    registry_dir, manifests_dir = _layout(tmp_path)
+    _write_registry(
+        registry_dir,
+        _source(base_url="https://www.nfra.gov.cn"),
+    )
+    manifest = manifests_dir / "regulations.jsonl"
+    _write_manifest(
+        manifest,
+        _entry(source_url=("https://www.nfra.gov.cn/cn/view/pages/ItemDetail.html?docId=invalid")),
+    )
+    service, calls = _service(tmp_path)
+
+    with pytest.raises(PilotConfigurationError) as caught:
+        service.collect_manifest(session, manifest, registry_dir=registry_dir)
+
+    assert "nfra_invalid_landing_url" in {issue.code for issue in caught.value.issues}
+    assert calls == []
+    assert session.query(PilotCollectionRun).count() == 0
+    assert session.query(PilotCollectionItem).count() == 0
+    assert session.query(PilotSourceRegistration).count() == 0
+    assert session.query(DataSource).count() == 0
+    assert session.query(SourceDocument).count() == 0
+
+
 def test_collect_uses_global_validation_not_only_selected_file(session, tmp_path: Path) -> None:
     registry_dir, manifests_dir = _layout(tmp_path)
     _write_registry(registry_dir, _source())
