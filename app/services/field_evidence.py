@@ -70,6 +70,16 @@ EVIDENCE_FIELDS: dict[str, frozenset[str]] = {
     ),
 }
 
+HAN_ORGANIZATION_NAME_TRANSFORMATION = "collapse_unicode_whitespace_for_han_organization_name_v1"
+_HAN_ORGANIZATION_MIN_LENGTH = 4
+_HAN_ORGANIZATION_MAX_LENGTH = 64
+_HAN_ORGANIZATION_QUOTE_MAX_LENGTH = 128
+_ORGANIZATION_BOUNDARY_BEFORE_WHITESPACE = re.compile(
+    r"(?:委员会|监督管理局|监管局|管理局|总局|分局|支局|公司|银行|中心|"
+    r"协会|学会|研究院|研究所|办公室|人民政府|机构|集团|大学|学院|"
+    r"医院|法院|检察院|政府|部门)(?=\s)"
+)
+
 
 class FieldEvidenceService:
     def __init__(self, settings: Settings | None = None) -> None:
@@ -173,6 +183,12 @@ class FieldEvidenceService:
         if item.mode == "document_metadata":
             self._validate_metadata(document, artifact, field_name, field_value, item)
             return
+        if item.transformation_note == HAN_ORGANIZATION_NAME_TRANSFORMATION and (
+            item.mode != "normalized"
+            or document.data_type != DataType.REGULATORY_CASE.value
+            or field_name != "publisher"
+        ):
+            raise FieldEvidenceError("field_not_supported_by_evidence")
         value = self._string_value(field_value)
         if item.mode == "verbatim":
             normalized_value = self._basic_normalize(value)
@@ -181,6 +197,10 @@ class FieldEvidenceService:
                 raise FieldEvidenceError("field_not_supported_by_evidence")
             return
         transformed = self._apply_declared_transform(item.quote, item.transformation_note or "")
+        if item.transformation_note == HAN_ORGANIZATION_NAME_TRANSFORMATION:
+            if not isinstance(field_value, str) or transformed != field_value:
+                raise FieldEvidenceError("field_not_supported_by_evidence")
+            return
         if self._basic_normalize(value) != self._basic_normalize(transformed):
             raise FieldEvidenceError("field_not_supported_by_evidence")
 
@@ -288,6 +308,8 @@ class FieldEvidenceService:
             value = f"{int(match.group(1)):04d}-{int(match.group(2)):02d}-{int(match.group(3)):02d}"
         elif normalized_note == "collapse_unicode_whitespace_for_chinese_date_v1":
             value = cls._normalize_split_chinese_date(value)
+        elif normalized_note == HAN_ORGANIZATION_NAME_TRANSFORMATION:
+            value = cls._normalize_han_organization_name(value)
         elif normalized_note in {"列表拆分与合并", "list_normalized"}:
             value = ",".join(
                 part.strip() for part in re.split(r"[,，;；、]", value) if part.strip()
@@ -313,6 +335,41 @@ class FieldEvidenceService:
             return date(year, month, day).isoformat()
         except ValueError as exc:
             raise FieldEvidenceError("field_not_supported_by_evidence") from exc
+
+    @classmethod
+    def _normalize_han_organization_name(cls, value: str) -> str:
+        if (
+            len(value) > _HAN_ORGANIZATION_QUOTE_MAX_LENGTH
+            or not any(character.isspace() for character in value)
+            or "\u2029" in value
+            or re.search(r"(?:\r?\n)[^\S\r\n]*(?:\r?\n)", value)
+            or any(
+                not character.isspace() and not cls._is_han_character(character)
+                for character in value
+            )
+            or _ORGANIZATION_BOUNDARY_BEFORE_WHITESPACE.search(value)
+        ):
+            raise FieldEvidenceError("field_not_supported_by_evidence")
+        collapsed = "".join(character for character in value if not character.isspace())
+        if not (
+            _HAN_ORGANIZATION_MIN_LENGTH <= len(collapsed) <= _HAN_ORGANIZATION_MAX_LENGTH
+        ) or any(not cls._is_han_character(character) for character in collapsed):
+            raise FieldEvidenceError("field_not_supported_by_evidence")
+        return collapsed
+
+    @staticmethod
+    def _is_han_character(character: str) -> bool:
+        codepoint = ord(character)
+        return any(
+            start <= codepoint <= end
+            for start, end in (
+                (0x3400, 0x4DBF),
+                (0x4E00, 0x9FFF),
+                (0xF900, 0xFAFF),
+                (0x20000, 0x2FA1F),
+                (0x30000, 0x3134F),
+            )
+        )
 
     @staticmethod
     def summary(evidence: dict[str, Any]) -> dict[str, Any]:

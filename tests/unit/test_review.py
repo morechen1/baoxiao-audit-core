@@ -20,6 +20,7 @@ from app.models import (
     Penalty,
     ProductDocument,
     Regulation,
+    RegulatoryCase,
     ReviewBatchItem,
     ReviewDecision,
     SourceDocument,
@@ -31,7 +32,10 @@ from app.models.enums import (
     ReviewStatus,
     SampleCategory,
 )
-from app.services.field_evidence import EVIDENCE_FIELDS
+from app.services.field_evidence import (
+    EVIDENCE_FIELDS,
+    HAN_ORGANIZATION_NAME_TRANSFORMATION,
+)
 from app.services.knowledge import KnowledgeIndexService
 from app.services.parsed_artifacts import ParsedArtifactService
 from app.services.parsing.base import ParsedDocument, ParsedPage
@@ -136,6 +140,7 @@ def document_records(session, document):
         DataType.REGULATION.value: Regulation,
         DataType.PENALTY.value: Penalty,
         DataType.PRODUCT_DOCUMENT.value: ProductDocument,
+        DataType.REGULATORY_CASE.value: RegulatoryCase,
     }.get(document.data_type)
     return list(session.query(model).filter_by(document_id=document.id)) if model else []
 
@@ -748,6 +753,91 @@ def test_expert_review_document_can_be_approved_with_revision(session, tmp_path:
     assert document.final_review_status == ReviewStatus.APPROVED_WITH_REVISION.value
     assert product.final_review_status == ReviewStatus.APPROVED_WITH_REVISION.value
     assert product.waiting_period == "三十日"
+
+
+def test_case_publisher_multiline_evidence_can_be_approved_with_revision(
+    session, tmp_path: Path
+) -> None:
+    quote = "中\n国银\n保监\n会消费者权益保护局"
+    target = "中国银保监会消费者权益保护局"
+    document = SourceDocument(
+        data_type=DataType.REGULATORY_CASE.value,
+        source_url="https://example.test/regulatory-case",
+        final_url="https://example.test/regulatory-case",
+        raw_file_path="/tmp/regulatory-case.txt",
+        raw_text=f"风险提示\n{quote}\n公开风险场景",
+        sha256="7" * 64,
+        publisher="消保局",
+        authenticity_type=AuthenticityType.VERIFIED_PUBLIC.value,
+        parse_status="parsed",
+        final_review_status=ReviewStatus.PENDING_REVIEW.value,
+        metadata_json={"automatic_validation": {"valid": True, "issues": []}},
+    )
+    session.add(document)
+    session.flush()
+    record = RegulatoryCase(
+        document_id=document.id,
+        case_title="风险提示",
+        publisher="消保局",
+        case_category="consumer_risk_alert",
+        scenario_text="公开风险场景",
+        marketing_wording_disclosed=False,
+        marketing_wording=None,
+        case_usage="external_test_candidate",
+        source_quote="公开风险场景",
+        final_review_status=ReviewStatus.PENDING_REVIEW.value,
+    )
+    session.add(record)
+    session.commit()
+    service = materialize_documents(session, DataType.REGULATORY_CASE.value)
+    record.field_evidence_json = {
+        **record.field_evidence_json,
+        "publisher": [
+            {
+                "quote": "风险提示",
+                "page_number": 1,
+                "start_offset": 0,
+                "end_offset": 4,
+                "mode": "document_metadata",
+                "metadata_field": "publisher",
+            }
+        ],
+    }
+    session.commit()
+    batch, bundle_path = service.export_bundle(session, DataType.REGULATORY_CASE.value)
+    with zipfile.ZipFile(bundle_path) as bundle:
+        row = json.loads(bundle.read("review.jsonl"))
+    portable_key = row["parsed_fields"]["records"][0]["portable_record_key"]
+
+    service.apply_decision(
+        session,
+        decision_payload(
+            row,
+            status=ReviewStatus.APPROVED_WITH_REVISION.value,
+            corrections={
+                "records": [
+                    {
+                        "portable_record_key": portable_key,
+                        "fields": {"publisher": target},
+                        "field_evidence": {
+                            "publisher": correction_evidence(
+                                document,
+                                quote,
+                                mode="normalized",
+                                note=HAN_ORGANIZATION_NAME_TRANSFORMATION,
+                            )
+                        },
+                    }
+                ]
+            },
+        ),
+        batch.id,
+    )
+
+    assert document.final_review_status == ReviewStatus.APPROVED_WITH_REVISION.value
+    assert record.final_review_status == ReviewStatus.APPROVED_WITH_REVISION.value
+    assert record.publisher == target
+    assert record.field_evidence_json["publisher"][0]["quote"] == quote
 
 
 def test_expert_review_document_can_be_rejected(session, tmp_path: Path) -> None:

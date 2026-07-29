@@ -41,7 +41,10 @@ from app.schemas.structured import (
     StructuredDraftEnvelope,
     StructuredDraftRevisionEnvelope,
 )
-from app.services.field_evidence import FieldEvidenceService
+from app.services.field_evidence import (
+    HAN_ORGANIZATION_NAME_TRANSFORMATION,
+    FieldEvidenceService,
+)
 from app.services.knowledge import KnowledgeIndexService
 from app.services.parsed_artifacts import (
     ParsedArtifactIntegrityService,
@@ -335,6 +338,203 @@ def test_split_chinese_date_requires_exact_quote_and_single_sentence(session) ->
                 )
             },
         )
+
+
+def test_han_organization_name_normalizes_exact_multiline_quote(session) -> None:
+    quote = "中\n国银\n保监\n会消费者权益保护局"
+    target = "中国银保监会消费者权益保护局"
+    document = make_document(session, DataType.REGULATORY_CASE.value, quote)
+
+    validated = FieldEvidenceService(settings_for(session)).validate(
+        session,
+        document,
+        {"publisher": target},
+        {
+            "publisher": evidence(
+                document,
+                quote,
+                mode="normalized",
+                note=HAN_ORGANIZATION_NAME_TRANSFORMATION,
+            )
+        },
+    )
+
+    assert validated["publisher"][0]["quote"] == quote
+    assert validated["publisher"][0]["transformation_note"] == (
+        HAN_ORGANIZATION_NAME_TRANSFORMATION
+    )
+
+
+def test_han_organization_name_rejects_character_changes_and_expansion(session) -> None:
+    cases = (
+        (
+            "中\n国银\n保监\n会消费者权益保护局",
+            "中国银保监会消费者权益保护处",
+        ),
+        ("消\n保局", "中国银保监会消费者权益保护局"),
+        (
+            "中\n国银\n保监\n会消费者权益保护局甲",
+            "中国银保监会消费者权益保护局",
+        ),
+    )
+
+    for quote, target in cases:
+        document = make_document(session, DataType.REGULATORY_CASE.value, quote)
+        with pytest.raises(FieldEvidenceError, match="field_not_supported_by_evidence"):
+            FieldEvidenceService(settings_for(session)).validate(
+                session,
+                document,
+                {"publisher": target},
+                {
+                    "publisher": evidence(
+                        document,
+                        quote,
+                        mode="normalized",
+                        note=HAN_ORGANIZATION_NAME_TRANSFORMATION,
+                    )
+                },
+            )
+
+
+def test_han_organization_name_rejects_punctuation_paragraphs_and_multiple_names(
+    session,
+) -> None:
+    cases = (
+        (
+            "中国银保监会。\n消费者权益保护局",
+            "中国银保监会消费者权益保护局",
+        ),
+        (
+            "中国银行保险监督管理委员会\n国家金融监督管理总局",
+            "中国银行保险监督管理委员会国家金融监督管理总局",
+        ),
+        (
+            "中国银保监会\n\n消费者权益保护局",
+            "中国银保监会消费者权益保护局",
+        ),
+    )
+
+    for quote, target in cases:
+        document = make_document(session, DataType.REGULATORY_CASE.value, quote)
+        with pytest.raises(FieldEvidenceError, match="field_not_supported_by_evidence"):
+            FieldEvidenceService(settings_for(session)).validate(
+                session,
+                document,
+                {"publisher": target},
+                {
+                    "publisher": evidence(
+                        document,
+                        quote,
+                        mode="normalized",
+                        note=HAN_ORGANIZATION_NAME_TRANSFORMATION,
+                    )
+                },
+            )
+
+
+def test_han_organization_name_transform_is_restricted_to_case_publisher(session) -> None:
+    quote = "中\n国银\n保监\n会消费者权益保护局"
+    target = "中国银保监会消费者权益保护局"
+    cases = (
+        (DataType.REGULATORY_CASE.value, "case_facts"),
+        (DataType.PENALTY.value, "authority"),
+        (DataType.REGULATION.value, "issuing_authority"),
+        (DataType.PRODUCT_DOCUMENT.value, "company_name"),
+    )
+
+    for data_type, field_name in cases:
+        document = make_document(session, data_type, quote)
+        with pytest.raises(FieldEvidenceError, match="field_not_supported_by_evidence"):
+            FieldEvidenceService(settings_for(session)).validate(
+                session,
+                document,
+                {field_name: target},
+                {
+                    field_name: evidence(
+                        document,
+                        quote,
+                        mode="normalized",
+                        note=HAN_ORGANIZATION_NAME_TRANSFORMATION,
+                    )
+                },
+            )
+
+
+def test_han_organization_name_requires_exact_versioned_normalized_mode(session) -> None:
+    quote = "中\n国银\n保监\n会消费者权益保护局"
+    target = "中国银保监会消费者权益保护局"
+    document = make_document(session, DataType.REGULATORY_CASE.value, quote)
+    with pytest.raises(FieldEvidenceError, match="evidence_offset_mismatch"):
+        FieldEvidenceService(settings_for(session)).validate(
+            session,
+            document,
+            {"publisher": target},
+            {
+                "publisher": [
+                    {
+                        "quote": target,
+                        "page_number": 1,
+                        "start_offset": 0,
+                        "end_offset": len(target),
+                        "mode": "normalized",
+                        "transformation_note": HAN_ORGANIZATION_NAME_TRANSFORMATION,
+                    }
+                ]
+            },
+        )
+    cases = (
+        ("normalized", "whitespace_normalized"),
+        ("normalized", f"{HAN_ORGANIZATION_NAME_TRANSFORMATION}_typo"),
+        ("verbatim", HAN_ORGANIZATION_NAME_TRANSFORMATION),
+    )
+
+    for mode, note in cases:
+        with pytest.raises(FieldEvidenceError, match="field_not_supported_by_evidence"):
+            FieldEvidenceService(settings_for(session)).validate(
+                session,
+                document,
+                {"publisher": target},
+                {
+                    "publisher": evidence(
+                        document,
+                        quote,
+                        mode=mode,
+                        note=note,
+                    )
+                },
+            )
+
+
+def test_han_organization_name_enforces_han_whitespace_and_length_bounds(session) -> None:
+    cases = (
+        ("中国银保监会消费者权益保护局", "中国银保监会消费者权益保护局"),
+        ("中国ABC\n监管局", "中国ABC监管局"),
+        ("中国2026\n监管局", "中国2026监管局"),
+        ("消\n保局", "消保局"),
+        ("中\n" * 65 + "局", "中" * 65 + "局"),
+        ("中国银保监会\u2029消费者权益保护局", "中国银保监会消费者权益保护局"),
+        (
+            "中\n国银\n保监\n会消费者权益保护局",
+            "中国银保监会 消费者权益保护局",
+        ),
+    )
+
+    for quote, target in cases:
+        document = make_document(session, DataType.REGULATORY_CASE.value, quote)
+        with pytest.raises(FieldEvidenceError, match="field_not_supported_by_evidence"):
+            FieldEvidenceService(settings_for(session)).validate(
+                session,
+                document,
+                {"publisher": target},
+                {
+                    "publisher": evidence(
+                        document,
+                        quote,
+                        mode="normalized",
+                        note=HAN_ORGANIZATION_NAME_TRANSFORMATION,
+                    )
+                },
+            )
 
 
 def test_nfra_caption_is_narrowly_scoped_document_number_metadata(session) -> None:

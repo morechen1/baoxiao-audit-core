@@ -95,6 +95,13 @@ ISO 日期会转换为日期对象；任一字段或证据非法时返回领域�
 只执行白名单内的空白、全半角、标点、日期、列表或字段标签转换，并要求可重放的
 `transformation_note`；summary 不得自动通过，会进入 `requires_expert_review`。
 
+`collapse_unicode_whitespace_for_han_organization_name_v1` 是专用于
+`RegulatoryCase.publisher` 的受控 normalized 转换。它只接受长度不超过 128、
+包含至少一个 Unicode 空白且除此以外全部为汉字的精确 quote；删除全部 Unicode
+空白后的 4 至 64 个汉字必须与目标值逐字符完全相同。标点、数字、拉丁字符、空段落、
+已完整结束的相邻机构名称和其他字段一律失败关闭。该转换不改写不可变解析文本，也不
+允许简称扩写或同义替换。
+
 正式草稿缺少证据返回 `missing_field_evidence`。常见拒绝码还包括
 `evidence_offset_mismatch`、`evidence_page_mismatch`、
 `field_not_supported_by_evidence` 和 `summary_evidence_requires_expert_review`。
