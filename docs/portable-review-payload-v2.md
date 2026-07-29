@@ -16,6 +16,11 @@ identifiers are excluded. Parsed Artifact Schema 2.0 likewise excludes `document
 artifact has the same SHA-256 in another database. Integrity verification remains backward
 compatible with existing Parsed Artifact Schema 1.0 files.
 
+Local `file://` source and occurrence URLs are canonicalized through the same shared function
+used by bundle export and payload hashing. Only the filename is retained as
+`local-unattributed://{filename}`; an empty filename fails closed. HTTPS and other non-file
+URLs are preserved unchanged.
+
 Each structured record has a `portable_record_key` derived from the raw artifact SHA-256,
 record type, draft provenance, canonical business fields, and canonical field evidence.
 Portable corrections must resolve this key to exactly one current structured record.
@@ -32,4 +37,6 @@ The evidence layer additionally supports:
   whitespace;
 - `nfra.caption` as a narrowly scoped metadata source for
   `Regulation.document_number`, provided the value was parsed from immutable official NFRA
-  JSON and passed the controlled document-number format check.
+  JSON and passed the controlled document-number format check. An available
+  `nfra.document_number` is always authoritative, so caption evidence is accepted only when
+  that primary value is empty.

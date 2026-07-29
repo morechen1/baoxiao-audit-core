@@ -210,7 +210,12 @@ class FieldEvidenceService:
             metadata_value = FieldEvidenceService._official_filename(document)
         elif item.metadata_field == "nfra.caption":
             raw_nfra = artifact.get("metadata", {}).get("nfra", {})
-            metadata_value = raw_nfra.get("caption") if isinstance(raw_nfra, dict) else None
+            if not isinstance(raw_nfra, dict):
+                raise FieldEvidenceError("field_not_supported_by_evidence")
+            primary_document_number = raw_nfra.get("document_number")
+            if isinstance(primary_document_number, str) and primary_document_number.strip():
+                raise FieldEvidenceError("field_not_supported_by_evidence")
+            metadata_value = raw_nfra.get("caption")
         else:
             metadata_value = getattr(document, item.metadata_field or "", None)
         if FieldEvidenceService._basic_normalize(

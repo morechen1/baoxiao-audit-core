@@ -6,6 +6,7 @@ import math
 from datetime import date, datetime
 from enum import Enum
 from typing import Any
+from urllib.parse import urlparse
 
 REVIEW_PAYLOAD_SCHEMA_VERSION = 2
 
@@ -53,6 +54,16 @@ def canonical_review_payload_hash_v2(review_row: dict[str, Any]) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
+def canonical_portable_source_url(value: Any) -> Any:
+    if not isinstance(value, str) or not value.startswith("file://"):
+        return value
+    parsed = urlparse(value)
+    filename = parsed.path.rsplit("/", 1)[-1]
+    if filename in {"", ".", ".."}:
+        raise ValueError("portable_source_filename_missing")
+    return f"local-unattributed://{filename}"
+
+
 def portable_record_key(
     raw_artifact_sha256: str,
     record_type: str,
@@ -87,8 +98,8 @@ def build_canonical_review_payload_v2(review_row: dict[str, Any]) -> dict[str, A
 
     occurrences = [
         {
-            "source_url": item.get("source_url"),
-            "final_url": item.get("final_url"),
+            "source_url": canonical_portable_source_url(item.get("source_url")),
+            "final_url": canonical_portable_source_url(item.get("final_url")),
             "publisher": item.get("publisher"),
             "http_status": item.get("http_status"),
         }
@@ -122,8 +133,8 @@ def build_canonical_review_payload_v2(review_row: dict[str, Any]) -> dict[str, A
         "review_payload_schema_version": REVIEW_PAYLOAD_SCHEMA_VERSION,
         "record_type": record_type,
         "source": {
-            "source_url": review_row.get("source_url"),
-            "retrieval_url": review_row.get("final_url"),
+            "source_url": canonical_portable_source_url(review_row.get("source_url")),
+            "retrieval_url": canonical_portable_source_url(review_row.get("final_url")),
             "source_title": review_row.get("source_title"),
             "publisher": review_row.get("publisher"),
             "published_at": review_row.get("published_at"),

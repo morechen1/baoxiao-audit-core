@@ -62,6 +62,7 @@ from app.services.knowledge import KnowledgeIndexService
 from app.services.parsed_artifacts import ParsedArtifactIntegrityService
 from app.services.review_payload import (
     REVIEW_PAYLOAD_SCHEMA_VERSION,
+    canonical_portable_source_url,
     canonical_review_payload_hash_v2,
     portable_record_key,
 )
@@ -1158,9 +1159,7 @@ class ReviewService:
 
     @staticmethod
     def _portable_url(value: Any) -> Any:
-        if not isinstance(value, str) or not value.startswith("file://"):
-            return value
-        return f"local-unattributed://{Path(urlparse(value).path).name}"
+        return canonical_portable_source_url(value)
 
     @staticmethod
     def _bundle_payload_hash(

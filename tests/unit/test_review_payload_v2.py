@@ -2,6 +2,7 @@ import copy
 import hashlib
 from pathlib import Path
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -11,7 +12,10 @@ from app.models.entities import Base
 from app.services.parsed_artifacts import ParsedArtifactService
 from app.services.parsing.base import ParsedDocument, ParsedPage
 from app.services.review.service import payload_hash
-from app.services.review_payload import portable_record_key
+from app.services.review_payload import (
+    canonical_portable_source_url,
+    portable_record_key,
+)
 
 
 def review_row() -> dict:
@@ -148,6 +152,45 @@ def test_payload_v2_ignores_database_ids_timestamps_paths_and_load_order() -> No
                 item["chunk_id"] = 999 + index
 
     assert payload_hash(first) == payload_hash(second)
+
+
+def test_payload_v2_canonicalizes_local_document_and_occurrence_urls() -> None:
+    database_row = review_row()
+    database_row["source_url"] = "file:///Users/alice/private/doc.pdf"
+    database_row["final_url"] = "file:///Users/alice/private/doc.pdf"
+    database_row["source_occurrences"][0]["source_url"] = "file:///Users/alice/archive/doc.pdf"
+    database_row["source_occurrences"][0]["final_url"] = "file:///Users/alice/archive/doc.pdf"
+    bundle_row = copy.deepcopy(database_row)
+    bundle_row["source_url"] = "local-unattributed://doc.pdf"
+    bundle_row["final_url"] = "local-unattributed://doc.pdf"
+    bundle_row["source_occurrences"][0]["source_url"] = "local-unattributed://doc.pdf"
+    bundle_row["source_occurrences"][0]["final_url"] = "local-unattributed://doc.pdf"
+    other_root = copy.deepcopy(database_row)
+    other_root["source_url"] = "file:///home/bob/elsewhere/doc.pdf"
+    other_root["final_url"] = "file:///home/bob/elsewhere/doc.pdf"
+    other_root["source_occurrences"][0]["source_url"] = "file:///home/bob/elsewhere/doc.pdf"
+    other_root["source_occurrences"][0]["final_url"] = "file:///home/bob/elsewhere/doc.pdf"
+
+    assert payload_hash(database_row) == payload_hash(bundle_row)
+    assert payload_hash(database_row) == payload_hash(other_root)
+
+
+def test_portable_source_url_preserves_https_and_distinguishes_filenames() -> None:
+    official_url = "https://official.example/doc.pdf"
+
+    assert canonical_portable_source_url(official_url) == official_url
+    assert canonical_portable_source_url(123) == 123
+    assert canonical_portable_source_url("file:///Users/alice/a/doc.pdf") == (
+        "local-unattributed://doc.pdf"
+    )
+    assert canonical_portable_source_url("file:///Users/alice/a/other.pdf") == (
+        "local-unattributed://other.pdf"
+    )
+    assert canonical_portable_source_url("file:///a/doc.pdf") != (
+        canonical_portable_source_url("file:///a/other.pdf")
+    )
+    with pytest.raises(ValueError, match="portable_source_filename_missing"):
+        canonical_portable_source_url("file:///Users/alice/a/")
 
 
 def test_payload_v2_changes_when_business_field_changes() -> None:

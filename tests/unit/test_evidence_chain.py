@@ -348,7 +348,7 @@ def test_nfra_caption_is_narrowly_scoped_document_number_metadata(session) -> No
             title=text,
             plain_text=text,
             pages=[ParsedPage(page_number=1, text=text)],
-            metadata={"nfra": {"caption": caption}},
+            metadata={"nfra": {"document_number": None, "caption": caption}},
         ),
         parser_name="NfraJsonParser",
     )
@@ -383,6 +383,65 @@ def test_nfra_caption_is_narrowly_scoped_document_number_metadata(session) -> No
                 {"document_number": caption},
                 rejected,
             )
+
+    forbidden_field_evidence = {
+        "title": [
+            {
+                **metadata_evidence["document_number"][0],
+                "metadata_field": "nfra.caption",
+            }
+        ]
+    }
+    with pytest.raises(FieldEvidenceError, match="field_not_supported_by_evidence"):
+        FieldEvidenceService(settings_for(session)).validate(
+            session,
+            document,
+            {"title": caption},
+            forbidden_field_evidence,
+        )
+
+
+def test_nfra_caption_is_rejected_when_primary_document_number_exists(session) -> None:
+    text = "保险销售行为管理办法"
+    document = make_document(session, DataType.REGULATION.value, text)
+    primary = "金规〔2026〕1号"
+    caption = "中国银行保险监督管理委员会令2022年第9号"
+    ParsedArtifactService(settings_for(session)).persist(
+        session,
+        document,
+        ParsedDocument(
+            title=text,
+            plain_text=text,
+            pages=[ParsedPage(page_number=1, text=text)],
+            metadata={
+                "nfra": {
+                    "document_number": primary,
+                    "caption": caption,
+                }
+            },
+        ),
+        parser_name="NfraJsonParser",
+    )
+    session.commit()
+
+    with pytest.raises(FieldEvidenceError, match="field_not_supported_by_evidence"):
+        FieldEvidenceService(settings_for(session)).validate(
+            session,
+            document,
+            {"document_number": caption},
+            {
+                "document_number": [
+                    {
+                        "quote": text,
+                        "page_number": 1,
+                        "start_offset": 0,
+                        "end_offset": len(text),
+                        "mode": "document_metadata",
+                        "metadata_field": "nfra.caption",
+                    }
+                ]
+            },
+        )
 
 
 def test_summary_evidence_routes_demo_record_to_expert_review(session) -> None:

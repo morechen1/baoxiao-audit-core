@@ -1173,6 +1173,39 @@ def test_portable_review_bundle_decision_uses_v2_payload_hash(session, tmp_path:
     assert product.final_review_status == ReviewStatus.APPROVED.value
 
 
+def test_local_source_bundle_hides_paths_and_can_apply_decision(session, tmp_path: Path) -> None:
+    document, product = setup_product(session)
+    document.source_url = "file:///Users/alice/private/product.txt"
+    document.final_url = "file:///Users/alice/private/product.txt"
+    session.add(
+        DocumentOccurrence(
+            document_id=document.id,
+            source_url="file:///home/bob/archive/product.txt",
+            final_url="file:///home/bob/archive/product.txt",
+            publisher="本地导入",
+            response_metadata={"source_path": "/home/bob/archive/product.txt"},
+        )
+    )
+    session.commit()
+    service = materialize_documents(session, DataType.PRODUCT_DOCUMENT.value)
+
+    batch, bundle_path = service.export_bundle(session, DataType.PRODUCT_DOCUMENT.value)
+    with zipfile.ZipFile(bundle_path) as bundle:
+        review_bytes = bundle.read("review.jsonl")
+        row = json.loads(review_bytes)
+
+    assert row["source_url"] == "local-unattributed://product.txt"
+    assert row["final_url"] == "local-unattributed://product.txt"
+    assert row["source_occurrences"][0]["source_url"] == ("local-unattributed://product.txt")
+    assert b"/Users/alice/" not in review_bytes
+    assert b"/home/bob/" not in review_bytes
+
+    service.apply_decision(session, decision_payload(row), batch.id)
+
+    assert document.final_review_status == ReviewStatus.APPROVED.value
+    assert product.final_review_status == ReviewStatus.APPROVED.value
+
+
 def test_portable_correction_key_must_resolve(session, tmp_path: Path) -> None:
     document, _ = setup_product(session)
     service = materialize_documents(session, DataType.PRODUCT_DOCUMENT.value)
