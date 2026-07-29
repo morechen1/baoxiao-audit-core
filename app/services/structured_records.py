@@ -137,7 +137,6 @@ class StructuredRecordService:
                 document,
                 session=session,
             )
-            submitted_fragments = self._validate_penalty_fragments(document, envelope)
             expected_doc_id = self._parsed_nfra_doc_id(parsed_payload)
             try:
                 validate_source_entry_locator(
@@ -195,6 +194,7 @@ class StructuredRecordService:
                     values,
                     validated_evidence,
                 )
+                submitted_fragments = self._validate_penalty_fragments(document, envelope)
             except ValueError as exc:
                 raise StructuredRecordError(str(exc)) from exc
             if submitted_fragments != expected_fragments:

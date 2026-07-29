@@ -18,6 +18,16 @@ remain an exact substring of the immutable parsed text. The submitted fragments 
 canonicalized and must exactly equal the derived set: one extra, missing or substituted
 fragment fails with `penalty_source_entry_fragment_set_mismatch`.
 
+Every `verbatim` or controlled `normalized` evidence item for a fixed identity field must
+resolve exactly to that field's value under the shared field-evidence normalization rules.
+A quote that only contains the value, or that adds surrounding context, fails with
+`penalty_source_identity_evidence_not_exact`.
+
+The canonical audit fragment list removes exact duplicate triples, sorts by `start_offset`,
+`end_offset`, then `quote`, and rejects every partial or containing overlap with
+`penalty_source_entry_fragment_overlap`. Adjacent ranges and one identical range shared by
+multiple identity fields remain valid.
+
 `source_entry_content_sha256` is SHA-256 over canonical JSON containing fixed field names and
 their exact evidence quotes. Offsets remain in the audit fragments, but are excluded from the
 content hash. Thus the same fixed identity content at another offset cannot manufacture a

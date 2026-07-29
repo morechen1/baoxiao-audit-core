@@ -183,10 +183,22 @@ def envelope_for(
         identity_evidence.setdefault("illegal_facts", evidence(document, "真实原文"))
         if field_evidence is not None:
             field_evidence.setdefault("punished_entity", evidence(document, "真实原文"))
-        fragments = build_penalty_source_entry_fragments(fields, identity_evidence)
-        content_sha256 = source_entry_content_sha256(
-            build_penalty_identity_material(fields, identity_evidence)
-        )
+        try:
+            fragments = build_penalty_source_entry_fragments(fields, identity_evidence)
+            content_sha256 = source_entry_content_sha256(
+                build_penalty_identity_material(fields, identity_evidence)
+            )
+        except ValueError:
+            # This helper intentionally constructs invalid field-evidence envelopes so
+            # the import boundary, rather than the identity builder, is under test.
+            fragments = [
+                {
+                    "quote": "真实原文",
+                    "start_offset": 0,
+                    "end_offset": len("真实原文"),
+                }
+            ]
+            content_sha256 = "a" * 64
         fields.update(
             {
                 "source_entry_index": 1,
@@ -1320,10 +1332,20 @@ def penalty_draft(
     identity_evidence = dict(payload)
     if entity_evidence is None:
         identity_evidence["punished_entity"] = evidence(document, "违法事实")
-    fragments = build_penalty_source_entry_fragments(fields, identity_evidence)
-    content_sha256 = source_entry_content_sha256(
-        build_penalty_identity_material(fields, identity_evidence)
-    )
+    if entity_evidence is None:
+        fragments = [
+            {
+                "quote": "违法事实",
+                "start_offset": 0,
+                "end_offset": len("违法事实"),
+            }
+        ]
+        content_sha256 = "a" * 64
+    else:
+        fragments = build_penalty_source_entry_fragments(fields, identity_evidence)
+        content_sha256 = source_entry_content_sha256(
+            build_penalty_identity_material(fields, identity_evidence)
+        )
     return StructuredDraftEnvelope.model_validate(
         {
             "document_id": document.id,

@@ -4,6 +4,8 @@ import hashlib
 import re
 from typing import Any
 
+from app.core.exceptions import FieldEvidenceError
+from app.services.field_evidence import FieldEvidenceService
 from app.services.review_payload import canonical_json_bytes
 
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
@@ -25,7 +27,7 @@ def canonical_source_entry_fragments(
     """Validate and canonicalize exact entry fragments for audit comparison."""
     if not isinstance(fragments, list) or not fragments:
         raise ValueError("penalty_source_entry_fragment_invalid")
-    result: list[dict[str, Any]] = []
+    unique: dict[tuple[str, int, int], dict[str, Any]] = {}
     for fragment in fragments:
         if not isinstance(fragment, dict) or set(fragment) != FRAGMENT_KEYS:
             raise ValueError("penalty_source_entry_fragment_invalid")
@@ -43,21 +45,51 @@ def canonical_source_entry_fragments(
             or end <= start
         ):
             raise ValueError("penalty_source_entry_fragment_invalid")
-        result.append(
-            {
-                "quote": quote,
-                "start_offset": start,
-                "end_offset": end,
-            }
-        )
-    if len(result) != len(
-        {(item["quote"], item["start_offset"], item["end_offset"]) for item in result}
-    ):
-        raise ValueError("penalty_source_entry_fragment_invalid")
-    return sorted(
-        result,
-        key=lambda item: (item["quote"], item["start_offset"], item["end_offset"]),
+        unique[(quote, start, end)] = {
+            "quote": quote,
+            "start_offset": start,
+            "end_offset": end,
+        }
+    result = sorted(
+        unique.values(),
+        key=lambda item: (item["start_offset"], item["end_offset"], item["quote"]),
     )
+    for previous, current in zip(result, result[1:], strict=False):
+        if current["start_offset"] < previous["end_offset"]:
+            raise ValueError("penalty_source_entry_fragment_overlap")
+    return result
+
+
+def validate_penalty_identity_evidence_exact(
+    field_name: str,
+    field_value: Any,
+    evidence_items: list[dict[str, Any]],
+) -> None:
+    """Require every penalty identity quote to resolve exactly to its field value."""
+    if field_name not in PENALTY_IDENTITY_FIELDS or not evidence_items:
+        raise ValueError("penalty_source_identity_evidence_not_exact")
+    normalized_value = FieldEvidenceService._basic_normalize(
+        FieldEvidenceService._string_value(field_value)
+    )
+    for item in evidence_items:
+        if not isinstance(item, dict) or not isinstance(item.get("quote"), str):
+            raise ValueError("penalty_source_identity_evidence_not_exact")
+        mode = item.get("mode")
+        quote = item["quote"]
+        if mode == "verbatim":
+            candidate = quote
+        elif mode == "normalized":
+            note = item.get("transformation_note")
+            if not isinstance(note, str) or not note.strip():
+                raise ValueError("penalty_source_identity_evidence_not_exact")
+            try:
+                candidate = FieldEvidenceService._apply_declared_transform(quote, note)
+            except FieldEvidenceError as exc:
+                raise ValueError("penalty_source_identity_evidence_not_exact") from exc
+        else:
+            raise ValueError("penalty_source_identity_evidence_not_exact")
+        if FieldEvidenceService._basic_normalize(candidate) != normalized_value:
+            raise ValueError("penalty_source_identity_evidence_not_exact")
 
 
 def build_penalty_identity_material(
@@ -76,6 +108,7 @@ def build_penalty_identity_material(
         items = validated_evidence.get(field_name)
         if not isinstance(items, list) or not items:
             raise ValueError("penalty_source_entry_fragment_set_mismatch")
+        validate_penalty_identity_evidence_exact(field_name, value, items)
         quotes: set[str] = set()
         for item in items:
             if (

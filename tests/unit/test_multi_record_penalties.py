@@ -26,8 +26,10 @@ from app.services.parsing.base import ParsedDocument, ParsedPage
 from app.services.penalty_entries import (
     build_penalty_identity_material,
     build_penalty_source_entry_fragments,
+    canonical_source_entry_fragments,
     penalty_source_entry_fingerprint,
     source_entry_content_sha256,
+    validate_penalty_identity_evidence_exact,
 )
 from app.services.review import ReviewService
 from app.services.review.service import payload_hash
@@ -475,15 +477,21 @@ def test_same_fragments_ignore_index_and_locator_and_duplicate_is_rejected(sessi
         service(session).import_draft(session, second)
 
 
-@pytest.mark.parametrize("mutation", ["wrong_offset", "duplicate"])
-def test_invalid_source_fragments_fail_closed(session, mutation: str) -> None:
+def test_exact_penalty_identity_quotes_import_successfully(session) -> None:
+    document = make_document(session, text="某保险公司\n罚款10万元\n销售误导")
+
+    record = service(session).import_draft(session, complete_envelope(document))
+
+    assert record.punished_entity == "某保险公司"
+    assert record.penalty_result == "罚款10万元"
+    assert record.illegal_facts == "销售误导"
+
+
+def test_invalid_source_fragment_offset_fails_closed(session) -> None:
     document = make_document(session, text="某保险公司\n罚款10万元\n销售误导")
     payload = complete_envelope(document).model_dump(mode="json")
     fragments = payload["source_entry_fragments"]
-    if mutation == "wrong_offset":
-        fragments[0]["start_offset"] += 1
-    else:
-        fragments.append(dict(fragments[0]))
+    fragments[0]["start_offset"] += 1
     candidate = StructuredDraftEnvelope.model_validate(payload)
 
     with pytest.raises(
@@ -493,57 +501,119 @@ def test_invalid_source_fragments_fail_closed(session, mutation: str) -> None:
         service(session).import_draft(session, candidate)
 
 
-def test_overlapping_fixed_field_evidence_is_accepted(session) -> None:
+def test_widened_identity_quote_is_rejected_and_cannot_create_second_fingerprint(
+    session,
+) -> None:
     text = "某保险公司销售误导，被罚款10万元"
     document = make_document(session, text=text)
-    fields = {
-        "source_entry_index": 1,
-        "punished_entity": "某保险公司",
-        "illegal_facts": text,
-        "penalty_result": "罚款10万元",
-        "original_sales_wording_disclosed": False,
-        "source_quote": text,
-    }
-    evidence = {}
-    for field_name, quote in (
-        ("punished_entity", "某保险公司"),
-        ("illegal_facts", text),
-        ("penalty_result", "罚款10万元"),
-    ):
-        start = text.index(quote)
-        evidence[field_name] = [
-            {
-                "quote": quote,
-                "page_number": 1,
-                "start_offset": start,
-                "end_offset": start + len(quote),
-                "mode": "verbatim",
-            }
-        ]
-    fragments = build_penalty_source_entry_fragments(fields, evidence)
-    content_sha256 = source_entry_content_sha256(build_penalty_identity_material(fields, evidence))
-    candidate = StructuredDraftEnvelope.model_validate(
-        {
-            "document_id": document.id,
-            "record_type": DataType.PENALTY.value,
-            "source_entry_locator": {"table_index": 1, "logical_row": 1},
-            "source_entry_fragments": fragments,
-            "source_entry_content_sha256": content_sha256,
-            "fields": {
-                **fields,
-                "source_entry_fingerprint": penalty_source_entry_fingerprint(
-                    raw_artifact_sha256=document.sha256,
-                    source_entry_content_sha256=content_sha256,
-                ),
-            },
-            "field_evidence": evidence,
-        }
+    first = complete_envelope(
+        document,
+        locator={"table_index": 1, "logical_row": 1},
+    )
+    service(session).import_draft(session, first)
+    payload = complete_envelope(
+        document,
+        index=2,
+        locator={"table_index": 1, "logical_row": 2},
+    ).model_dump(mode="json")
+    widened = "某保险公司销售误导"
+    payload["field_evidence"]["punished_entity"][0].update(
+        {"quote": widened, "start_offset": 0, "end_offset": len(widened)}
+    )
+    payload["source_entry_fragments"][0].update(
+        {"quote": widened, "start_offset": 0, "end_offset": len(widened)}
     )
 
-    record = service(session).import_draft(session, candidate)
+    with pytest.raises(
+        StructuredRecordError,
+        match="penalty_source_identity_evidence_not_exact",
+    ):
+        service(session).import_draft(
+            session,
+            StructuredDraftEnvelope.model_validate(payload),
+        )
+    assert session.query(Penalty).filter_by(document_id=document.id).count() == 1
 
-    assert record.punished_entity == "某保险公司"
-    assert len(fragments) == 3
+
+@pytest.mark.parametrize(
+    "fragments",
+    [
+        [
+            {"quote": "甲乙丙", "start_offset": 0, "end_offset": 3},
+            {"quote": "丙丁", "start_offset": 2, "end_offset": 4},
+        ],
+        [
+            {"quote": "甲乙丙丁", "start_offset": 0, "end_offset": 4},
+            {"quote": "乙丙", "start_offset": 1, "end_offset": 3},
+        ],
+    ],
+)
+def test_overlapping_identity_fragments_fail_closed(fragments) -> None:
+    with pytest.raises(ValueError, match="penalty_source_entry_fragment_overlap"):
+        canonical_source_entry_fragments(fragments)
+
+
+def test_adjacent_and_duplicate_identity_fragments_are_canonicalized_by_offset() -> None:
+    shared = {"quote": "乙丙", "start_offset": 2, "end_offset": 4}
+    result = canonical_source_entry_fragments(
+        [
+            {"quote": "丁戊", "start_offset": 4, "end_offset": 6},
+            shared,
+            {"quote": "甲", "start_offset": 0, "end_offset": 1},
+            dict(shared),
+            {"quote": "乙", "start_offset": 1, "end_offset": 2},
+        ]
+    )
+
+    assert result == [
+        {"quote": "甲", "start_offset": 0, "end_offset": 1},
+        {"quote": "乙", "start_offset": 1, "end_offset": 2},
+        shared,
+        {"quote": "丁戊", "start_offset": 4, "end_offset": 6},
+    ]
+
+
+def test_identical_fragment_shared_by_identity_fields_is_deduplicated_and_imported(
+    session,
+) -> None:
+    document = make_document(session, text="同一原文片段")
+    candidate = envelope(document, 1, "同一原文片段")
+
+    assert [item.model_dump() for item in candidate.source_entry_fragments or []] == [
+        {
+            "quote": "同一原文片段",
+            "start_offset": 0,
+            "end_offset": len("同一原文片段"),
+        }
+    ]
+    assert service(session).import_draft(session, candidate).punished_entity == "同一原文片段"
+
+
+def test_controlled_normalized_identity_evidence_must_resolve_exactly() -> None:
+    validate_penalty_identity_evidence_exact(
+        "document_number",
+        "白金罚决字",
+        [
+            {
+                "quote": "白金罚决字  ",
+                "mode": "normalized",
+                "transformation_note": "whitespace_normalized",
+            }
+        ],
+    )
+
+    with pytest.raises(ValueError, match="penalty_source_identity_evidence_not_exact"):
+        validate_penalty_identity_evidence_exact(
+            "document_number",
+            "白金罚决字",
+            [
+                {
+                    "quote": "白金罚决字附加文字",
+                    "mode": "normalized",
+                    "transformation_note": "whitespace_normalized",
+                }
+            ],
+        )
 
 
 @pytest.mark.parametrize("missing_field", ["punished_entity", "penalty_result"])
@@ -958,6 +1028,43 @@ def test_fragment_set_failure_rolls_back_whole_jsonl_batch(session, tmp_path: Pa
 
     assert imported == 0
     assert "penalty_source_entry_fragment_set_mismatch" in errors[0]
+    assert session.query(Penalty).filter_by(document_id=document.id).count() == 0
+
+
+def test_identity_evidence_failure_rolls_back_whole_jsonl_batch(
+    session,
+    tmp_path: Path,
+) -> None:
+    document = make_document(
+        session,
+        text="违法事实一\n违法事实二\n附加上下文",
+    )
+    first = envelope(document, 1, "违法事实一")
+    invalid = envelope(document, 2, "违法事实二").model_dump(mode="json")
+    widened = "违法事实二\n附加上下文"
+    invalid["field_evidence"]["punished_entity"][0].update(
+        {
+            "quote": widened,
+            "start_offset": (document.raw_text or "").index(widened),
+            "end_offset": (document.raw_text or "").index(widened) + len(widened),
+        }
+    )
+    path = tmp_path / "identity-evidence-not-exact.jsonl"
+    path.write_text(
+        "\n".join(
+            (
+                json.dumps(first.model_dump(mode="json"), ensure_ascii=False),
+                json.dumps(invalid, ensure_ascii=False),
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    imported, errors = service(session).import_jsonl(session, path)
+
+    assert imported == 0
+    assert "penalty_source_identity_evidence_not_exact" in errors[0]
     assert session.query(Penalty).filter_by(document_id=document.id).count() == 0
 
 
