@@ -89,6 +89,8 @@ def setup_penalty(session):
     session.flush()
     penalty = Penalty(
         document_id=document.id,
+        source_entry_index=1,
+        source_entry_fingerprint="1" * 64,
         illegal_facts="演示违法事实",
         original_sales_wording_disclosed=False,
         original_sales_wording=None,

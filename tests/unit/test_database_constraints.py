@@ -42,6 +42,8 @@ def test_penalty_wording_check_constraint(session) -> None:
     session.add(
         Penalty(
             document_id=document.id,
+            source_entry_index=1,
+            source_entry_fingerprint="2" * 64,
             illegal_facts="演示",
             source_quote="演示",
             original_sales_wording_disclosed=False,

@@ -257,11 +257,8 @@ class Penalty(Base):
     document_id: Mapped[int] = mapped_column(
         ForeignKey("source_documents.id", ondelete="CASCADE"), index=True
     )
-    source_entry_index: Mapped[int] = mapped_column(default=1)
-    source_entry_fingerprint: Mapped[str] = mapped_column(
-        String(64),
-        default="53c5d4ddf67b6bf07185c7e1ba517573106422e57f1bd1a89d6146105b46c13f",
-    )
+    source_entry_index: Mapped[int] = mapped_column()
+    source_entry_fingerprint: Mapped[str] = mapped_column(String(64))
     duplicate_candidate: Mapped[bool] = mapped_column(Boolean, default=False)
     punished_entity: Mapped[str | None] = mapped_column(String(500))
     authority: Mapped[str | None] = mapped_column(String(255))

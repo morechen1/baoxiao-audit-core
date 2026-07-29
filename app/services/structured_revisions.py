@@ -17,6 +17,16 @@ from app.services.parsed_artifacts import ParsedArtifactIntegrityService
 from app.services.state_machine import StateMachineService
 from app.services.structured_records import DRAFT_MODELS, ENTITY_MODELS
 
+PENALTY_SOURCE_IDENTITY_FIELDS = frozenset(
+    {
+        "source_entry_index",
+        "source_entry_fingerprint",
+        "source_entry_content_sha256",
+        "source_entry_fragments",
+        "source_entry_locator",
+    }
+)
+
 
 class StructuredDraftRevisionService:
     def __init__(self, settings: Settings | None = None) -> None:
@@ -109,6 +119,11 @@ class StructuredDraftRevisionService:
             candidate = {**previous_fields, **envelope.fields}
             evidence = {**previous_evidence, **envelope.field_evidence}
         changed_fields = set(envelope.fields)
+        if (
+            document.data_type == DataType.PENALTY.value
+            and changed_fields & PENALTY_SOURCE_IDENTITY_FIELDS
+        ):
+            raise StructuredRecordError("penalty_source_identity_locked")
         if not changed_fields.issubset(draft_model.model_fields):
             raise StructuredRecordError("revision_field_not_allowed")
         if document.data_type == DataType.REGULATORY_CASE.value and "case_usage" in changed_fields:

@@ -211,8 +211,8 @@ def _canonical_provenance(value: Any) -> dict[str, Any] | None:
     }
     for key in (
         "source_entry_locator",
-        "source_entry_text",
-        "source_entry_text_sha256",
+        "source_entry_fragments",
+        "source_entry_content_sha256",
     ):
         if key in value:
             result[key] = _canonical_value(value.get(key))

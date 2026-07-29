@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from app.core.config import Settings
+from app.core.exceptions import StructuredRecordError
 from app.models import Penalty, SourceDocument
 from app.models.enums import (
     AuthenticityType,
@@ -22,10 +23,11 @@ from app.schemas.structured import (
 from app.services.parsed_artifacts import ParsedArtifactService
 from app.services.parsing.base import ParsedDocument, ParsedPage
 from app.services.penalty_entries import (
-    exact_source_entry_text_sha256,
     penalty_source_entry_fingerprint,
+    source_entry_content_sha256,
 )
 from app.services.review import ReviewService
+from app.services.review.service import payload_hash
 from app.services.review_payload import portable_record_key
 from app.services.structured_records import StructuredRecordService
 from app.services.structured_revisions import StructuredDraftRevisionService
@@ -38,6 +40,7 @@ def make_document(
     text: str = "违法事实一\n违法事实二\n修订事实一",
     *,
     source_url: str = "https://example.test/penalty",
+    nfra_doc_id: str | None = None,
 ) -> SourceDocument:
     data_dir = session.info["data_dir"]
     raw_path = data_dir / "raw" / f"{hashlib.sha256(source_url.encode()).hexdigest()}.json"
@@ -62,6 +65,11 @@ def make_document(
             title="处罚测试",
             plain_text=text,
             pages=[ParsedPage(page_number=1, text=text)],
+            metadata=(
+                {"nfra": {"doc_id": nfra_doc_id}, "source_format": "nfra_public_json"}
+                if nfra_doc_id
+                else {}
+            ),
         ),
         parser_name="TestParser",
     )
@@ -74,23 +82,28 @@ def envelope(
     index: int,
     text: str,
     *,
-    locator: dict[str, str | int] | None = None,
+    locator: dict[str, object] | None = None,
 ) -> StructuredDraftEnvelope:
-    stable_locator = locator or {"table_index": 1, "row_index": index}
-    text_sha256 = exact_source_entry_text_sha256(text)
+    stable_locator = locator or {"table_index": 1, "logical_row": index}
+    start = (document.raw_text or "").index(text)
+    fragments = [
+        {
+            "quote": text,
+            "start_offset": start,
+            "end_offset": start + len(text),
+        }
+    ]
+    content_sha256 = source_entry_content_sha256(fragments)
     fingerprint = penalty_source_entry_fingerprint(
         raw_artifact_sha256=document.sha256,
-        source_entry_index=index,
-        stable_source_locator=stable_locator,
-        exact_source_entry_text_sha256=text_sha256,
+        source_entry_content_sha256=content_sha256,
     )
-    start = (document.raw_text or "").index(text)
     return StructuredDraftEnvelope(
         document_id=document.id,
         record_type=DataType.PENALTY,
         source_entry_locator=stable_locator,
-        source_entry_text=text,
-        source_entry_text_sha256=text_sha256,
+        source_entry_fragments=fragments,
+        source_entry_content_sha256=content_sha256,
         fields={
             "source_entry_index": index,
             "source_entry_fingerprint": fingerprint,
@@ -116,18 +129,74 @@ def service(session) -> StructuredRecordService:
     return StructuredRecordService(Settings(data_dir=session.info["data_dir"]))
 
 
+def complete_envelope(
+    document: SourceDocument,
+    *,
+    index: int = 1,
+    locator: dict[str, object] | None = None,
+) -> StructuredDraftEnvelope:
+    entity = "某保险公司"
+    result = "罚款10万元"
+    fact = "销售误导"
+    fragments = []
+    evidence = {}
+    for field_name, quote in (
+        ("punished_entity", entity),
+        ("penalty_result", result),
+    ):
+        start = (document.raw_text or "").index(quote)
+        fragments.append({"quote": quote, "start_offset": start, "end_offset": start + len(quote)})
+        evidence[field_name] = [
+            {
+                "quote": quote,
+                "page_number": 1,
+                "start_offset": start,
+                "end_offset": start + len(quote),
+                "mode": "verbatim",
+            }
+        ]
+    fact_start = (document.raw_text or "").index(fact)
+    evidence["illegal_facts"] = [
+        {
+            "quote": fact,
+            "page_number": 1,
+            "start_offset": fact_start,
+            "end_offset": fact_start + len(fact),
+            "mode": "verbatim",
+        }
+    ]
+    fragments.sort(key=lambda item: item["start_offset"])
+    content_sha256 = source_entry_content_sha256(fragments)
+    return StructuredDraftEnvelope(
+        document_id=document.id,
+        record_type=DataType.PENALTY,
+        source_entry_locator=locator or {"table_index": 1, "logical_row": index},
+        source_entry_fragments=fragments,
+        source_entry_content_sha256=content_sha256,
+        fields={
+            "source_entry_index": index,
+            "source_entry_fingerprint": penalty_source_entry_fingerprint(
+                raw_artifact_sha256=document.sha256,
+                source_entry_content_sha256=content_sha256,
+            ),
+            "punished_entity": entity,
+            "illegal_facts": fact,
+            "penalty_result": result,
+            "original_sales_wording_disclosed": False,
+            "source_quote": fact,
+        },
+        field_evidence=evidence,
+    )
+
+
 def test_penalty_fingerprint_is_stable_and_has_fixed_serialization() -> None:
     inputs = {
         "raw_artifact_sha256": "a" * 64,
-        "source_entry_index": 2,
-        "stable_source_locator": {"row": 2, "table": "处罚"},
-        "exact_source_entry_text_sha256": "b" * 64,
+        "source_entry_content_sha256": "b" * 64,
     }
 
     first = penalty_source_entry_fingerprint(**inputs)
-    second = penalty_source_entry_fingerprint(
-        **{**inputs, "stable_source_locator": {"table": "处罚", "row": 2}}
-    )
+    second = penalty_source_entry_fingerprint(**inputs)
 
     assert first == second
     assert len(first) == 64
@@ -135,12 +204,7 @@ def test_penalty_fingerprint_is_stable_and_has_fixed_serialization() -> None:
 
 @pytest.mark.parametrize(
     ("field", "replacement"),
-    [
-        ("raw_artifact_sha256", "c" * 64),
-        ("source_entry_index", 3),
-        ("stable_source_locator", {"row": 3, "table": "处罚"}),
-        ("exact_source_entry_text_sha256", "d" * 64),
-    ],
+    [("raw_artifact_sha256", "c" * 64), ("source_entry_content_sha256", "d" * 64)],
 )
 def test_penalty_fingerprint_binds_every_material_input(
     field: str,
@@ -148,9 +212,7 @@ def test_penalty_fingerprint_binds_every_material_input(
 ) -> None:
     inputs = {
         "raw_artifact_sha256": "a" * 64,
-        "source_entry_index": 2,
-        "stable_source_locator": {"row": 2, "table": "处罚"},
-        "exact_source_entry_text_sha256": "b" * 64,
+        "source_entry_content_sha256": "b" * 64,
     }
     baseline = penalty_source_entry_fingerprint(**inputs)
 
@@ -177,7 +239,7 @@ def test_duplicate_entry_index_rolls_back_whole_jsonl_batch(session, tmp_path: P
         document,
         1,
         "违法事实二",
-        locator={"table_index": 1, "row_index": 2},
+        locator={"table_index": 1, "logical_row": 2},
     )
     path = tmp_path / "duplicate-index.jsonl"
     path.write_text(
@@ -389,3 +451,192 @@ def test_legacy_migration_fingerprint_is_deterministic() -> None:
 
     assert first == second
     assert len(first) == 64
+
+
+def test_same_fragments_ignore_index_and_locator_and_duplicate_is_rejected(session) -> None:
+    document = make_document(session, text="某保险公司\n罚款10万元\n销售误导")
+    first = complete_envelope(document, index=1)
+    second = complete_envelope(
+        document,
+        index=2,
+        locator={"table_index": 9, "numbered_entry": 7},
+    )
+
+    assert first.fields["source_entry_fingerprint"] == second.fields["source_entry_fingerprint"]
+    service(session).import_draft(session, first)
+    with pytest.raises(StructuredRecordError, match="penalty_source_entry_duplicate"):
+        service(session).import_draft(session, second)
+
+
+@pytest.mark.parametrize("mutation", ["wrong_offset", "unsorted", "overlap"])
+def test_invalid_source_fragments_fail_closed(session, mutation: str) -> None:
+    document = make_document(session, text="某保险公司\n罚款10万元\n销售误导")
+    payload = complete_envelope(document).model_dump(mode="json")
+    fragments = payload["source_entry_fragments"]
+    if mutation == "wrong_offset":
+        fragments[0]["start_offset"] += 1
+    elif mutation == "unsorted":
+        fragments.reverse()
+    else:
+        fragments[1]["start_offset"] = fragments[0]["end_offset"] - 1
+    candidate = StructuredDraftEnvelope.model_validate(payload)
+
+    with pytest.raises(
+        StructuredRecordError,
+        match="penalty_source_entry_fragment_invalid",
+    ):
+        service(session).import_draft(session, candidate)
+
+
+@pytest.mark.parametrize("missing_field", ["punished_entity", "penalty_result"])
+def test_identity_requires_entity_and_result_fragments(session, missing_field: str) -> None:
+    document = make_document(session, text="某保险公司\n罚款10万元\n销售误导")
+    payload = complete_envelope(document).model_dump(mode="json")
+    evidence_item = payload["field_evidence"][missing_field][0]
+    payload["source_entry_fragments"] = [
+        item
+        for item in payload["source_entry_fragments"]
+        if item["start_offset"] != evidence_item["start_offset"]
+    ]
+    payload["source_entry_content_sha256"] = source_entry_content_sha256(
+        payload["source_entry_fragments"]
+    )
+    payload["fields"]["source_entry_fingerprint"] = penalty_source_entry_fingerprint(
+        raw_artifact_sha256=document.sha256,
+        source_entry_content_sha256=payload["source_entry_content_sha256"],
+    )
+
+    with pytest.raises(
+        StructuredRecordError,
+        match="penalty_source_entry_fragment_invalid",
+    ):
+        service(session).import_draft(
+            session,
+            StructuredDraftEnvelope.model_validate(payload),
+        )
+
+
+def test_source_entry_content_hash_mismatch_is_rejected(session) -> None:
+    document = make_document(session, text="某保险公司\n罚款10万元\n销售误导")
+    payload = complete_envelope(document).model_dump(mode="json")
+    payload["source_entry_content_sha256"] = "f" * 64
+
+    with pytest.raises(
+        StructuredRecordError,
+        match="penalty_source_entry_content_sha256_mismatch",
+    ):
+        service(session).import_draft(
+            session,
+            StructuredDraftEnvelope.model_validate(payload),
+        )
+
+
+def test_nfra_locator_validation_fails_closed(session) -> None:
+    invalid_locators = [
+        {"nfra_doc_id": "999", "table_index": 1, "logical_row": 1},
+        {"nfra_doc_id": "123", "table_index": True, "logical_row": 1},
+        {
+            "nfra_doc_id": "123",
+            "table_index": 1,
+            "logical_row": 1,
+            "numbered_entry": 1,
+        },
+        {"nfra_doc_id": "123", "table_index": 1, "random": 1},
+    ]
+    for position, locator in enumerate(invalid_locators, 1):
+        document = make_document(
+            session,
+            text=f"某保险公司\n罚款10万元\n销售误导\n{position}",
+            source_url=f"https://example.test/invalid-locator-{position}",
+            nfra_doc_id="123",
+        )
+        candidate = complete_envelope(document, locator=locator)
+
+        with pytest.raises(
+            StructuredRecordError,
+            match="penalty_source_entry_locator_invalid",
+        ):
+            service(session).import_draft(session, candidate)
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "source_entry_index",
+        "source_entry_fingerprint",
+        "source_entry_content_sha256",
+        "source_entry_fragments",
+        "source_entry_locator",
+    ],
+)
+def test_penalty_source_identity_is_locked_during_revision(
+    session,
+    field_name: str,
+) -> None:
+    document = make_document(session)
+    record = service(session).import_draft(session, envelope(document, 1, "违法事实一"))
+    revision = StructuredDraftRevisionEnvelope(
+        document_id=document.id,
+        record_type=DataType.PENALTY,
+        structured_record_id=record.id,
+        fields={field_name: "changed"},
+        field_evidence={},
+    )
+
+    with pytest.raises(StructuredRecordError, match="penalty_source_identity_locked"):
+        StructuredDraftRevisionService(Settings(data_dir=session.info["data_dir"])).revise(
+            session, revision, reason="不得修改身份", actor="tester"
+        )
+
+
+def test_duplicate_candidate_does_not_mutate_approved_existing_record(session) -> None:
+    first_document = make_document(session, source_url="https://example.test/protected-a")
+    first = service(session).import_draft(
+        session,
+        envelope(first_document, 1, "违法事实一"),
+    )
+    first_document.final_review_status = ReviewStatus.APPROVED.value
+    session.commit()
+    review_service = ReviewService(Settings(data_dir=session.info["data_dir"]))
+    before = review_service._document_review_row(session, first_document, 1, 1)
+    before_key = before["parsed_fields"]["records"][0]["portable_record_key"]
+    before_hash = payload_hash(before)
+    second_document = make_document(
+        session,
+        text="违法事实一\n违法事实二\n修订事实一\n另一原件",
+        source_url="https://example.test/protected-b",
+    )
+
+    second = service(session).import_draft(
+        session,
+        envelope(second_document, 1, "违法事实一"),
+    )
+
+    assert second.duplicate_candidate is True
+    assert first.duplicate_candidate is False
+    after = review_service._document_review_row(session, first_document, 1, 1)
+    assert after["parsed_fields"]["records"][0]["portable_record_key"] == before_key
+    assert payload_hash(after) == before_hash
+
+
+def test_penalty_identity_provenance_is_saved_and_bound_to_portable_key(session) -> None:
+    document = make_document(session, text="某保险公司\n罚款10万元\n销售误导")
+    record = service(session).import_draft(session, complete_envelope(document))
+    provenance = document.metadata_json["structured_draft_provenance"][0]
+
+    assert provenance["structured_record_id"] == record.id
+    assert len(provenance["source_entry_fragments"]) == 2
+    assert provenance["source_entry_content_sha256"] == source_entry_content_sha256(
+        provenance["source_entry_fragments"]
+    )
+    row = ReviewService(Settings(data_dir=session.info["data_dir"]))._document_review_row(
+        session,
+        document,
+        1,
+        1,
+    )
+    exported = row["parsed_fields"]["records"][0]
+    assert (
+        exported["draft_provenance"]["source_entry_fragments"]
+        == provenance["source_entry_fragments"]
+    )

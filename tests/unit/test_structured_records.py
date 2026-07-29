@@ -27,8 +27,8 @@ from app.schemas.structured import StructuredDraftEnvelope
 from app.services.parsed_artifacts import ParsedArtifactService
 from app.services.parsing.base import ParsedDocument, ParsedPage
 from app.services.penalty_entries import (
-    exact_source_entry_text_sha256,
     penalty_source_entry_fingerprint,
+    source_entry_content_sha256,
 )
 from app.services.review import ReviewService
 from app.services.structured_records import StructuredRecordService
@@ -80,19 +80,25 @@ def penalty_entry_identity(
     index: int = 1,
     exact_text: str = "演示违法事实",
 ) -> tuple[dict[str, object], dict[str, object]]:
-    locator = {"table_index": 1, "row_index": index}
-    text_sha256 = exact_source_entry_text_sha256(exact_text)
+    locator = {"table_index": 1, "logical_row": index}
+    start = (document.raw_text or "").index(exact_text)
+    fragments = [
+        {
+            "quote": exact_text,
+            "start_offset": start,
+            "end_offset": start + len(exact_text),
+        }
+    ]
+    content_sha256 = source_entry_content_sha256(fragments)
     fingerprint = penalty_source_entry_fingerprint(
         raw_artifact_sha256=document.sha256,
-        source_entry_index=index,
-        stable_source_locator=locator,
-        exact_source_entry_text_sha256=text_sha256,
+        source_entry_content_sha256=content_sha256,
     )
     return (
         {
             "source_entry_locator": locator,
-            "source_entry_text": exact_text,
-            "source_entry_text_sha256": text_sha256,
+            "source_entry_fragments": fragments,
+            "source_entry_content_sha256": content_sha256,
         },
         {
             "source_entry_index": index,

@@ -31,17 +31,29 @@ def _canonical_json_bytes(value: Any) -> bytes:
     ).encode("utf-8")
 
 
-def _legacy_fingerprint(raw_sha256: str, source_quote: str) -> str:
+def _legacy_fragments(source_quote: str, raw_text: str | None = None) -> list[dict[str, Any]]:
+    start = (raw_text or "").find(source_quote)
+    if start < 0:
+        start = 0
+    return [
+        {
+            "quote": source_quote,
+            "start_offset": start,
+            "end_offset": start + len(source_quote),
+        }
+    ]
+
+
+def _legacy_fingerprint(
+    raw_sha256: str,
+    source_quote: str,
+    raw_text: str | None = None,
+) -> str:
+    fragments = _legacy_fragments(source_quote, raw_text)
+    content_sha256 = hashlib.sha256(_canonical_json_bytes(fragments)).hexdigest()
     identity = {
-        "exact_source_entry_text_sha256": hashlib.sha256(
-            source_quote.encode("utf-8")
-        ).hexdigest(),
         "raw_artifact_sha256": raw_sha256,
-        "source_entry_index": 1,
-        "stable_source_locator": {
-            "migration": "legacy_single_record_v1",
-            "record_ordinal": 1,
-        },
+        "source_entry_content_sha256": content_sha256,
     }
     return hashlib.sha256(_canonical_json_bytes(identity)).hexdigest()
 
@@ -65,7 +77,8 @@ def upgrade() -> None:
     rows = connection.execute(
         sa.text(
             """
-            SELECT penalties.id, source_documents.sha256, penalties.source_quote
+            SELECT penalties.id, source_documents.sha256, source_documents.raw_text,
+                   penalties.source_quote
             FROM penalties
             JOIN source_documents ON source_documents.id = penalties.document_id
             ORDER BY penalties.id
@@ -84,7 +97,11 @@ def upgrade() -> None:
             ),
             {
                 "penalty_id": row.id,
-                "fingerprint": _legacy_fingerprint(row.sha256, row.source_quote),
+                "fingerprint": _legacy_fingerprint(
+                    row.sha256,
+                    row.source_quote,
+                    row.raw_text,
+                ),
             },
         )
     with op.batch_alter_table("penalties") as batch:

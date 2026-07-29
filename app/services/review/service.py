@@ -1007,8 +1007,8 @@ class ReviewService:
                     "draft_generation_method",
                     "draft_generation_version",
                     "source_entry_locator",
-                    "source_entry_text",
-                    "source_entry_text_sha256",
+                    "source_entry_fragments",
+                    "source_entry_content_sha256",
                 }
             }
             for item in raw_provenance

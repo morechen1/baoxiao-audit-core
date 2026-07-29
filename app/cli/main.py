@@ -560,6 +560,8 @@ def seed() -> None:
             session.add(
                 Penalty(
                     document_id=penalty_doc.id,
+                    source_entry_index=1,
+                    source_entry_fingerprint="0" * 64,
                     illegal_facts="虚构情景：演示材料信息披露不完整。",
                     original_sales_wording_disclosed=False,
                     original_sales_wording=None,

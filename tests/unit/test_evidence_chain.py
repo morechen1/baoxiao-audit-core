@@ -53,8 +53,8 @@ from app.services.parsed_artifacts import (
 from app.services.parsing import ParsingService
 from app.services.parsing.base import ParsedDocument, ParsedPage
 from app.services.penalty_entries import (
-    exact_source_entry_text_sha256,
     penalty_source_entry_fingerprint,
+    source_entry_content_sha256,
 )
 from app.services.review import ReviewService
 from app.services.review.service import payload_hash
@@ -174,24 +174,29 @@ def envelope_for(
         "field_evidence": field_evidence,
     }
     if document.data_type == DataType.PENALTY.value:
-        locator = {"table_index": 1, "row_index": 1}
-        text_sha256 = exact_source_entry_text_sha256("真实原文")
+        locator = {"table_index": 1, "logical_row": 1}
+        fragments = [
+            {
+                "quote": "真实原文",
+                "start_offset": 0,
+                "end_offset": len("真实原文"),
+            }
+        ]
+        content_sha256 = source_entry_content_sha256(fragments)
         fields.update(
             {
                 "source_entry_index": 1,
                 "source_entry_fingerprint": penalty_source_entry_fingerprint(
                     raw_artifact_sha256=document.sha256,
-                    source_entry_index=1,
-                    stable_source_locator=locator,
-                    exact_source_entry_text_sha256=text_sha256,
+                    source_entry_content_sha256=content_sha256,
                 ),
             }
         )
         payload.update(
             {
                 "source_entry_locator": locator,
-                "source_entry_text": "真实原文",
-                "source_entry_text_sha256": text_sha256,
+                "source_entry_fragments": fragments,
+                "source_entry_content_sha256": content_sha256,
             }
         )
     return StructuredDraftEnvelope.model_validate(payload)
@@ -984,6 +989,8 @@ def make_failed_draft(
         )
         record = Penalty(
             document_id=document.id,
+            source_entry_index=1,
+            source_entry_fingerprint="4" * 64,
             illegal_facts=old_value,
             original_sales_wording_disclosed=False,
             source_quote=old_value,
@@ -1301,22 +1308,38 @@ def penalty_draft(
     payload: dict[str, list[dict[str, object]]] = {"illegal_facts": evidence(document, "违法事实")}
     if entity_evidence is not None:
         payload["punished_entity"] = entity_evidence
-    locator = {"table_index": 1, "row_index": 1}
-    text_sha256 = exact_source_entry_text_sha256("违法事实")
+    locator = {"table_index": 1, "logical_row": 1}
+    fact_start = (document.raw_text or "").index("违法事实")
+    fragments = [
+        {
+            "quote": "违法事实",
+            "start_offset": fact_start,
+            "end_offset": fact_start + len("违法事实"),
+        }
+    ]
+    if entity_evidence is not None:
+        entity_start = (document.raw_text or "").index(punished_entity)
+        fragments.append(
+            {
+                "quote": punished_entity,
+                "start_offset": entity_start,
+                "end_offset": entity_start + len(punished_entity),
+            }
+        )
+        fragments.sort(key=lambda item: item["start_offset"])
+    content_sha256 = source_entry_content_sha256(fragments)
     return StructuredDraftEnvelope.model_validate(
         {
             "document_id": document.id,
             "record_type": DataType.PENALTY.value,
             "source_entry_locator": locator,
-            "source_entry_text": "违法事实",
-            "source_entry_text_sha256": text_sha256,
+            "source_entry_fragments": fragments,
+            "source_entry_content_sha256": content_sha256,
             "fields": {
                 "source_entry_index": 1,
                 "source_entry_fingerprint": penalty_source_entry_fingerprint(
                     raw_artifact_sha256=document.sha256,
-                    source_entry_index=1,
-                    stable_source_locator=locator,
-                    exact_source_entry_text_sha256=text_sha256,
+                    source_entry_content_sha256=content_sha256,
                 ),
                 "punished_entity": punished_entity,
                 "illegal_facts": "违法事实",
@@ -1508,6 +1531,8 @@ def test_punished_entity_correction_without_new_evidence_is_rejected(session) ->
     document.metadata_json = {"automatic_validation": {"valid": True, "issues": []}}
     record = Penalty(
         document_id=document.id,
+        source_entry_index=1,
+        source_entry_fingerprint="5" * 64,
         punished_entity="旧机构",
         illegal_facts="违法事实",
         original_sales_wording_disclosed=False,

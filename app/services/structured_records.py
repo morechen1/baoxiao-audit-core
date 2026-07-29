@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 import unicodedata
@@ -25,6 +24,7 @@ from app.models import (
 from app.models.enums import (
     AuthenticityType,
     DataType,
+    KnowledgeIndexStatus,
     RegulatoryCaseUsage,
     ReviewStatus,
 )
@@ -36,7 +36,13 @@ from app.schemas.structured import (
     StructuredDraftEnvelope,
 )
 from app.services.field_evidence import EVIDENCE_FIELDS, FieldEvidenceService
-from app.services.penalty_entries import penalty_source_entry_fingerprint
+from app.services.parsed_artifacts import ParsedArtifactIntegrityService
+from app.services.penalty_entries import (
+    canonical_source_entry_fragments,
+    penalty_source_entry_fingerprint,
+    source_entry_content_sha256,
+    validate_source_entry_locator,
+)
 from app.services.state_machine import StateMachineService
 
 DRAFT_MODELS = {
@@ -124,20 +130,25 @@ class StructuredRecordService:
         ):
             raise StructuredRecordError("case_usage_requires_human_review")
         if document.data_type == DataType.PENALTY.value:
-            if envelope.source_entry_text is None or envelope.source_entry_text not in (
-                document.raw_text or ""
-            ):
-                raise StructuredRecordError("penalty_source_entry_text_not_found")
-            actual_text_sha256 = hashlib.sha256(
-                envelope.source_entry_text.encode("utf-8")
-            ).hexdigest()
-            if actual_text_sha256 != envelope.source_entry_text_sha256:
-                raise StructuredRecordError("penalty_source_entry_text_sha256_mismatch")
+            parsed_payload = ParsedArtifactIntegrityService(self.settings).verify(
+                document,
+                session=session,
+            )
+            fragments = self._validate_penalty_fragments(document, envelope)
+            expected_doc_id = self._parsed_nfra_doc_id(parsed_payload)
+            try:
+                validate_source_entry_locator(
+                    envelope.source_entry_locator or {},
+                    expected_nfra_doc_id=expected_doc_id,
+                )
+            except ValueError as exc:
+                raise StructuredRecordError(str(exc)) from exc
+            actual_content_sha256 = source_entry_content_sha256(fragments)
+            if actual_content_sha256 != envelope.source_entry_content_sha256:
+                raise StructuredRecordError("penalty_source_entry_content_sha256_mismatch")
             expected_fingerprint = penalty_source_entry_fingerprint(
                 raw_artifact_sha256=document.sha256,
-                source_entry_index=draft.source_entry_index,
-                stable_source_locator=envelope.source_entry_locator or {},
-                exact_source_entry_text_sha256=envelope.source_entry_text_sha256 or "",
+                source_entry_content_sha256=actual_content_sha256,
             )
             if draft.source_entry_fingerprint != expected_fingerprint:
                 raise StructuredRecordError("penalty_source_entry_fingerprint_mismatch")
@@ -195,6 +206,12 @@ class StructuredRecordService:
                 )
             except Exception as exc:
                 raise StructuredRecordError(str(exc)) from exc
+        if document.data_type == DataType.PENALTY.value:
+            self._validate_penalty_identity_evidence(
+                values,
+                validated_evidence,
+                fragments,
+            )
         record = entity_model(
             document_id=document.id,
             final_review_status=document.final_review_status,
@@ -206,13 +223,13 @@ class StructuredRecordService:
             session.flush()
             if isinstance(record, Penalty):
                 self._mark_penalty_duplicate_candidates(session, document, record)
-            if envelope.pilot_id is not None:
+            if envelope.pilot_id is not None or isinstance(record, Penalty):
                 entry_provenance: dict[str, Any] = {}
                 if document.data_type == DataType.PENALTY.value:
                     entry_provenance = {
                         "source_entry_locator": envelope.source_entry_locator,
-                        "source_entry_text": envelope.source_entry_text,
-                        "source_entry_text_sha256": envelope.source_entry_text_sha256,
+                        "source_entry_fragments": fragments,
+                        "source_entry_content_sha256": envelope.source_entry_content_sha256,
                     }
                 metadata = dict(document.metadata_json)
                 metadata["structured_draft_provenance"] = [
@@ -253,7 +270,7 @@ class StructuredRecordService:
     ) -> None:
         possible_candidates = list(
             session.execute(
-                select(Penalty, SourceDocument.source_url)
+                select(Penalty, SourceDocument)
                 .join(SourceDocument, SourceDocument.id == Penalty.document_id)
                 .where(Penalty.document_id != document.id)
             )
@@ -267,10 +284,10 @@ class StructuredRecordService:
         record_signature = tuple(getattr(record, name) for name in signature_fields)
         record_text = StructuredRecordService._penalty_similarity_text(record)
         candidates = [
-            candidate
-            for candidate, candidate_source_url in possible_candidates
+            (candidate, candidate_document)
+            for candidate, candidate_document in possible_candidates
             if (
-                (bool(document.source_url) and candidate_source_url == document.source_url)
+                (bool(document.source_url) and candidate_document.source_url == document.source_url)
                 or tuple(getattr(candidate, name) for name in signature_fields) == record_signature
                 or (
                     bool(record_text)
@@ -286,8 +303,83 @@ class StructuredRecordService:
         ]
         if candidates:
             record.duplicate_candidate = True
-            for candidate in candidates:
-                candidate.duplicate_candidate = True
+            for candidate, candidate_document in candidates:
+                if not StructuredRecordService._duplicate_candidate_is_protected(
+                    candidate_document
+                ):
+                    candidate.duplicate_candidate = True
+
+    @staticmethod
+    def _duplicate_candidate_is_protected(document: SourceDocument) -> bool:
+        return (
+            document.final_review_status
+            in {
+                ReviewStatus.APPROVED.value,
+                ReviewStatus.APPROVED_WITH_REVISION.value,
+            }
+            or document.knowledge_index_status == KnowledgeIndexStatus.INDEXED.value
+        )
+
+    @staticmethod
+    def _parsed_nfra_doc_id(payload: dict[str, Any]) -> str | None:
+        metadata = payload.get("metadata")
+        if not isinstance(metadata, dict):
+            return None
+        nested = metadata.get("nfra")
+        doc_id = nested.get("doc_id") if isinstance(nested, dict) else metadata.get("doc_id")
+        if doc_id is None:
+            return None
+        if not isinstance(doc_id, str) or not doc_id:
+            raise StructuredRecordError("penalty_source_entry_locator_invalid")
+        return doc_id
+
+    @staticmethod
+    def _validate_penalty_fragments(
+        document: SourceDocument,
+        envelope: StructuredDraftEnvelope,
+    ) -> list[dict[str, Any]]:
+        raw_fragments = [item.model_dump() for item in (envelope.source_entry_fragments or [])]
+        try:
+            fragments = canonical_source_entry_fragments(raw_fragments)
+        except ValueError as exc:
+            raise StructuredRecordError(str(exc)) from exc
+        raw_text = document.raw_text or ""
+        if any(
+            raw_text[item["start_offset"] : item["end_offset"]] != item["quote"]
+            for item in fragments
+        ):
+            raise StructuredRecordError("penalty_source_entry_fragment_invalid")
+        return fragments
+
+    @staticmethod
+    def _validate_penalty_identity_evidence(
+        values: dict[str, Any],
+        evidence: dict[str, list[dict[str, Any]]],
+        fragments: list[dict[str, Any]],
+    ) -> None:
+        def evidence_identity(field_name: str) -> set[tuple[str, int, int]]:
+            return {
+                (
+                    str(item.get("quote")),
+                    int(item.get("start_offset", -1)),
+                    int(item.get("end_offset", -1)),
+                )
+                for item in evidence.get(field_name, [])
+            }
+
+        fragment_identity = {
+            (item["quote"], item["start_offset"], item["end_offset"]) for item in fragments
+        }
+        punished_entity = values.get("punished_entity")
+        if isinstance(punished_entity, str) and punished_entity.strip():
+            if len(fragment_identity) < 2 or not (
+                fragment_identity & evidence_identity("punished_entity")
+            ):
+                raise StructuredRecordError("penalty_source_entry_fragment_invalid")
+        if values.get("penalty_result") and not (
+            fragment_identity & evidence_identity("penalty_result")
+        ):
+            raise StructuredRecordError("penalty_source_entry_fragment_invalid")
 
     @staticmethod
     def _penalty_similarity_text(record: Penalty) -> str:
@@ -337,11 +429,22 @@ class StructuredRecordService:
             and isinstance(item.get("structured_record_id"), int)
             and item["structured_record_id"] in existing_record_ids
             and item.get("record_type") == document.data_type
-            and item.get("pilot_id") in pilot_ids
-            and isinstance(item.get("draft_generation_method"), str)
-            and bool(item["draft_generation_method"].strip())
-            and isinstance(item.get("draft_generation_version"), str)
-            and bool(item["draft_generation_version"].strip())
+            and (
+                (
+                    bool(pilot_ids)
+                    and item.get("pilot_id") in pilot_ids
+                    and isinstance(item.get("draft_generation_method"), str)
+                    and bool(item["draft_generation_method"].strip())
+                    and isinstance(item.get("draft_generation_version"), str)
+                    and bool(item["draft_generation_version"].strip())
+                )
+                or (
+                    not pilot_ids
+                    and item.get("pilot_id") is None
+                    and item.get("draft_generation_method") is None
+                    and item.get("draft_generation_version") is None
+                )
+            )
             for item in raw_provenance
         ):
             raise StructuredRecordError("structured_draft_provenance_conflict")

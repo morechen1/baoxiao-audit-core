@@ -1,33 +1,47 @@
-# Multi-record penalty source documents
+# Multi-record penalty source identity
 
-A single official penalty source document may describe several independently reviewable
-administrative-penalty entries. `Penalty.document_id` is therefore no longer unique.
+A single immutable penalty source document may produce multiple `Penalty` records. Every
+record has an explicit positive `source_entry_index`, but the index is ordering metadata and
+is not part of the record identity.
 
-Each entry has two stable identities:
+The immutable identity is represented by `source_entry_fragments`, an ordered list of exact
+substrings from the verified parsed text:
 
-- `source_entry_index`: a positive, source-order ordinal within the immutable document.
-- `source_entry_fingerprint`: SHA-256 of canonical JSON containing the raw artifact SHA-256,
-  source entry index, a stable source locator, and the SHA-256 of the exact entry text.
+```json
+[
+  {"quote": "被处罚主体", "start_offset": 10, "end_offset": 15},
+  {"quote": "罚款10万元", "start_offset": 30, "end_offset": 36}
+]
+```
 
-Canonical JSON is UTF-8, uses sorted keys and compact separators, preserves Unicode
-(`ensure_ascii=False`), and rejects NaN. Database identifiers, timestamps, local paths, and
-review state are never fingerprint inputs.
+Fragments must be sorted, non-overlapping, have exact offsets, include the punished-entity
+evidence when that field is populated, and include the penalty-result evidence when that
+field is populated. A populated punished entity cannot be the only fragment.
 
-Penalty draft envelopes must provide the stable locator, the exact continuous entry text, and
-its SHA-256. Import verifies that text against the immutable parsed text, recomputes the
-fingerprint, and rejects mismatches. A JSONL import is one transaction: a duplicate
-`(document_id, source_entry_index)`, duplicate `(document_id, source_entry_fingerprint)`, or any
-other invalid row rolls back the whole file.
+`source_entry_content_sha256` is SHA-256 over canonical JSON for that ordered fragment list.
+`source_entry_fingerprint` is SHA-256 over canonical JSON containing only:
 
-Portable review records are ordered by `source_entry_index` and then
-`portable_record_key`. Human corrections continue to address one
-`structured_record_id`/portable key and do not implicitly mutate sibling entries.
+```json
+{
+  "raw_artifact_sha256": "...",
+  "source_entry_content_sha256": "..."
+}
+```
 
-Candidates across different source documents are marked when the source URL is identical, the
-four-field signature is identical, or the NFKC/whitespace-normalized four-field signature has a
-`SequenceMatcher` ratio of at least `0.90`. They are retained as `duplicate_candidate` and are
-never automatically deleted or merged. A reviewer must decide how to resolve them.
+The fingerprint intentionally excludes database IDs, timestamps, local paths, entry indexes
+and locators. Reordering or relabelling the same source content therefore cannot create a new
+identity.
 
-The migration backfills legacy single-record penalties with index `1` and a deterministic
-fingerprint. Downgrade fails with `cannot_downgrade_multi_record_penalties` if any document has
-more than one penalty record, preventing silent data loss.
+For NFRA documents, `source_entry_locator` is audit provenance only. It contains the exact
+parsed NFRA `doc_id`, a positive integer `table_index`, and exactly one positive integer
+`logical_row` or `numbered_entry`. Boolean integers, unknown keys and mismatched document IDs
+fail closed.
+
+Identity fields are immutable during structured-draft revision. Duplicate detection may flag
+the newly imported unreviewed record, but it never mutates an existing approved,
+approved-with-revision or indexed record.
+
+Database uniqueness guards `(document_id, source_entry_index)` and
+`(document_id, source_entry_fingerprint)`. The migration deterministically backfills legacy
+single-record rows. Downgrade fails closed once any source document contains multiple
+penalties.
