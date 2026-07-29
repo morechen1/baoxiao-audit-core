@@ -52,6 +52,10 @@ from app.services.parsed_artifacts import (
 )
 from app.services.parsing import ParsingService
 from app.services.parsing.base import ParsedDocument, ParsedPage
+from app.services.penalty_entries import (
+    exact_source_entry_text_sha256,
+    penalty_source_entry_fingerprint,
+)
 from app.services.review import ReviewService
 from app.services.review.service import payload_hash
 from app.services.structured_records import StructuredRecordService
@@ -162,14 +166,35 @@ def envelope_for(
     field_name: str,
     field_evidence: dict[str, list[dict[str, object]]] | None,
 ) -> StructuredDraftEnvelope:
-    return StructuredDraftEnvelope.model_validate(
-        {
-            "document_id": document.id,
-            "record_type": document.data_type,
-            "fields": record_fields(document.data_type, value),
-            "field_evidence": field_evidence,
-        }
-    )
+    fields = record_fields(document.data_type, value)
+    payload: dict[str, object] = {
+        "document_id": document.id,
+        "record_type": document.data_type,
+        "fields": fields,
+        "field_evidence": field_evidence,
+    }
+    if document.data_type == DataType.PENALTY.value:
+        locator = {"table_index": 1, "row_index": 1}
+        text_sha256 = exact_source_entry_text_sha256("真实原文")
+        fields.update(
+            {
+                "source_entry_index": 1,
+                "source_entry_fingerprint": penalty_source_entry_fingerprint(
+                    raw_artifact_sha256=document.sha256,
+                    source_entry_index=1,
+                    stable_source_locator=locator,
+                    exact_source_entry_text_sha256=text_sha256,
+                ),
+            }
+        )
+        payload.update(
+            {
+                "source_entry_locator": locator,
+                "source_entry_text": "真实原文",
+                "source_entry_text_sha256": text_sha256,
+            }
+        )
+    return StructuredDraftEnvelope.model_validate(payload)
 
 
 @pytest.mark.parametrize(
@@ -1276,11 +1301,23 @@ def penalty_draft(
     payload: dict[str, list[dict[str, object]]] = {"illegal_facts": evidence(document, "违法事实")}
     if entity_evidence is not None:
         payload["punished_entity"] = entity_evidence
+    locator = {"table_index": 1, "row_index": 1}
+    text_sha256 = exact_source_entry_text_sha256("违法事实")
     return StructuredDraftEnvelope.model_validate(
         {
             "document_id": document.id,
             "record_type": DataType.PENALTY.value,
+            "source_entry_locator": locator,
+            "source_entry_text": "违法事实",
+            "source_entry_text_sha256": text_sha256,
             "fields": {
+                "source_entry_index": 1,
+                "source_entry_fingerprint": penalty_source_entry_fingerprint(
+                    raw_artifact_sha256=document.sha256,
+                    source_entry_index=1,
+                    stable_source_locator=locator,
+                    exact_source_entry_text_sha256=text_sha256,
+                ),
                 "punished_entity": punished_entity,
                 "illegal_facts": "违法事实",
                 "original_sales_wording_disclosed": False,

@@ -26,6 +26,10 @@ from app.models.enums import (
 from app.schemas.structured import StructuredDraftEnvelope
 from app.services.parsed_artifacts import ParsedArtifactService
 from app.services.parsing.base import ParsedDocument, ParsedPage
+from app.services.penalty_entries import (
+    exact_source_entry_text_sha256,
+    penalty_source_entry_fingerprint,
+)
 from app.services.review import ReviewService
 from app.services.structured_records import StructuredRecordService
 from app.services.validation import ValidationService
@@ -68,6 +72,33 @@ def parsed_document(session, data_type: str, *, raw_text: str) -> SourceDocument
 
 def structured_service(session) -> StructuredRecordService:
     return StructuredRecordService(Settings(data_dir=session.info["data_dir"]))
+
+
+def penalty_entry_identity(
+    document: SourceDocument,
+    *,
+    index: int = 1,
+    exact_text: str = "演示违法事实",
+) -> tuple[dict[str, object], dict[str, object]]:
+    locator = {"table_index": 1, "row_index": index}
+    text_sha256 = exact_source_entry_text_sha256(exact_text)
+    fingerprint = penalty_source_entry_fingerprint(
+        raw_artifact_sha256=document.sha256,
+        source_entry_index=index,
+        stable_source_locator=locator,
+        exact_source_entry_text_sha256=text_sha256,
+    )
+    return (
+        {
+            "source_entry_locator": locator,
+            "source_entry_text": exact_text,
+            "source_entry_text_sha256": text_sha256,
+        },
+        {
+            "source_entry_index": index,
+            "source_entry_fingerprint": fingerprint,
+        },
+    )
 
 
 def attach_pilot_item(
@@ -156,6 +187,7 @@ def test_missing_structured_record_fails_validation(session) -> None:
 def test_import_structured_penalty_draft(session, tmp_path: Path) -> None:
     document = parsed_document(session, DataType.PENALTY.value, raw_text="演示违法事实")
     attach_pilot_item(session, document, "PEN-001")
+    envelope_identity, field_identity = penalty_entry_identity(document)
     path = tmp_path / "drafts.jsonl"
     path.write_text(
         json.dumps(
@@ -165,7 +197,9 @@ def test_import_structured_penalty_draft(session, tmp_path: Path) -> None:
                 "record_type": "penalty",
                 "draft_generation_method": "manual_rules_from_official_text",
                 "draft_generation_version": "first-batch-v1",
+                **envelope_identity,
                 "fields": {
+                    **field_identity,
                     "illegal_facts": "演示违法事实",
                     "original_sales_wording_disclosed": False,
                     "original_sales_wording": None,
@@ -201,6 +235,7 @@ def test_import_structured_penalty_draft(session, tmp_path: Path) -> None:
             "pilot_id": "PEN-001",
             "draft_generation_method": "manual_rules_from_official_text",
             "draft_generation_version": "first-batch-v1",
+            **envelope_identity,
         }
     ]
 
@@ -211,13 +246,16 @@ def test_pilot_id_for_another_document_is_rejected_atomically(session) -> None:
     attach_pilot_item(session, document, "PEN-001")
     attach_pilot_item(session, other, "PEN-002")
     original_metadata = dict(document.metadata_json)
+    envelope_identity, field_identity = penalty_entry_identity(document)
     envelope = StructuredDraftEnvelope(
         pilot_id="PEN-002",
         document_id=document.id,
         record_type=DataType.PENALTY,
         draft_generation_method="manual_rules_from_official_text",
         draft_generation_version="first-batch-v1",
+        **envelope_identity,
         fields={
+            **field_identity,
             "illegal_facts": "演示违法事实",
             "original_sales_wording_disclosed": False,
             "source_quote": "演示违法事实",
@@ -246,10 +284,13 @@ def test_pilot_id_for_another_document_is_rejected_atomically(session) -> None:
 def test_pilot_document_requires_generation_provenance(session) -> None:
     document = parsed_document(session, DataType.PENALTY.value, raw_text="演示违法事实")
     attach_pilot_item(session, document, "PEN-001")
+    envelope_identity, field_identity = penalty_entry_identity(document)
     envelope = StructuredDraftEnvelope(
         document_id=document.id,
         record_type=DataType.PENALTY,
+        **envelope_identity,
         fields={
+            **field_identity,
             "illegal_facts": "演示违法事实",
             "original_sales_wording_disclosed": False,
             "source_quote": "演示违法事实",
@@ -277,13 +318,16 @@ def test_pilot_document_requires_generation_provenance(session) -> None:
 def test_draft_provenance_is_exported_in_portable_review_bundle(session, tmp_path: Path) -> None:
     document = parsed_document(session, DataType.PENALTY.value, raw_text="演示违法事实")
     attach_pilot_item(session, document, "PEN-001")
+    envelope_identity, field_identity = penalty_entry_identity(document)
     envelope = StructuredDraftEnvelope(
         pilot_id="PEN-001",
         document_id=document.id,
         record_type=DataType.PENALTY,
         draft_generation_method="manual_rules_from_official_text",
         draft_generation_version="first-batch-v1",
+        **envelope_identity,
         fields={
+            **field_identity,
             "illegal_facts": "演示违法事实",
             "original_sales_wording_disclosed": False,
             "source_quote": "演示违法事实",
@@ -317,6 +361,7 @@ def test_draft_provenance_is_exported_in_portable_review_bundle(session, tmp_pat
         "pilot_id": "PEN-001",
         "draft_generation_method": "manual_rules_from_official_text",
         "draft_generation_version": "first-batch-v1",
+        **envelope_identity,
     }
 
 
@@ -411,10 +456,13 @@ def test_record_type_must_match_document(session) -> None:
 
 def test_empty_structured_record_cannot_bypass_validation(session) -> None:
     document = parsed_document(session, DataType.PENALTY.value, raw_text="演示违法事实")
+    envelope_identity, field_identity = penalty_entry_identity(document)
     envelope = StructuredDraftEnvelope(
         document_id=document.id,
         record_type=DataType.PENALTY,
+        **envelope_identity,
         fields={
+            **field_identity,
             "illegal_facts": "",
             "source_quote": "",
             "original_sales_wording_disclosed": False,
@@ -436,12 +484,15 @@ def test_empty_structured_record_cannot_bypass_validation(session) -> None:
         structured_service(session).import_draft(session, envelope)
 
 
-def test_penalty_primary_record_is_unique(session) -> None:
+def test_penalty_source_entry_identity_is_unique(session) -> None:
     document = parsed_document(session, DataType.PENALTY.value, raw_text="演示违法事实")
+    envelope_identity, field_identity = penalty_entry_identity(document)
     envelope = StructuredDraftEnvelope(
         document_id=document.id,
         record_type=DataType.PENALTY,
+        **envelope_identity,
         fields={
+            **field_identity,
             "illegal_facts": "演示违法事实",
             "source_quote": "演示违法事实",
             "original_sales_wording_disclosed": False,
@@ -461,7 +512,7 @@ def test_penalty_primary_record_is_unique(session) -> None:
     service = structured_service(session)
     service.import_draft(session, envelope)
 
-    with pytest.raises(StructuredRecordError, match="already has"):
+    with pytest.raises(StructuredRecordError, match="penalty_source_entry_duplicate"):
         service.import_draft(session, envelope)
 
 
