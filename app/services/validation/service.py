@@ -61,7 +61,9 @@ class ValidationService:
         }
         document.metadata_json = metadata
         codes = {issue.code for issue in result.issues}
-        if "summary_evidence_requires_expert_review" in codes:
+        if "summary_evidence_requires_expert_review" in codes or (
+            document.data_type == DataType.PENALTY.value and result.valid
+        ):
             status = ReviewStatus.REQUIRES_EXPERT_REVIEW.value
         else:
             status = (

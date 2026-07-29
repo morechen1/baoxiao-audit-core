@@ -116,7 +116,13 @@ class StateMachineService:
         }.get(document.data_type)
         if model is None:
             return []
-        return list(session.scalars(select(model).where(model.document_id == document.id)))
+        query = select(model).where(model.document_id == document.id)
+        if document.data_type == DataType.PENALTY.value:
+            query = query.order_by(
+                Penalty.source_entry_index,
+                Penalty.source_entry_fingerprint,
+            )
+        return list(session.scalars(query))
 
     @classmethod
     def resubmit_document(

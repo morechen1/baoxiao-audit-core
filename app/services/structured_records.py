@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, cast
 
 from pydantic import ValidationError as PydanticValidationError
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -32,6 +33,7 @@ from app.schemas.structured import (
     StructuredDraftEnvelope,
 )
 from app.services.field_evidence import EVIDENCE_FIELDS, FieldEvidenceService
+from app.services.penalty_entries import penalty_source_entry_fingerprint
 from app.services.state_machine import StateMachineService
 
 DRAFT_MODELS = {
@@ -56,26 +58,41 @@ class StructuredRecordService:
     def import_jsonl(self, session: Session, path: Path) -> tuple[int, list[str]]:
         if not path.is_file() or path.suffix.lower() != ".jsonl":
             raise StructuredRecordError("Structured drafts must be an existing JSONL file")
-        imported = 0
+        pending: list[tuple[int, StructuredDraftEnvelope]] = []
         errors: list[str] = []
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if not line.strip():
                 continue
             try:
-                envelope = StructuredDraftEnvelope.model_validate_json(line)
-                self.import_draft(session, envelope)
-                imported += 1
+                pending.append((line_number, StructuredDraftEnvelope.model_validate_json(line)))
             except (
                 json.JSONDecodeError,
                 PydanticValidationError,
                 StructuredRecordError,
             ) as exc:
-                session.rollback()
                 errors.append(f"line {line_number}: {exc}")
-        return imported, errors
+        if errors:
+            session.rollback()
+            return 0, errors
+        try:
+            for line_number, envelope in pending:
+                try:
+                    self.import_draft(session, envelope, commit=False)
+                except Exception as exc:
+                    session.rollback()
+                    return 0, [f"line {line_number}: {exc}"]
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        return len(pending), []
 
     def import_draft(
-        self, session: Session, envelope: StructuredDraftEnvelope
+        self,
+        session: Session,
+        envelope: StructuredDraftEnvelope,
+        *,
+        commit: bool = True,
     ) -> Regulation | Penalty | ProductDocument | RegulatoryCase:
         document = session.get(SourceDocument, envelope.document_id)
         if not document:
@@ -102,9 +119,26 @@ class StructuredRecordService:
             and draft.case_usage != RegulatoryCaseUsage.EXTERNAL_TEST_CANDIDATE
         ):
             raise StructuredRecordError("case_usage_requires_human_review")
+        if document.data_type == DataType.PENALTY.value:
+            if envelope.source_entry_text is None or envelope.source_entry_text not in (
+                document.raw_text or ""
+            ):
+                raise StructuredRecordError("penalty_source_entry_text_not_found")
+            actual_text_sha256 = hashlib.sha256(
+                envelope.source_entry_text.encode("utf-8")
+            ).hexdigest()
+            if actual_text_sha256 != envelope.source_entry_text_sha256:
+                raise StructuredRecordError("penalty_source_entry_text_sha256_mismatch")
+            expected_fingerprint = penalty_source_entry_fingerprint(
+                raw_artifact_sha256=document.sha256,
+                source_entry_index=draft.source_entry_index,
+                stable_source_locator=envelope.source_entry_locator or {},
+                exact_source_entry_text_sha256=envelope.source_entry_text_sha256 or "",
+            )
+            if draft.source_entry_fingerprint != expected_fingerprint:
+                raise StructuredRecordError("penalty_source_entry_fingerprint_mismatch")
         pilot_ids = self._validate_pilot_provenance(session, document, envelope)
         if document.data_type in {
-            DataType.PENALTY.value,
             DataType.PRODUCT_DOCUMENT.value,
             DataType.REGULATORY_CASE.value,
         }:
@@ -115,6 +149,18 @@ class StructuredRecordService:
                 raise StructuredRecordError(
                     f"{document.data_type} already has a primary structured record"
                 )
+        if document.data_type == DataType.PENALTY.value:
+            duplicate_entry = session.scalar(
+                select(Penalty.id).where(
+                    Penalty.document_id == document.id,
+                    (
+                        (Penalty.source_entry_index == draft.source_entry_index)
+                        | (Penalty.source_entry_fingerprint == draft.source_entry_fingerprint)
+                    ),
+                )
+            )
+            if duplicate_entry is not None:
+                raise StructuredRecordError("penalty_source_entry_duplicate")
         values = draft.model_dump()
         if document.data_type == DataType.REGULATION.value:
             duplicates = session.scalars(
@@ -154,7 +200,16 @@ class StructuredRecordService:
         try:
             session.add(record)
             session.flush()
+            if isinstance(record, Penalty):
+                self._mark_penalty_duplicate_candidates(session, document, record)
             if envelope.pilot_id is not None:
+                entry_provenance: dict[str, Any] = {}
+                if document.data_type == DataType.PENALTY.value:
+                    entry_provenance = {
+                        "source_entry_locator": envelope.source_entry_locator,
+                        "source_entry_text": envelope.source_entry_text,
+                        "source_entry_text_sha256": envelope.source_entry_text_sha256,
+                    }
                 metadata = dict(document.metadata_json)
                 metadata["structured_draft_provenance"] = [
                     *existing_provenance,
@@ -164,6 +219,7 @@ class StructuredRecordService:
                         "pilot_id": envelope.pilot_id,
                         "draft_generation_method": envelope.draft_generation_method,
                         "draft_generation_version": envelope.draft_generation_version,
+                        **entry_provenance,
                     },
                 ]
                 document.metadata_json = metadata
@@ -177,12 +233,57 @@ class StructuredRecordService:
                     ReviewStatus.PARSED.value,
                     "structured draft imported after validation failure",
                 )
-            session.commit()
+            if commit:
+                session.commit()
         except Exception:
             session.rollback()
             raise
         session.refresh(record)
         return cast(Regulation | Penalty | ProductDocument | RegulatoryCase, record)
+
+    @staticmethod
+    def _mark_penalty_duplicate_candidates(
+        session: Session,
+        document: SourceDocument,
+        record: Penalty,
+    ) -> None:
+        signature_fields = (
+            "punished_entity",
+            "document_number",
+            "illegal_facts",
+            "penalty_result",
+        )
+        signature = and_(
+            *[
+                (
+                    getattr(Penalty, field_name).is_(None)
+                    if getattr(record, field_name) is None
+                    else getattr(Penalty, field_name) == getattr(record, field_name)
+                )
+                for field_name in signature_fields
+            ]
+        )
+        candidates = list(
+            session.scalars(
+                select(Penalty)
+                .join(SourceDocument, SourceDocument.id == Penalty.document_id)
+                .where(
+                    Penalty.document_id != document.id,
+                    or_(
+                        (
+                            SourceDocument.source_url == document.source_url
+                            if document.source_url
+                            else False
+                        ),
+                        signature,
+                    ),
+                )
+            )
+        )
+        if candidates:
+            record.duplicate_candidate = True
+            for candidate in candidates:
+                candidate.duplicate_candidate = True
 
     @staticmethod
     def _validate_pilot_provenance(

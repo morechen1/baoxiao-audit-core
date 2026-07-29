@@ -1006,6 +1006,9 @@ class ReviewService:
                     "pilot_id",
                     "draft_generation_method",
                     "draft_generation_version",
+                    "source_entry_locator",
+                    "source_entry_text",
+                    "source_entry_text_sha256",
                 }
             }
             for item in raw_provenance
@@ -1031,6 +1034,16 @@ class ReviewService:
                 parsed_record,
             )
             parsed_records.append(parsed_record)
+        parsed_records.sort(
+            key=lambda value: (
+                (
+                    value.get("source_entry_index", 0)
+                    if document.data_type == DataType.PENALTY.value
+                    else 0
+                ),
+                value["portable_record_key"],
+            )
+        )
         return {
             "review_payload_schema_version": REVIEW_PAYLOAD_SCHEMA_VERSION,
             "batch_id": batch_id,

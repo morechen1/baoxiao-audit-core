@@ -49,6 +49,8 @@ class RegulationDraft(StrictDraft):
 
 
 class PenaltyDraft(StrictDraft):
+    source_entry_index: int = Field(gt=0)
+    source_entry_fingerprint: StrictStr = Field(pattern=r"^[0-9a-f]{64}$")
     punished_entity: StrictStr | None = None
     authority: StrictStr | None = None
     document_number: StrictStr | None = None
@@ -119,6 +121,12 @@ class StructuredDraftEnvelope(StrictDraft):
     field_evidence: dict[str, list[FieldEvidenceItem]] | None = None
     draft_generation_method: StrictStr | None = Field(default=None, min_length=1)
     draft_generation_version: StrictStr | None = Field(default=None, min_length=1)
+    source_entry_locator: dict[str, StrictStr | int] | None = None
+    source_entry_text: StrictStr | None = Field(default=None, min_length=1)
+    source_entry_text_sha256: StrictStr | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
 
     @model_validator(mode="after")
     def validate_generation_provenance(self) -> "StructuredDraftEnvelope":
@@ -131,6 +139,16 @@ class StructuredDraftEnvelope(StrictDraft):
             value is not None for value in provenance
         ):
             raise ValueError("draft generation provenance must be complete")
+        entry_identity = (
+            self.source_entry_locator,
+            self.source_entry_text,
+            self.source_entry_text_sha256,
+        )
+        if self.record_type == DataType.PENALTY:
+            if not all(value is not None for value in entry_identity):
+                raise ValueError("penalty source entry identity must be complete")
+        elif any(value is not None for value in entry_identity):
+            raise ValueError("source entry identity is only valid for penalty drafts")
         return self
 
 
