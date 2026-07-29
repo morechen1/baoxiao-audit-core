@@ -23,9 +23,10 @@ Portable review records are ordered by `source_entry_index` and then
 `portable_record_key`. Human corrections continue to address one
 `structured_record_id`/portable key and do not implicitly mutate sibling entries.
 
-Exact duplicate candidates across different source documents are retained and marked
-`duplicate_candidate`; they are never automatically deleted or merged. A reviewer must decide
-how to resolve them.
+Candidates across different source documents are marked when the source URL is identical, the
+four-field signature is identical, or the NFKC/whitespace-normalized four-field signature has a
+`SequenceMatcher` ratio of at least `0.90`. They are retained as `duplicate_candidate` and are
+never automatically deleted or merged. A reviewer must decide how to resolve them.
 
 The migration backfills legacy single-record penalties with index `1` and a deterministic
 fingerprint. Downgrade fails with `cannot_downgrade_multi_record_penalties` if any document has

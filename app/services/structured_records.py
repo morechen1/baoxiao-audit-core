@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import unicodedata
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, cast
 
 from pydantic import ValidationError as PydanticValidationError
-from sqlalchemy import and_, or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -49,6 +52,7 @@ ENTITY_MODELS = {
     DataType.PRODUCT_DOCUMENT.value: ProductDocument,
     DataType.REGULATORY_CASE.value: RegulatoryCase,
 }
+PENALTY_DUPLICATE_SIMILARITY_THRESHOLD = 0.90
 
 
 class StructuredRecordService:
@@ -247,43 +251,55 @@ class StructuredRecordService:
         document: SourceDocument,
         record: Penalty,
     ) -> None:
+        possible_candidates = list(
+            session.execute(
+                select(Penalty, SourceDocument.source_url)
+                .join(SourceDocument, SourceDocument.id == Penalty.document_id)
+                .where(Penalty.document_id != document.id)
+            )
+        )
         signature_fields = (
             "punished_entity",
             "document_number",
             "illegal_facts",
             "penalty_result",
         )
-        signature = and_(
-            *[
-                (
-                    getattr(Penalty, field_name).is_(None)
-                    if getattr(record, field_name) is None
-                    else getattr(Penalty, field_name) == getattr(record, field_name)
-                )
-                for field_name in signature_fields
-            ]
-        )
-        candidates = list(
-            session.scalars(
-                select(Penalty)
-                .join(SourceDocument, SourceDocument.id == Penalty.document_id)
-                .where(
-                    Penalty.document_id != document.id,
-                    or_(
-                        (
-                            SourceDocument.source_url == document.source_url
-                            if document.source_url
-                            else False
-                        ),
-                        signature,
-                    ),
+        record_signature = tuple(getattr(record, name) for name in signature_fields)
+        record_text = StructuredRecordService._penalty_similarity_text(record)
+        candidates = [
+            candidate
+            for candidate, candidate_source_url in possible_candidates
+            if (
+                (bool(document.source_url) and candidate_source_url == document.source_url)
+                or tuple(getattr(candidate, name) for name in signature_fields) == record_signature
+                or (
+                    bool(record_text)
+                    and SequenceMatcher(
+                        None,
+                        record_text,
+                        StructuredRecordService._penalty_similarity_text(candidate),
+                        autojunk=False,
+                    ).ratio()
+                    >= PENALTY_DUPLICATE_SIMILARITY_THRESHOLD
                 )
             )
-        )
+        ]
         if candidates:
             record.duplicate_candidate = True
             for candidate in candidates:
                 candidate.duplicate_candidate = True
+
+    @staticmethod
+    def _penalty_similarity_text(record: Penalty) -> str:
+        values = (
+            record.punished_entity,
+            record.document_number,
+            record.illegal_facts,
+            record.penalty_result,
+        )
+        return "|".join(
+            re.sub(r"\s+", "", unicodedata.normalize("NFKC", value or "")) for value in values
+        )
 
     @staticmethod
     def _validate_pilot_provenance(

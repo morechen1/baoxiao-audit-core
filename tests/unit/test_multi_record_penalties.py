@@ -326,6 +326,33 @@ def test_cross_document_exact_duplicate_is_marked_but_not_deleted(session) -> No
     assert session.query(Penalty).count() == 2
 
 
+def test_cross_document_high_similarity_is_only_marked_for_human_resolution(session) -> None:
+    first_text = "某保险销售人员在产品介绍过程中连续多次使用误导性宣传表述"
+    second_text = "某保险销售人员在产品介绍过程中连续多次使用误导性宣传措辞"
+    first_document = make_document(
+        session,
+        text=first_text,
+        source_url="https://example.test/similar-a",
+    )
+    second_document = make_document(
+        session,
+        text=second_text,
+        source_url="https://example.test/similar-b",
+    )
+    first = service(session).import_draft(
+        session,
+        envelope(first_document, 1, first_text),
+    )
+    second = service(session).import_draft(
+        session,
+        envelope(second_document, 1, second_text),
+    )
+
+    assert first.duplicate_candidate is True
+    assert second.duplicate_candidate is True
+    assert session.query(Penalty).count() == 2
+
+
 def test_penalty_validation_requires_expert_review_and_never_auto_indexes(session) -> None:
     document = make_document(session)
     service(session).import_draft(session, envelope(document, 1, "违法事实一"))
