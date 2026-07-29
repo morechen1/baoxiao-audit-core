@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -617,6 +618,30 @@ def test_duplicate_candidate_does_not_mutate_approved_existing_record(session) -
     after = review_service._document_review_row(session, first_document, 1, 1)
     assert after["parsed_fields"]["records"][0]["portable_record_key"] == before_key
     assert payload_hash(after) == before_hash
+
+
+def test_duplicate_candidate_does_not_mutate_indexed_existing_record(session) -> None:
+    first_document = make_document(session, source_url="https://example.test/indexed-a")
+    first = service(session).import_draft(
+        session,
+        envelope(first_document, 1, "违法事实一"),
+    )
+    first_document.knowledge_index_status = KnowledgeIndexStatus.INDEXED.value
+    first_document.indexed_at = datetime.now(UTC)
+    session.commit()
+    second_document = make_document(
+        session,
+        text="违法事实一\n违法事实二\n修订事实一\n索引保护",
+        source_url="https://example.test/indexed-b",
+    )
+
+    second = service(session).import_draft(
+        session,
+        envelope(second_document, 1, "违法事实一"),
+    )
+
+    assert second.duplicate_candidate is True
+    assert first.duplicate_candidate is False
 
 
 def test_penalty_identity_provenance_is_saved_and_bound_to_portable_key(session) -> None:
