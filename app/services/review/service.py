@@ -1302,6 +1302,7 @@ class ReviewService:
 
     @staticmethod
     def _complete_batch_if_ready(session: Session, batch: ReviewBatch) -> None:
+        session.flush()
         remaining = session.scalar(
             select(func.count(ReviewBatchItem.id)).where(
                 ReviewBatchItem.batch_id == batch.id,
