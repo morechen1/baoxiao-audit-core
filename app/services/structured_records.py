@@ -19,6 +19,7 @@ from app.models import (
     ProductDocument,
     Regulation,
     RegulatoryCase,
+    ReviewDecision,
     SourceDocument,
 )
 from app.models.enums import (
@@ -38,6 +39,8 @@ from app.schemas.structured import (
 from app.services.field_evidence import EVIDENCE_FIELDS, FieldEvidenceService
 from app.services.parsed_artifacts import ParsedArtifactIntegrityService
 from app.services.penalty_entries import (
+    build_penalty_identity_material,
+    build_penalty_source_entry_fragments,
     canonical_source_entry_fragments,
     penalty_source_entry_fingerprint,
     source_entry_content_sha256,
@@ -134,7 +137,7 @@ class StructuredRecordService:
                 document,
                 session=session,
             )
-            fragments = self._validate_penalty_fragments(document, envelope)
+            submitted_fragments = self._validate_penalty_fragments(document, envelope)
             expected_doc_id = self._parsed_nfra_doc_id(parsed_payload)
             try:
                 validate_source_entry_locator(
@@ -143,15 +146,6 @@ class StructuredRecordService:
                 )
             except ValueError as exc:
                 raise StructuredRecordError(str(exc)) from exc
-            actual_content_sha256 = source_entry_content_sha256(fragments)
-            if actual_content_sha256 != envelope.source_entry_content_sha256:
-                raise StructuredRecordError("penalty_source_entry_content_sha256_mismatch")
-            expected_fingerprint = penalty_source_entry_fingerprint(
-                raw_artifact_sha256=document.sha256,
-                source_entry_content_sha256=actual_content_sha256,
-            )
-            if draft.source_entry_fingerprint != expected_fingerprint:
-                raise StructuredRecordError("penalty_source_entry_fingerprint_mismatch")
         pilot_ids = self._validate_pilot_provenance(session, document, envelope)
         if document.data_type in {
             DataType.PRODUCT_DOCUMENT.value,
@@ -164,18 +158,6 @@ class StructuredRecordService:
                 raise StructuredRecordError(
                     f"{document.data_type} already has a primary structured record"
                 )
-        if document.data_type == DataType.PENALTY.value:
-            duplicate_entry = session.scalar(
-                select(Penalty.id).where(
-                    Penalty.document_id == document.id,
-                    (
-                        (Penalty.source_entry_index == draft.source_entry_index)
-                        | (Penalty.source_entry_fingerprint == draft.source_entry_fingerprint)
-                    ),
-                )
-            )
-            if duplicate_entry is not None:
-                raise StructuredRecordError("penalty_source_entry_duplicate")
         values = draft.model_dump()
         if document.data_type == DataType.REGULATION.value:
             duplicates = session.scalars(
@@ -207,11 +189,36 @@ class StructuredRecordService:
             except Exception as exc:
                 raise StructuredRecordError(str(exc)) from exc
         if document.data_type == DataType.PENALTY.value:
-            self._validate_penalty_identity_evidence(
-                values,
-                validated_evidence,
-                fragments,
+            try:
+                identity_material = build_penalty_identity_material(values, validated_evidence)
+                expected_fragments = build_penalty_source_entry_fragments(
+                    values,
+                    validated_evidence,
+                )
+            except ValueError as exc:
+                raise StructuredRecordError(str(exc)) from exc
+            if submitted_fragments != expected_fragments:
+                raise StructuredRecordError("penalty_source_entry_fragment_set_mismatch")
+            actual_content_sha256 = source_entry_content_sha256(identity_material)
+            if actual_content_sha256 != envelope.source_entry_content_sha256:
+                raise StructuredRecordError("penalty_source_entry_content_sha256_mismatch")
+            expected_fingerprint = penalty_source_entry_fingerprint(
+                raw_artifact_sha256=document.sha256,
+                source_entry_content_sha256=actual_content_sha256,
             )
+            if draft.source_entry_fingerprint != expected_fingerprint:
+                raise StructuredRecordError("penalty_source_entry_fingerprint_mismatch")
+            duplicate_entry = session.scalar(
+                select(Penalty.id).where(
+                    Penalty.document_id == document.id,
+                    (
+                        (Penalty.source_entry_index == draft.source_entry_index)
+                        | (Penalty.source_entry_fingerprint == draft.source_entry_fingerprint)
+                    ),
+                )
+            )
+            if duplicate_entry is not None:
+                raise StructuredRecordError("penalty_source_entry_duplicate")
         record = entity_model(
             document_id=document.id,
             final_review_status=document.final_review_status,
@@ -228,7 +235,7 @@ class StructuredRecordService:
                 if document.data_type == DataType.PENALTY.value:
                     entry_provenance = {
                         "source_entry_locator": envelope.source_entry_locator,
-                        "source_entry_fragments": fragments,
+                        "source_entry_fragments": expected_fragments,
                         "source_entry_content_sha256": envelope.source_entry_content_sha256,
                     }
                 metadata = dict(document.metadata_json)
@@ -305,19 +312,41 @@ class StructuredRecordService:
             record.duplicate_candidate = True
             for candidate, candidate_document in candidates:
                 if not StructuredRecordService._duplicate_candidate_is_protected(
-                    candidate_document
+                    session, candidate_document
                 ):
                     candidate.duplicate_candidate = True
 
     @staticmethod
-    def _duplicate_candidate_is_protected(document: SourceDocument) -> bool:
-        return (
-            document.final_review_status
+    def _duplicate_candidate_is_protected(
+        session: Session,
+        document: SourceDocument,
+    ) -> bool:
+        protected_by_state = (
+            document.authenticity_type == AuthenticityType.VERIFIED_PUBLIC.value
+            or document.final_review_status
             in {
                 ReviewStatus.APPROVED.value,
                 ReviewStatus.APPROVED_WITH_REVISION.value,
+                ReviewStatus.REJECTED.value,
+                ReviewStatus.PENDING_SOURCE_VERIFICATION.value,
+                ReviewStatus.REJECTED_HALLUCINATION.value,
+                ReviewStatus.REJECTED_DUPLICATE.value,
+                ReviewStatus.REJECTED_OUTDATED.value,
             }
             or document.knowledge_index_status == KnowledgeIndexStatus.INDEXED.value
+        )
+        if protected_by_state:
+            return True
+        return (
+            session.scalar(
+                select(ReviewDecision.id)
+                .where(
+                    ReviewDecision.record_type == DataType.PENALTY.value,
+                    ReviewDecision.record_id == document.id,
+                )
+                .limit(1)
+            )
+            is not None
         )
 
     @staticmethod
@@ -325,10 +354,10 @@ class StructuredRecordService:
         metadata = payload.get("metadata")
         if not isinstance(metadata, dict):
             return None
-        nested = metadata.get("nfra")
-        doc_id = nested.get("doc_id") if isinstance(nested, dict) else metadata.get("doc_id")
-        if doc_id is None:
+        if metadata.get("source_format") != "nfra_public_json":
             return None
+        nested = metadata.get("nfra")
+        doc_id = nested.get("doc_id") if isinstance(nested, dict) else None
         if not isinstance(doc_id, str) or not doc_id:
             raise StructuredRecordError("penalty_source_entry_locator_invalid")
         return doc_id
@@ -350,36 +379,6 @@ class StructuredRecordService:
         ):
             raise StructuredRecordError("penalty_source_entry_fragment_invalid")
         return fragments
-
-    @staticmethod
-    def _validate_penalty_identity_evidence(
-        values: dict[str, Any],
-        evidence: dict[str, list[dict[str, Any]]],
-        fragments: list[dict[str, Any]],
-    ) -> None:
-        def evidence_identity(field_name: str) -> set[tuple[str, int, int]]:
-            return {
-                (
-                    str(item.get("quote")),
-                    int(item.get("start_offset", -1)),
-                    int(item.get("end_offset", -1)),
-                )
-                for item in evidence.get(field_name, [])
-            }
-
-        fragment_identity = {
-            (item["quote"], item["start_offset"], item["end_offset"]) for item in fragments
-        }
-        punished_entity = values.get("punished_entity")
-        if isinstance(punished_entity, str) and punished_entity.strip():
-            if len(fragment_identity) < 2 or not (
-                fragment_identity & evidence_identity("punished_entity")
-            ):
-                raise StructuredRecordError("penalty_source_entry_fragment_invalid")
-        if values.get("penalty_result") and not (
-            fragment_identity & evidence_identity("penalty_result")
-        ):
-            raise StructuredRecordError("penalty_source_entry_fragment_invalid")
 
     @staticmethod
     def _penalty_similarity_text(record: Penalty) -> str:

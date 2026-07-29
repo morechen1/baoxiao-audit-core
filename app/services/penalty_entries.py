@@ -10,16 +10,22 @@ SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
 FRAGMENT_KEYS = frozenset({"quote", "start_offset", "end_offset"})
 LOCATOR_BASE_KEYS = frozenset({"nfra_doc_id", "table_index"})
 LOCATOR_POSITION_KEYS = frozenset({"logical_row", "numbered_entry"})
+PENALTY_IDENTITY_FIELDS = (
+    "punished_entity",
+    "penalty_result",
+    "illegal_facts",
+    "document_number",
+)
+IDENTITY_EVIDENCE_MODES = frozenset({"verbatim", "normalized"})
 
 
 def canonical_source_entry_fragments(
     fragments: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Validate and canonicalize exact, ordered entry fragments."""
+    """Validate and canonicalize exact entry fragments for audit comparison."""
     if not isinstance(fragments, list) or not fragments:
         raise ValueError("penalty_source_entry_fragment_invalid")
     result: list[dict[str, Any]] = []
-    previous_end = -1
     for fragment in fragments:
         if not isinstance(fragment, dict) or set(fragment) != FRAGMENT_KEYS:
             raise ValueError("penalty_source_entry_fragment_invalid")
@@ -35,7 +41,6 @@ def canonical_source_entry_fragments(
             or not isinstance(end, int)
             or start < 0
             or end <= start
-            or start < previous_end
         ):
             raise ValueError("penalty_source_entry_fragment_invalid")
         result.append(
@@ -45,13 +50,79 @@ def canonical_source_entry_fragments(
                 "end_offset": end,
             }
         )
-        previous_end = end
-    return result
+    if len(result) != len(
+        {(item["quote"], item["start_offset"], item["end_offset"]) for item in result}
+    ):
+        raise ValueError("penalty_source_entry_fragment_invalid")
+    return sorted(
+        result,
+        key=lambda item: (item["quote"], item["start_offset"], item["end_offset"]),
+    )
 
 
-def source_entry_content_sha256(fragments: list[dict[str, Any]]) -> str:
-    canonical = canonical_source_entry_fragments(fragments)
-    return hashlib.sha256(canonical_json_bytes(canonical)).hexdigest()
+def build_penalty_identity_material(
+    validated_fields: dict[str, Any],
+    validated_evidence: dict[str, list[dict[str, Any]]],
+) -> dict[str, list[dict[str, str]]]:
+    """Derive identity only from fixed business fields and validated evidence."""
+    punished_entity = validated_fields.get("punished_entity")
+    if not isinstance(punished_entity, str) or not punished_entity.strip():
+        raise ValueError("penalty_punished_entity_required")
+    material: dict[str, list[dict[str, str]]] = {}
+    for field_name in PENALTY_IDENTITY_FIELDS:
+        value = validated_fields.get(field_name)
+        if value is None or not str(value).strip():
+            continue
+        items = validated_evidence.get(field_name)
+        if not isinstance(items, list) or not items:
+            raise ValueError("penalty_source_entry_fragment_set_mismatch")
+        quotes: set[str] = set()
+        for item in items:
+            if (
+                not isinstance(item, dict)
+                or item.get("mode") not in IDENTITY_EVIDENCE_MODES
+                or not isinstance(item.get("quote"), str)
+                or not item["quote"]
+            ):
+                raise ValueError("penalty_source_entry_fragment_set_mismatch")
+            quotes.add(item["quote"])
+        material[field_name] = [{"quote": quote} for quote in sorted(quotes)]
+    return material
+
+
+def build_penalty_source_entry_fragments(
+    validated_fields: dict[str, Any],
+    validated_evidence: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    build_penalty_identity_material(validated_fields, validated_evidence)
+    fragments: dict[tuple[str, int, int], dict[str, Any]] = {}
+    for field_name in PENALTY_IDENTITY_FIELDS:
+        value = validated_fields.get(field_name)
+        if value is None or not str(value).strip():
+            continue
+        for item in validated_evidence[field_name]:
+            identity = (
+                str(item["quote"]),
+                int(item["start_offset"]),
+                int(item["end_offset"]),
+            )
+            fragments[identity] = {
+                "quote": identity[0],
+                "start_offset": identity[1],
+                "end_offset": identity[2],
+            }
+    return canonical_source_entry_fragments(list(fragments.values()))
+
+
+def source_entry_content_sha256(
+    identity_material: dict[str, list[dict[str, str]]],
+) -> str:
+    expected_keys = [
+        field_name for field_name in PENALTY_IDENTITY_FIELDS if field_name in identity_material
+    ]
+    if list(identity_material) != expected_keys or not identity_material:
+        raise ValueError("penalty_source_entry_fragment_set_mismatch")
+    return hashlib.sha256(canonical_json_bytes(identity_material)).hexdigest()
 
 
 def penalty_source_entry_fingerprint(
@@ -108,8 +179,7 @@ def validate_source_entry_locator(
         ):
             raise ValueError("penalty_source_entry_locator_invalid")
     elif "nfra_doc_id" in locator:
-        if not isinstance(doc_id, str) or not doc_id:
-            raise ValueError("penalty_source_entry_locator_invalid")
+        raise ValueError("penalty_source_entry_locator_invalid")
     return {
         **({"nfra_doc_id": doc_id} if isinstance(doc_id, str) else {}),
         "table_index": table_index,

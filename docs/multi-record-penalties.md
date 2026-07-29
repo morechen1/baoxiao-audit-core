@@ -4,21 +4,24 @@ A single immutable penalty source document may produce multiple `Penalty` record
 record has an explicit positive `source_entry_index`, but the index is ordering metadata and
 is not part of the record identity.
 
-The immutable identity is represented by `source_entry_fragments`, an ordered list of exact
-substrings from the verified parsed text:
+The caller still supplies `source_entry_fragments` for offline audit, but the list is not a
+free-form identity input. The importer first validates field evidence and deterministically
+derives the complete fragment set from these fixed identity fields:
 
-```json
-[
-  {"quote": "被处罚主体", "start_offset": 10, "end_offset": 15},
-  {"quote": "罚款10万元", "start_offset": 30, "end_offset": 36}
-]
-```
+- `punished_entity` (required);
+- `penalty_result` (when populated);
+- `illegal_facts` (required);
+- `document_number` (when populated).
 
-Fragments must be sorted, non-overlapping, have exact offsets, include the punished-entity
-evidence when that field is populated, and include the penalty-result evidence when that
-field is populated. A populated punished entity cannot be the only fragment.
+Only validated `verbatim` or controlled `normalized` evidence participates. Each quote must
+remain an exact substring of the immutable parsed text. The submitted fragments are
+canonicalized and must exactly equal the derived set: one extra, missing or substituted
+fragment fails with `penalty_source_entry_fragment_set_mismatch`.
 
-`source_entry_content_sha256` is SHA-256 over canonical JSON for that ordered fragment list.
+`source_entry_content_sha256` is SHA-256 over canonical JSON containing fixed field names and
+their exact evidence quotes. Offsets remain in the audit fragments, but are excluded from the
+content hash. Thus the same fixed identity content at another offset cannot manufacture a
+second identity.
 `source_entry_fingerprint` is SHA-256 over canonical JSON containing only:
 
 ```json
@@ -32,14 +35,15 @@ The fingerprint intentionally excludes database IDs, timestamps, local paths, en
 and locators. Reordering or relabelling the same source content therefore cannot create a new
 identity.
 
-For NFRA documents, `source_entry_locator` is audit provenance only. It contains the exact
-parsed NFRA `doc_id`, a positive integer `table_index`, and exactly one positive integer
-`logical_row` or `numbered_entry`. Boolean integers, unknown keys and mismatched document IDs
-fail closed.
+For parsed artifacts whose `metadata.source_format` is `nfra_public_json`,
+`source_entry_locator` is audit provenance only. It must contain the exact non-empty
+`metadata.nfra.doc_id`, a positive integer `table_index`, and exactly one positive integer
+`logical_row` or `numbered_entry`. Non-NFRA artifacts must not carry `nfra_doc_id`. Boolean
+integers, unknown keys, missing metadata and mismatched document IDs fail closed.
 
 Identity fields are immutable during structured-draft revision. Duplicate detection may flag
-the newly imported unreviewed record, but it never mutates an existing approved,
-approved-with-revision or indexed record.
+the newly imported record, but it never mutates an existing record that has a
+`ReviewDecision`, is `verified_public`, has any human decision result, or is indexed.
 
 Database uniqueness guards `(document_id, source_entry_index)` and
 `(document_id, source_entry_fingerprint)`. The migration deterministically backfills legacy
