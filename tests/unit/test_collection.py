@@ -161,6 +161,7 @@ def review_payload(row: dict, occurrence_id: int) -> dict:
         "batch_id": row["batch_id"],
         "batch_item_id": row["batch_item_id"],
         "reviewed_payload_hash": payload_hash(row),
+        "review_payload_schema_version": row["review_payload_schema_version"],
         "schema_version": "2.0",
         "record_id": row["record_id"],
         "record_type": row["record_type"],

@@ -21,11 +21,19 @@ class NfraJsonParser(DocumentParser):
             pages=[ParsedPage(1, plain_text)],
             metadata={
                 "source_format": "nfra_public_json",
-                "doc_id": payload.doc_id,
                 "publisher": payload.publisher,
                 "published_at": (
                     payload.published_at.isoformat() if payload.published_at else None
                 ),
                 "document_number": payload.document_number,
+                "nfra": {
+                    "doc_id": payload.doc_id,
+                    "doc_title": payload.title,
+                    "document_number": payload.document_number,
+                    "caption": payload.caption_document_number,
+                    "publish_date": (
+                        payload.published_at.isoformat() if payload.published_at else None
+                    ),
+                },
             },
         )

@@ -60,6 +60,12 @@ from app.services.field_evidence import EVIDENCE_FIELDS, FieldEvidenceService
 from app.services.integrity import RawArtifactIntegrityService
 from app.services.knowledge import KnowledgeIndexService
 from app.services.parsed_artifacts import ParsedArtifactIntegrityService
+from app.services.review_payload import (
+    REVIEW_PAYLOAD_SCHEMA_VERSION,
+    canonical_portable_source_url,
+    canonical_review_payload_hash_v2,
+    portable_record_key,
+)
 from app.services.state_machine import StateMachineService
 from app.services.validation import ValidationService
 
@@ -175,12 +181,15 @@ PROTECTED_CORRECTION_FIELDS = frozenset(
 
 
 def payload_hash(payload: dict[str, Any]) -> str:
+    if payload.get("review_payload_schema_version") == REVIEW_PAYLOAD_SCHEMA_VERSION:
+        return canonical_review_payload_hash_v2(payload)
     encoded = json.dumps(
         payload,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
         default=str,
+        allow_nan=False,
     ).encode()
     return hashlib.sha256(encoded).hexdigest()
 
@@ -400,6 +409,10 @@ class ReviewService:
                     "batch_item_id": item.id,
                     "record_id": item.record_id,
                     "payload_hash": item.payload_hash,
+                    "portable_record_keys": sorted(
+                        record["portable_record_key"]
+                        for record in row.get("parsed_fields", {}).get("records", [])
+                    ),
                     "raw_sha256": document.sha256,
                     "raw_bundle_relative_path": source_member,
                     "parsed_artifact_sha256": document.parsed_artifact_sha256,
@@ -428,6 +441,7 @@ class ReviewService:
         )
         manifest = {
             "schema_version": batch.schema_version,
+            "review_payload_schema_version": REVIEW_PAYLOAD_SCHEMA_VERSION,
             "batch_id": batch.id,
             "package_sha256": package_payload_hash,
             "integrity_scheme": "member-sha256+server-pinned-zip-sha256",
@@ -478,6 +492,7 @@ class ReviewService:
             "batch_id",
             "batch_item_id",
             "reviewed_payload_hash",
+            "review_payload_schema_version",
             "schema_version",
             "record_id",
             "record_type",
@@ -505,6 +520,8 @@ class ReviewService:
             raise ReviewDecisionError("review_batch_not_open")
         if payload["schema_version"] != batch.schema_version:
             raise ReviewDecisionError("Review decision schema_version does not match batch")
+        if payload["review_payload_schema_version"] != REVIEW_PAYLOAD_SCHEMA_VERSION:
+            raise ReviewDecisionError("review_payload_schema_unsupported")
         if payload["reviewed_payload_hash"] != item.payload_hash:
             raise ReviewDecisionError("reviewed_payload_hash does not match review batch item")
         record_id = int(payload["record_id"])
@@ -584,13 +601,27 @@ class ReviewService:
         if not records:
             raise ReviewDecisionError("Structured record is missing")
         records_by_id = {record.id: record for record in records}
+        portable_records: dict[str, list[Any]] = {}
+        for exported_record in current_payload.get("parsed_fields", {}).get("records", []):
+            key = exported_record.get("portable_record_key")
+            target = records_by_id.get(exported_record.get("structured_record_id"))
+            if isinstance(key, str) and target is not None:
+                portable_records.setdefault(key, []).append(target)
         validated_updates: list[tuple[Any, dict[str, Any], dict[str, Any]]] = []
         for correction in correction_set.records if correction_set else []:
-            target = records_by_id.get(correction.structured_record_id)
-            if target is None:
-                raise ReviewDecisionError(
-                    "structured_record_id does not belong to the reviewed document"
-                )
+            if batch.bundle_path:
+                matches = portable_records.get(correction.portable_record_key or "", [])
+                if not matches:
+                    raise ReviewDecisionError("portable_record_not_found")
+                if len(matches) != 1:
+                    raise ReviewDecisionError("portable_record_ambiguous")
+                target = matches[0]
+            else:
+                target = records_by_id.get(correction.structured_record_id)
+                if target is None:
+                    raise ReviewDecisionError(
+                        "structured_record_id does not belong to the reviewed document"
+                    )
             model = CORRECTION_MODELS[record_type]
             evidence_fields = EVIDENCE_FIELDS[record_type]
             candidate = {field: getattr(target, field) for field in model.model_fields}
@@ -994,8 +1025,14 @@ class ReviewService:
                 if not key.startswith("_") and key != "document_id"
             }
             parsed_record["draft_provenance"] = provenance_by_record_id.get(record.id)
+            parsed_record["portable_record_key"] = portable_record_key(
+                document.sha256,
+                document.data_type,
+                parsed_record,
+            )
             parsed_records.append(parsed_record)
         return {
+            "review_payload_schema_version": REVIEW_PAYLOAD_SCHEMA_VERSION,
             "batch_id": batch_id,
             "batch_item_id": batch_item_id,
             "pilot_id": pilot_ids[0] if len(pilot_ids) == 1 else None,
@@ -1050,6 +1087,7 @@ class ReviewService:
         sample: EvaluationSample, batch_id: int, batch_item_id: int
     ) -> dict[str, Any]:
         return {
+            "review_payload_schema_version": REVIEW_PAYLOAD_SCHEMA_VERSION,
             "batch_id": batch_id,
             "batch_item_id": batch_item_id,
             "document_id": None,
@@ -1088,6 +1126,7 @@ class ReviewService:
                 "batch_id": batch.id,
                 "batch_item_id": item.id,
                 "reviewed_payload_hash": item.payload_hash,
+                "review_payload_schema_version": REVIEW_PAYLOAD_SCHEMA_VERSION,
                 "schema_version": batch.schema_version,
                 "record_id": item.record_id,
                 "record_type": item.record_type,
@@ -1120,9 +1159,7 @@ class ReviewService:
 
     @staticmethod
     def _portable_url(value: Any) -> Any:
-        if not isinstance(value, str) or not value.startswith("file://"):
-            return value
-        return f"local-unattributed://{Path(urlparse(value).path).name}"
+        return canonical_portable_source_url(value)
 
     @staticmethod
     def _bundle_payload_hash(
@@ -1158,6 +1195,8 @@ class ReviewService:
                 review_bytes = bundle.read("review.jsonl")
                 template_bytes = bundle.read("review-results-template.jsonl")
                 manifest = json.loads(manifest_bytes)
+                if manifest.get("review_payload_schema_version") != REVIEW_PAYLOAD_SCHEMA_VERSION:
+                    raise ReviewDecisionError("review_payload_schema_unsupported")
                 if (
                     not batch.bundle_manifest_sha256
                     or hashlib.sha256(manifest_bytes).hexdigest() != batch.bundle_manifest_sha256
@@ -1182,6 +1221,12 @@ class ReviewService:
                     row = rows[int(item["batch_item_id"])]
                     if (
                         payload_hash(row) != item["payload_hash"]
+                        or row.get("review_payload_schema_version") != REVIEW_PAYLOAD_SCHEMA_VERSION
+                        or sorted(
+                            record["portable_record_key"]
+                            for record in row.get("parsed_fields", {}).get("records", [])
+                        )
+                        != item["portable_record_keys"]
                         or row["raw_file_path"] != item["raw_bundle_relative_path"]
                         or row["parsed_artifact_path"] != item["parsed_bundle_relative_path"]
                     ):

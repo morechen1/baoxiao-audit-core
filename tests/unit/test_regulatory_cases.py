@@ -225,6 +225,7 @@ def _decision(
         "batch_id": batch.id,
         "batch_item_id": row["batch_item_id"],
         "reviewed_payload_hash": payload_hash(row),
+        "review_payload_schema_version": row["review_payload_schema_version"],
         "schema_version": batch.schema_version,
         "record_id": row["record_id"],
         "record_type": DataType.REGULATORY_CASE.value,

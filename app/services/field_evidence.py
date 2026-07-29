@@ -171,7 +171,7 @@ class FieldEvidenceService:
         if item.mode == "summary":
             raise FieldEvidenceError("summary_evidence_requires_expert_review")
         if item.mode == "document_metadata":
-            self._validate_metadata(document, field_name, field_value, item)
+            self._validate_metadata(document, artifact, field_name, field_value, item)
             return
         value = self._string_value(field_value)
         if item.mode == "verbatim":
@@ -187,6 +187,7 @@ class FieldEvidenceService:
     @staticmethod
     def _validate_metadata(
         document: SourceDocument,
+        artifact: dict[str, Any],
         field_name: str,
         field_value: Any,
         item: FieldEvidenceItem,
@@ -200,12 +201,21 @@ class FieldEvidenceService:
             "effective_date": {"published_at"},
             "decision_date": {"published_at"},
             "published_at": {"published_at"},
+            "document_number": {"nfra.caption"},
         }
         if item.metadata_field not in allowed.get(field_name, set()):
             raise FieldEvidenceError("field_not_supported_by_evidence")
         metadata_value: Any
         if item.metadata_field == "filename":
             metadata_value = FieldEvidenceService._official_filename(document)
+        elif item.metadata_field == "nfra.caption":
+            raw_nfra = artifact.get("metadata", {}).get("nfra", {})
+            if not isinstance(raw_nfra, dict):
+                raise FieldEvidenceError("field_not_supported_by_evidence")
+            primary_document_number = raw_nfra.get("document_number")
+            if isinstance(primary_document_number, str) and primary_document_number.strip():
+                raise FieldEvidenceError("field_not_supported_by_evidence")
+            metadata_value = raw_nfra.get("caption")
         else:
             metadata_value = getattr(document, item.metadata_field or "", None)
         if FieldEvidenceService._basic_normalize(
@@ -276,6 +286,8 @@ class FieldEvidenceService:
             if not match:
                 raise FieldEvidenceError("field_not_supported_by_evidence")
             value = f"{int(match.group(1)):04d}-{int(match.group(2)):02d}-{int(match.group(3)):02d}"
+        elif normalized_note == "collapse_unicode_whitespace_for_chinese_date_v1":
+            value = cls._normalize_split_chinese_date(value)
         elif normalized_note in {"列表拆分与合并", "list_normalized"}:
             value = ",".join(
                 part.strip() for part in re.split(r"[,，;；、]", value) if part.strip()
@@ -283,6 +295,24 @@ class FieldEvidenceService:
         else:
             raise FieldEvidenceError("field_not_supported_by_evidence")
         return value.strip()
+
+    @staticmethod
+    def _normalize_split_chinese_date(value: str) -> str:
+        collapsed = "".join(character for character in value if not character.isspace())
+        sentence = collapsed[:-1] if collapsed.endswith(("。", "！", "？")) else collapsed
+        if any(marker in sentence for marker in ("。", "！", "？", "；", ";")):
+            raise FieldEvidenceError("field_not_supported_by_evidence")
+        matches = re.findall(
+            r"(?<![0-9])([0-9]{4})年([0-9]{1,2})月([0-9]{1,2})日(?![0-9])",
+            sentence,
+        )
+        if len(matches) != 1:
+            raise FieldEvidenceError("field_not_supported_by_evidence")
+        year, month, day = (int(part) for part in matches[0])
+        try:
+            return date(year, month, day).isoformat()
+        except ValueError as exc:
+            raise FieldEvidenceError("field_not_supported_by_evidence") from exc
 
     @staticmethod
     def summary(evidence: dict[str, Any]) -> dict[str, Any]:
