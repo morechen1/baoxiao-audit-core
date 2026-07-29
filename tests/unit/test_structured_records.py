@@ -27,6 +27,8 @@ from app.schemas.structured import StructuredDraftEnvelope
 from app.services.parsed_artifacts import ParsedArtifactService
 from app.services.parsing.base import ParsedDocument, ParsedPage
 from app.services.penalty_entries import (
+    build_penalty_identity_material,
+    build_penalty_source_entry_fragments,
     penalty_source_entry_fingerprint,
     source_entry_content_sha256,
 )
@@ -82,14 +84,13 @@ def penalty_entry_identity(
 ) -> tuple[dict[str, object], dict[str, object]]:
     locator = {"table_index": 1, "logical_row": index}
     start = (document.raw_text or "").index(exact_text)
-    fragments = [
-        {
-            "quote": exact_text,
-            "start_offset": start,
-            "end_offset": start + len(exact_text),
-        }
-    ]
-    content_sha256 = source_entry_content_sha256(fragments)
+    fields = {
+        "punished_entity": exact_text,
+        "illegal_facts": exact_text,
+    }
+    evidence = penalty_evidence(exact_text, start)
+    fragments = build_penalty_source_entry_fragments(fields, evidence)
+    content_sha256 = source_entry_content_sha256(build_penalty_identity_material(fields, evidence))
     fingerprint = penalty_source_entry_fingerprint(
         raw_artifact_sha256=document.sha256,
         source_entry_content_sha256=content_sha256,
@@ -103,8 +104,23 @@ def penalty_entry_identity(
         {
             "source_entry_index": index,
             "source_entry_fingerprint": fingerprint,
+            "punished_entity": exact_text,
         },
     )
+
+
+def penalty_evidence(exact_text: str, start: int = 0) -> dict[str, list[dict[str, object]]]:
+    item = {
+        "quote": exact_text,
+        "page_number": 1,
+        "start_offset": start,
+        "end_offset": start + len(exact_text),
+        "mode": "verbatim",
+    }
+    return {
+        "punished_entity": [dict(item)],
+        "illegal_facts": [dict(item)],
+    }
 
 
 def attach_pilot_item(
@@ -211,17 +227,7 @@ def test_import_structured_penalty_draft(session, tmp_path: Path) -> None:
                     "original_sales_wording": None,
                     "source_quote": "演示违法事实",
                 },
-                "field_evidence": {
-                    "illegal_facts": [
-                        {
-                            "quote": "演示违法事实",
-                            "page_number": 1,
-                            "start_offset": 0,
-                            "end_offset": 6,
-                            "mode": "verbatim",
-                        }
-                    ]
-                },
+                "field_evidence": penalty_evidence("演示违法事实"),
             },
             ensure_ascii=False,
         )
@@ -266,17 +272,7 @@ def test_pilot_id_for_another_document_is_rejected_atomically(session) -> None:
             "original_sales_wording_disclosed": False,
             "source_quote": "演示违法事实",
         },
-        field_evidence={
-            "illegal_facts": [
-                {
-                    "quote": "演示违法事实",
-                    "page_number": 1,
-                    "start_offset": 0,
-                    "end_offset": 6,
-                    "mode": "verbatim",
-                }
-            ]
-        },
+        field_evidence=penalty_evidence("演示违法事实"),
     )
 
     with pytest.raises(StructuredRecordError, match="pilot_id_document_mismatch"):
@@ -301,17 +297,7 @@ def test_pilot_document_requires_generation_provenance(session) -> None:
             "original_sales_wording_disclosed": False,
             "source_quote": "演示违法事实",
         },
-        field_evidence={
-            "illegal_facts": [
-                {
-                    "quote": "演示违法事实",
-                    "page_number": 1,
-                    "start_offset": 0,
-                    "end_offset": 6,
-                    "mode": "verbatim",
-                }
-            ]
-        },
+        field_evidence=penalty_evidence("演示违法事实"),
     )
 
     with pytest.raises(StructuredRecordError, match="pilot_id_document_mismatch"):
@@ -338,17 +324,7 @@ def test_draft_provenance_is_exported_in_portable_review_bundle(session, tmp_pat
             "original_sales_wording_disclosed": False,
             "source_quote": "演示违法事实",
         },
-        field_evidence={
-            "illegal_facts": [
-                {
-                    "quote": "演示违法事实",
-                    "page_number": 1,
-                    "start_offset": 0,
-                    "end_offset": 6,
-                    "mode": "verbatim",
-                }
-            ]
-        },
+        field_evidence=penalty_evidence("演示违法事实"),
     )
     structured_service(session).import_draft(session, envelope)
     ValidationService(Settings(data_dir=session.info["data_dir"])).validate_document(
@@ -473,17 +449,7 @@ def test_empty_structured_record_cannot_bypass_validation(session) -> None:
             "source_quote": "",
             "original_sales_wording_disclosed": False,
         },
-        field_evidence={
-            "illegal_facts": [
-                {
-                    "quote": "演示违法事实",
-                    "page_number": 1,
-                    "start_offset": 0,
-                    "end_offset": 6,
-                    "mode": "verbatim",
-                }
-            ]
-        },
+        field_evidence=penalty_evidence("演示违法事实"),
     )
 
     with pytest.raises(StructuredRecordError):
@@ -503,17 +469,7 @@ def test_penalty_source_entry_identity_is_unique(session) -> None:
             "source_quote": "演示违法事实",
             "original_sales_wording_disclosed": False,
         },
-        field_evidence={
-            "illegal_facts": [
-                {
-                    "quote": "演示违法事实",
-                    "page_number": 1,
-                    "start_offset": 0,
-                    "end_offset": 6,
-                    "mode": "verbatim",
-                }
-            ]
-        },
+        field_evidence=penalty_evidence("演示违法事实"),
     )
     service = structured_service(session)
     service.import_draft(session, envelope)

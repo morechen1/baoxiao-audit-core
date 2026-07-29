@@ -53,6 +53,8 @@ from app.services.parsed_artifacts import (
 from app.services.parsing import ParsingService
 from app.services.parsing.base import ParsedDocument, ParsedPage
 from app.services.penalty_entries import (
+    build_penalty_identity_material,
+    build_penalty_source_entry_fragments,
     penalty_source_entry_fingerprint,
     source_entry_content_sha256,
 )
@@ -152,6 +154,7 @@ def record_fields(data_type: str, value: str) -> dict[str, object]:
         }
     if data_type == DataType.PENALTY.value:
         return {
+            "punished_entity": "真实原文",
             "illegal_facts": value,
             "original_sales_wording_disclosed": False,
             "original_sales_wording": None,
@@ -175,14 +178,15 @@ def envelope_for(
     }
     if document.data_type == DataType.PENALTY.value:
         locator = {"table_index": 1, "logical_row": 1}
-        fragments = [
-            {
-                "quote": "真实原文",
-                "start_offset": 0,
-                "end_offset": len("真实原文"),
-            }
-        ]
-        content_sha256 = source_entry_content_sha256(fragments)
+        identity_evidence = dict(field_evidence or {})
+        identity_evidence.setdefault("punished_entity", evidence(document, "真实原文"))
+        identity_evidence.setdefault("illegal_facts", evidence(document, "真实原文"))
+        if field_evidence is not None:
+            field_evidence.setdefault("punished_entity", evidence(document, "真实原文"))
+        fragments = build_penalty_source_entry_fragments(fields, identity_evidence)
+        content_sha256 = source_entry_content_sha256(
+            build_penalty_identity_material(fields, identity_evidence)
+        )
         fields.update(
             {
                 "source_entry_index": 1,
@@ -1309,25 +1313,17 @@ def penalty_draft(
     if entity_evidence is not None:
         payload["punished_entity"] = entity_evidence
     locator = {"table_index": 1, "logical_row": 1}
-    fact_start = (document.raw_text or "").index("违法事实")
-    fragments = [
-        {
-            "quote": "违法事实",
-            "start_offset": fact_start,
-            "end_offset": fact_start + len("违法事实"),
-        }
-    ]
-    if entity_evidence is not None:
-        entity_start = (document.raw_text or "").index(punished_entity)
-        fragments.append(
-            {
-                "quote": punished_entity,
-                "start_offset": entity_start,
-                "end_offset": entity_start + len(punished_entity),
-            }
-        )
-        fragments.sort(key=lambda item: item["start_offset"])
-    content_sha256 = source_entry_content_sha256(fragments)
+    fields = {
+        "punished_entity": punished_entity,
+        "illegal_facts": "违法事实",
+    }
+    identity_evidence = dict(payload)
+    if entity_evidence is None:
+        identity_evidence["punished_entity"] = evidence(document, "违法事实")
+    fragments = build_penalty_source_entry_fragments(fields, identity_evidence)
+    content_sha256 = source_entry_content_sha256(
+        build_penalty_identity_material(fields, identity_evidence)
+    )
     return StructuredDraftEnvelope.model_validate(
         {
             "document_id": document.id,
