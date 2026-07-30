@@ -148,11 +148,16 @@ class ValidationService:
                         document,
                         record,
                     )
-                except ValueError:
+                except ValueError as exc:
+                    code = (
+                        "penalty_source_identity_reimport_required"
+                        if str(exc) == "penalty_source_identity_reimport_required"
+                        else "penalty_source_identity_consistency_failed"
+                    )
                     issues.append(
                         ValidationIssue(
                             "PenaltySourceIdentityValidator",
-                            "penalty_source_identity_consistency_failed",
+                            code,
                             "Penalty source identity must match immutable draft provenance",
                         )
                     )

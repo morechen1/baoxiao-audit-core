@@ -18,6 +18,10 @@ from app.services.penalty_entries import (
     validate_source_entry_locator,
 )
 
+LEGACY_PENALTY_IDENTITY_VERSION = "legacy_source_quote_v1"
+LEGACY_PENALTY_IDENTITY_STATUS = "reimport_required"
+LEGACY_PENALTY_REIMPORT_ERROR = "penalty_source_identity_reimport_required"
+
 
 @dataclass(frozen=True)
 class PenaltySourceIdentity:
@@ -108,6 +112,11 @@ class PenaltySourceIdentityService:
         if len(matches) != 1:
             raise ValueError("penalty_source_identity_provenance_ambiguous")
         provenance = matches[0]
+        if (
+            provenance.get("identity_version") == LEGACY_PENALTY_IDENTITY_VERSION
+            or provenance.get("source_identity_status") == LEGACY_PENALTY_IDENTITY_STATUS
+        ):
+            raise ValueError(LEGACY_PENALTY_REIMPORT_ERROR)
         if (
             provenance.get("record_type") != "penalty"
             or not isinstance(provenance.get("source_entry_locator"), dict)

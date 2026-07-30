@@ -227,6 +227,15 @@ class ReviewService:
                 RawArtifactIntegrityService(self.settings).verify(document)
                 ParsedArtifactIntegrityService(self.settings).verify(document, session=session)
                 for structured_record in StateMachineService.structured_records(session, document):
+                    if isinstance(structured_record, Penalty):
+                        try:
+                            PenaltySourceIdentityService(self.settings).validate(
+                                session,
+                                document,
+                                structured_record,
+                            )
+                        except ValueError as exc:
+                            raise ReviewDecisionError(str(exc)) from exc
                     try:
                         FieldEvidenceService(self.settings).validate(
                             session,
@@ -239,15 +248,6 @@ class ReviewService:
                         )
                     except FieldEvidenceError as exc:
                         raise ReviewDecisionError(str(exc)) from exc
-                    if isinstance(structured_record, Penalty):
-                        try:
-                            PenaltySourceIdentityService(self.settings).validate(
-                                session,
-                                document,
-                                structured_record,
-                            )
-                        except ValueError as exc:
-                            raise ReviewDecisionError(str(exc)) from exc
             try:
                 with session.begin_nested():
                     session.add(
@@ -611,6 +611,16 @@ class ReviewService:
         records = StateMachineService.structured_records(session, document)
         if not records:
             raise ReviewDecisionError("Structured record is missing")
+        for record in records:
+            if isinstance(record, Penalty):
+                try:
+                    PenaltySourceIdentityService(self.settings).validate(
+                        session,
+                        document,
+                        record,
+                    )
+                except ValueError as exc:
+                    raise ReviewDecisionError(str(exc)) from exc
         records_by_id = {record.id: record for record in records}
         portable_records: dict[str, list[Any]] = {}
         for exported_record in current_payload.get("parsed_fields", {}).get("records", []):

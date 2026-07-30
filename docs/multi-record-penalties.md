@@ -68,6 +68,15 @@ quote is an explicitly field-scoped controlled transformation. The
 `Penalty.document_number`, accepts a bounded Chinese penalty-document-number form, and removes
 Unicode whitespace only. It cannot be used for other identity or long-text fields.
 
+The v0.8 single-record `Penalty` migration is structural compatibility only. Because the old
+records do not contain a trustworthy NFRA table locator, their provenance is marked
+`identity_version=legacy_source_quote_v1` and `source_identity_status=reimport_required`.
+These records are preserved, but validation, review export and decisions, ordinary revisions,
+and knowledge-index admission all fail with `penalty_source_identity_reimport_required`.
+V3.3 is the first formally reconstructed input for the ten initial penalty documents. Legacy
+isolation must be resolved through the complete multi-record structured import workflow; a
+locator must never be guessed or written directly into the database to bypass this boundary.
+
 Database uniqueness guards `(document_id, source_entry_index)` and
 `(document_id, source_entry_fingerprint)`. The migration deterministically backfills legacy
 single-record rows. Downgrade fails closed once any source document contains multiple

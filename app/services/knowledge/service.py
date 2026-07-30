@@ -111,8 +111,12 @@ class KnowledgeIndexService:
                         document,
                         record,
                     )
-                except ValueError:
-                    reasons.append("penalty_source_identity_consistency_failed")
+                except ValueError as exc:
+                    reasons.append(
+                        "penalty_source_identity_reimport_required"
+                        if str(exc) == "penalty_source_identity_reimport_required"
+                        else "penalty_source_identity_consistency_failed"
+                    )
             if record.final_review_status != document.final_review_status:
                 reasons.append("structured_status_mismatch")
             quote = getattr(record, "source_quote", None)

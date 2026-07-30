@@ -103,6 +103,15 @@ class StructuredDraftRevisionService:
             target = session.get(entity_model, envelope.structured_record_id)
             if not target or target.document_id != document.id:
                 raise StructuredRecordError("revision_record_mismatch")
+            if isinstance(target, Penalty):
+                try:
+                    PenaltySourceIdentityService(self.settings).validate(
+                        session,
+                        document,
+                        target,
+                    )
+                except ValueError as exc:
+                    raise StructuredRecordError(str(exc)) from exc
             previous_fields = {name: getattr(target, name) for name in draft_model.model_fields}
             previous_evidence = dict(target.field_evidence_json)
             if envelope.action == "delete":

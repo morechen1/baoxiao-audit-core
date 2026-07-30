@@ -884,6 +884,200 @@ def test_legacy_migration_fingerprint_is_deterministic() -> None:
     assert len(first) == 64
 
 
+def test_legacy_migration_marks_exact_provenance_without_forging_locator() -> None:
+    metadata = {
+        "existing": {"preserved": True},
+        "structured_draft_provenance": [
+            {
+                "structured_record_id": 7,
+                "record_type": "penalty",
+                "pilot_id": "PEN-LEGACY",
+                "draft_generation_method": "legacy_import",
+                "draft_generation_version": "v0.8",
+            }
+        ],
+    }
+
+    marked = migration._mark_legacy_penalty_provenance(metadata, 7)
+    provenance = marked["structured_draft_provenance"][0]
+
+    assert marked["existing"] == {"preserved": True}
+    assert provenance["pilot_id"] == "PEN-LEGACY"
+    assert provenance["draft_generation_method"] == "legacy_import"
+    assert provenance["draft_generation_version"] == "v0.8"
+    assert provenance["identity_version"] == "legacy_source_quote_v1"
+    assert provenance["source_identity_status"] == "reimport_required"
+    assert "source_entry_locator" not in provenance
+    assert "source_entry_fragments" not in provenance
+    assert "source_entry_content_sha256" not in provenance
+
+
+@pytest.mark.parametrize(
+    "provenance",
+    [
+        [],
+        [
+            {"structured_record_id": 7, "record_type": "penalty"},
+            {"structured_record_id": 7, "record_type": "penalty"},
+        ],
+    ],
+)
+def test_legacy_migration_rejects_missing_or_ambiguous_provenance(
+    provenance: list[dict[str, object]],
+) -> None:
+    with pytest.raises(
+        RuntimeError,
+        match="cannot_backfill_legacy_penalty_identity_marker",
+    ):
+        migration._mark_legacy_penalty_provenance(
+            {"structured_draft_provenance": provenance},
+            7,
+        )
+
+
+def test_legacy_penalty_isolated_from_revision_validation_review_and_index(session) -> None:
+    document = make_document(session, text="某保险公司\n罚款10万元\n销售误导\n修订事实一")
+    record = service(session).import_draft(session, complete_envelope(document))
+    provenance = dict(document.metadata_json["structured_draft_provenance"][0])
+    provenance.update(
+        {
+            "identity_version": "legacy_source_quote_v1",
+            "source_identity_status": "reimport_required",
+        }
+    )
+    document.metadata_json = {
+        **document.metadata_json,
+        "structured_draft_provenance": [provenance],
+    }
+    session.commit()
+
+    validation = ValidationService(Settings(data_dir=session.info["data_dir"])).evaluate_document(
+        session,
+        document,
+        [record],
+    )
+    assert validation.valid is False
+    assert any(
+        issue.validator == "PenaltySourceIdentityValidator"
+        and issue.code == "penalty_source_identity_reimport_required"
+        for issue in validation.issues
+    )
+
+    start = (document.raw_text or "").index("修订事实一")
+    revision = StructuredDraftRevisionEnvelope(
+        document_id=document.id,
+        record_type=DataType.PENALTY,
+        structured_record_id=record.id,
+        fields={"authority": "修订事实一"},
+        field_evidence={
+            "authority": [
+                {
+                    "quote": "修订事实一",
+                    "page_number": 1,
+                    "start_offset": start,
+                    "end_offset": start + len("修订事实一"),
+                    "mode": "verbatim",
+                }
+            ]
+        },
+    )
+    with pytest.raises(
+        StructuredRecordError,
+        match="penalty_source_identity_reimport_required",
+    ):
+        StructuredDraftRevisionService(Settings(data_dir=session.info["data_dir"])).revise(
+            session,
+            revision,
+            reason="legacy身份不得普通修订",
+            actor="tester",
+        )
+
+    make_penalty_reviewable(session, document)
+    with pytest.raises(
+        ReviewDecisionError,
+        match="penalty_source_identity_reimport_required",
+    ):
+        ReviewService(Settings(data_dir=session.info["data_dir"])).export_batch(
+            session,
+            DataType.PENALTY.value,
+            "jsonl",
+        )
+    session.rollback()
+
+    document = session.get(SourceDocument, document.id)
+    assert document is not None
+    reasons = KnowledgeIndexService(Settings(data_dir=session.info["data_dir"])).rejection_reasons(
+        session, document
+    )
+    assert "penalty_source_identity_reimport_required" in reasons
+    assert session.query(ReviewDecision).count() == 0
+    assert session.query(AuthenticityDecisionLog).count() == 0
+    assert document.knowledge_index_status == KnowledgeIndexStatus.NOT_INDEXED.value
+
+
+def test_legacy_penalty_approved_with_revision_fails_before_decisions(session) -> None:
+    document = make_document(session, text="某保险公司\n罚款10万元\n销售误导\n修订事实一")
+    record = service(session).import_draft(session, complete_envelope(document))
+    make_penalty_reviewable(session, document)
+    review_service = ReviewService(Settings(data_dir=session.info["data_dir"]))
+    batch = review_service.export_batch(session, DataType.PENALTY.value, "jsonl")
+    item = session.query(ReviewBatchItem).filter_by(batch_id=batch.id).one()
+    provenance = dict(document.metadata_json["structured_draft_provenance"][0])
+    provenance.update(
+        {
+            "identity_version": "legacy_source_quote_v1",
+            "source_identity_status": "reimport_required",
+        }
+    )
+    document.metadata_json = {
+        **document.metadata_json,
+        "structured_draft_provenance": [provenance],
+    }
+    current_row = review_service._document_review_row(
+        session,
+        document,
+        batch.id,
+        item.id,
+    )
+    item.payload_hash = payload_hash(current_row)
+    session.commit()
+    start = (document.raw_text or "").index("修订事实一")
+    corrections = {
+        "records": [
+            {
+                "structured_record_id": record.id,
+                "fields": {"authority": "修订事实一"},
+                "field_evidence": {
+                    "authority": [
+                        {
+                            "quote": "修订事实一",
+                            "page_number": 1,
+                            "start_offset": start,
+                            "end_offset": start + len("修订事实一"),
+                            "mode": "verbatim",
+                        }
+                    ]
+                },
+            }
+        ]
+    }
+
+    with pytest.raises(
+        ReviewDecisionError,
+        match="penalty_source_identity_reimport_required",
+    ):
+        review_service.apply_decision(
+            session,
+            penalty_review_payload(current_row, corrections),
+            batch.id,
+        )
+
+    assert record.authority is None
+    assert session.query(ReviewDecision).count() == 0
+    assert session.query(AuthenticityDecisionLog).count() == 0
+    assert item.decision_id is None
+
+
 def test_same_fragments_ignore_index_and_locator_and_duplicate_is_rejected(session) -> None:
     document = make_document(session, text="某保险公司\n罚款10万元\n销售误导")
     first = complete_envelope(document, index=1)
@@ -1496,6 +1690,8 @@ def test_penalty_identity_provenance_is_saved_and_bound_to_portable_key(session)
     provenance = document.metadata_json["structured_draft_provenance"][0]
 
     assert provenance["structured_record_id"] == record.id
+    assert "identity_version" not in provenance
+    assert "source_identity_status" not in provenance
     assert len(provenance["source_entry_fragments"]) == 3
     assert provenance["source_entry_content_sha256"] == source_entry_content_sha256(
         build_penalty_identity_material(
