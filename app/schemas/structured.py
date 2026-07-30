@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, model_validator
 
 from app.models.enums import (
     DataType,
@@ -49,6 +49,8 @@ class RegulationDraft(StrictDraft):
 
 
 class PenaltyDraft(StrictDraft):
+    source_entry_index: int = Field(gt=0)
+    source_entry_fingerprint: StrictStr = Field(pattern=r"^[0-9a-f]{64}$")
     punished_entity: StrictStr | None = None
     authority: StrictStr | None = None
     document_number: StrictStr | None = None
@@ -66,6 +68,18 @@ class PenaltyDraft(StrictDraft):
             raise ValueError("disclosed original wording must be provided")
         if not self.original_sales_wording_disclosed and self.original_sales_wording:
             raise ValueError("undisclosed original wording must be empty")
+        return self
+
+
+class SourceEntryFragment(StrictDraft):
+    quote: StrictStr = Field(min_length=1)
+    start_offset: StrictInt = Field(ge=0)
+    end_offset: StrictInt = Field(gt=0)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "SourceEntryFragment":
+        if self.end_offset <= self.start_offset:
+            raise ValueError("penalty_source_entry_fragment_invalid")
         return self
 
 
@@ -119,6 +133,15 @@ class StructuredDraftEnvelope(StrictDraft):
     field_evidence: dict[str, list[FieldEvidenceItem]] | None = None
     draft_generation_method: StrictStr | None = Field(default=None, min_length=1)
     draft_generation_version: StrictStr | None = Field(default=None, min_length=1)
+    source_entry_locator: dict[str, Any] | None = None
+    source_entry_fragments: list[SourceEntryFragment] | None = Field(
+        default=None,
+        min_length=1,
+    )
+    source_entry_content_sha256: StrictStr | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
 
     @model_validator(mode="after")
     def validate_generation_provenance(self) -> "StructuredDraftEnvelope":
@@ -131,6 +154,16 @@ class StructuredDraftEnvelope(StrictDraft):
             value is not None for value in provenance
         ):
             raise ValueError("draft generation provenance must be complete")
+        entry_identity = (
+            self.source_entry_locator,
+            self.source_entry_fragments,
+            self.source_entry_content_sha256,
+        )
+        if self.record_type == DataType.PENALTY:
+            if not all(value is not None for value in entry_identity):
+                raise ValueError("penalty source entry identity must be complete")
+        elif any(value is not None for value in entry_identity):
+            raise ValueError("source entry identity is only valid for penalty drafts")
         return self
 
 

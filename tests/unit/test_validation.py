@@ -16,6 +16,8 @@ from app.services.validation import (
 def test_penalty_original_wording_cannot_be_invented(session) -> None:
     penalty = Penalty(
         document_id=1,
+        source_entry_index=1,
+        source_entry_fingerprint="3" * 64,
         illegal_facts="演示违法事实",
         original_sales_wording_disclosed=False,
         original_sales_wording="不得补写的话术",

@@ -94,7 +94,12 @@ def build_canonical_review_payload_v2(review_row: dict[str, Any]) -> dict[str, A
             content = _canonical_record_content(raw_record)
             key = portable_record_key(raw_sha256, record_type, raw_record)
             records.append({"portable_record_key": key, **content})
-    records.sort(key=lambda value: value["portable_record_key"])
+    records.sort(
+        key=lambda value: (
+            (value["business_fields"].get("source_entry_index") if record_type == "penalty" else 0),
+            value["portable_record_key"],
+        )
+    )
 
     occurrences = [
         {
@@ -196,7 +201,7 @@ def _canonical_evidence(value: Any) -> dict[str, list[dict[str, Any]]]:
 def _canonical_provenance(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
-    return {
+    result = {
         key: _canonical_value(value.get(key))
         for key in (
             "pilot_id",
@@ -204,6 +209,14 @@ def _canonical_provenance(value: Any) -> dict[str, Any] | None:
             "draft_generation_version",
         )
     }
+    for key in (
+        "source_entry_locator",
+        "source_entry_fragments",
+        "source_entry_content_sha256",
+    ):
+        if key in value:
+            result[key] = _canonical_value(value.get(key))
+    return result
 
 
 def _canonical_value(value: Any) -> Any:

@@ -12,7 +12,7 @@ from app.core.exceptions import (
     ParsedArtifactIntegrityError,
     RawArtifactIntegrityError,
 )
-from app.models import RegulatoryCase, SourceDocument
+from app.models import Penalty, RegulatoryCase, SourceDocument
 from app.models.enums import (
     APPROVABLE_STATUSES,
     AuthenticityType,
@@ -24,6 +24,7 @@ from app.repositories import DocumentRepository
 from app.services.field_evidence import EVIDENCE_FIELDS, FieldEvidenceService
 from app.services.integrity import RawArtifactIntegrityService
 from app.services.parsed_artifacts import ParsedArtifactIntegrityService
+from app.services.penalty_identity import PenaltySourceIdentityService
 from app.services.state_machine import StateMachineService
 
 
@@ -103,6 +104,19 @@ class KnowledgeIndexService:
                     reasons.append("sealed_external_test_not_indexable")
                 elif record.case_usage != RegulatoryCaseUsage.RETRIEVAL_ONLY.value:
                     reasons.append("case_usage_not_indexable")
+            if isinstance(record, Penalty):
+                try:
+                    PenaltySourceIdentityService(self.settings).validate(
+                        session,
+                        document,
+                        record,
+                    )
+                except ValueError as exc:
+                    reasons.append(
+                        "penalty_source_identity_reimport_required"
+                        if str(exc) == "penalty_source_identity_reimport_required"
+                        else "penalty_source_identity_consistency_failed"
+                    )
             if record.final_review_status != document.final_review_status:
                 reasons.append("structured_status_mismatch")
             quote = getattr(record, "source_quote", None)

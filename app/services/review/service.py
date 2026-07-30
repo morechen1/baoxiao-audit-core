@@ -26,6 +26,7 @@ from app.models import (
     DataSource,
     DocumentOccurrence,
     EvaluationSample,
+    Penalty,
     PilotCollectionItem,
     RegulatoryCase,
     ReviewBatch,
@@ -60,6 +61,7 @@ from app.services.field_evidence import EVIDENCE_FIELDS, FieldEvidenceService
 from app.services.integrity import RawArtifactIntegrityService
 from app.services.knowledge import KnowledgeIndexService
 from app.services.parsed_artifacts import ParsedArtifactIntegrityService
+from app.services.penalty_identity import PenaltySourceIdentityService
 from app.services.review_payload import (
     REVIEW_PAYLOAD_SCHEMA_VERSION,
     canonical_portable_source_url,
@@ -225,6 +227,15 @@ class ReviewService:
                 RawArtifactIntegrityService(self.settings).verify(document)
                 ParsedArtifactIntegrityService(self.settings).verify(document, session=session)
                 for structured_record in StateMachineService.structured_records(session, document):
+                    if isinstance(structured_record, Penalty):
+                        try:
+                            PenaltySourceIdentityService(self.settings).validate(
+                                session,
+                                document,
+                                structured_record,
+                            )
+                        except ValueError as exc:
+                            raise ReviewDecisionError(str(exc)) from exc
                     try:
                         FieldEvidenceService(self.settings).validate(
                             session,
@@ -600,6 +611,16 @@ class ReviewService:
         records = StateMachineService.structured_records(session, document)
         if not records:
             raise ReviewDecisionError("Structured record is missing")
+        for record in records:
+            if isinstance(record, Penalty):
+                try:
+                    PenaltySourceIdentityService(self.settings).validate(
+                        session,
+                        document,
+                        record,
+                    )
+                except ValueError as exc:
+                    raise ReviewDecisionError(str(exc)) from exc
         records_by_id = {record.id: record for record in records}
         portable_records: dict[str, list[Any]] = {}
         for exported_record in current_payload.get("parsed_fields", {}).get("records", []):
@@ -662,6 +683,17 @@ class ReviewService:
                 )
             except (PydanticValidationError, FieldEvidenceError) as exc:
                 raise ReviewDecisionError("invalid_correction_value") from exc
+            if isinstance(target, Penalty):
+                try:
+                    PenaltySourceIdentityService(self.settings).validate(
+                        session,
+                        document,
+                        target,
+                        candidate_fields=validated,
+                        candidate_evidence=validated_evidence,
+                    )
+                except ValueError as exc:
+                    raise ReviewDecisionError(str(exc)) from exc
             validated_updates.append(
                 (
                     target,
@@ -1006,6 +1038,9 @@ class ReviewService:
                     "pilot_id",
                     "draft_generation_method",
                     "draft_generation_version",
+                    "source_entry_locator",
+                    "source_entry_fragments",
+                    "source_entry_content_sha256",
                 }
             }
             for item in raw_provenance
@@ -1031,6 +1066,16 @@ class ReviewService:
                 parsed_record,
             )
             parsed_records.append(parsed_record)
+        parsed_records.sort(
+            key=lambda value: (
+                (
+                    value.get("source_entry_index", 0)
+                    if document.data_type == DataType.PENALTY.value
+                    else 0
+                ),
+                value["portable_record_key"],
+            )
+        )
         return {
             "review_payload_schema_version": REVIEW_PAYLOAD_SCHEMA_VERSION,
             "batch_id": batch_id,

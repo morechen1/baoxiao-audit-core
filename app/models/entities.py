@@ -221,7 +221,24 @@ class Regulation(Base):
 class Penalty(Base):
     __tablename__ = "penalties"
     __table_args__ = (
-        UniqueConstraint("document_id", name="uq_penalties_document_id"),
+        UniqueConstraint(
+            "document_id",
+            "source_entry_index",
+            name="uq_penalties_document_entry_index",
+        ),
+        UniqueConstraint(
+            "document_id",
+            "source_entry_fingerprint",
+            name="uq_penalties_document_entry_fingerprint",
+        ),
+        CheckConstraint(
+            "source_entry_index > 0",
+            name="ck_penalties_source_entry_index_positive",
+        ),
+        CheckConstraint(
+            "length(source_entry_fingerprint) = 64",
+            name="ck_penalties_source_entry_fingerprint_length",
+        ),
         CheckConstraint(
             f"final_review_status IN ({sql_values(REVIEW_STATUS_VALUES)})",
             name="ck_penalties_review_status",
@@ -240,6 +257,9 @@ class Penalty(Base):
     document_id: Mapped[int] = mapped_column(
         ForeignKey("source_documents.id", ondelete="CASCADE"), index=True
     )
+    source_entry_index: Mapped[int] = mapped_column()
+    source_entry_fingerprint: Mapped[str] = mapped_column(String(64))
+    duplicate_candidate: Mapped[bool] = mapped_column(Boolean, default=False)
     punished_entity: Mapped[str | None] = mapped_column(String(500))
     authority: Mapped[str | None] = mapped_column(String(255))
     document_number: Mapped[str | None] = mapped_column(String(255))

@@ -71,6 +71,9 @@ EVIDENCE_FIELDS: dict[str, frozenset[str]] = {
 }
 
 HAN_ORGANIZATION_NAME_TRANSFORMATION = "collapse_unicode_whitespace_for_han_organization_name_v1"
+PENALTY_DOCUMENT_NUMBER_TRANSFORMATION = (
+    "collapse_unicode_whitespace_for_penalty_document_number_v1"
+)
 _HAN_ORGANIZATION_MIN_LENGTH = 4
 _HAN_ORGANIZATION_MAX_LENGTH = 64
 _HAN_ORGANIZATION_QUOTE_MAX_LENGTH = 128
@@ -187,6 +190,12 @@ class FieldEvidenceService:
             item.mode != "normalized"
             or document.data_type != DataType.REGULATORY_CASE.value
             or field_name != "publisher"
+        ):
+            raise FieldEvidenceError("field_not_supported_by_evidence")
+        if item.transformation_note == PENALTY_DOCUMENT_NUMBER_TRANSFORMATION and (
+            item.mode != "normalized"
+            or document.data_type != DataType.PENALTY.value
+            or field_name != "document_number"
         ):
             raise FieldEvidenceError("field_not_supported_by_evidence")
         value = self._string_value(field_value)
@@ -310,6 +319,8 @@ class FieldEvidenceService:
             value = cls._normalize_split_chinese_date(value)
         elif normalized_note == HAN_ORGANIZATION_NAME_TRANSFORMATION:
             value = cls._normalize_han_organization_name(value)
+        elif normalized_note == PENALTY_DOCUMENT_NUMBER_TRANSFORMATION:
+            value = cls._normalize_penalty_document_number(value)
         elif normalized_note in {"列表拆分与合并", "list_normalized"}:
             value = ",".join(
                 part.strip() for part in re.split(r"[,，;；、]", value) if part.strip()
@@ -354,6 +365,26 @@ class FieldEvidenceService:
         if not (
             _HAN_ORGANIZATION_MIN_LENGTH <= len(collapsed) <= _HAN_ORGANIZATION_MAX_LENGTH
         ) or any(not cls._is_han_character(character) for character in collapsed):
+            raise FieldEvidenceError("field_not_supported_by_evidence")
+        return collapsed
+
+    @classmethod
+    def _normalize_penalty_document_number(cls, value: str) -> str:
+        if (
+            len(value) > 128
+            or not any(character.isspace() for character in value)
+            or any(
+                not character.isspace()
+                and not cls._is_han_character(character)
+                and character not in "0123456789〔〕"
+                for character in value
+            )
+        ):
+            raise FieldEvidenceError("field_not_supported_by_evidence")
+        collapsed = "".join(character for character in value if not character.isspace())
+        if not re.fullmatch(
+            r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]{2,32}〔[0-9]{4}〕[0-9]{1,8}号", collapsed
+        ):
             raise FieldEvidenceError("field_not_supported_by_evidence")
         return collapsed
 

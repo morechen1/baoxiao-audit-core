@@ -11,6 +11,7 @@ from app.repositories import DocumentRepository
 from app.services.field_evidence import EVIDENCE_FIELDS, FieldEvidenceService
 from app.services.integrity import RawArtifactIntegrityService
 from app.services.parsed_artifacts import ParsedArtifactIntegrityService
+from app.services.penalty_identity import PenaltySourceIdentityService
 from app.services.validation.validators import (
     AuthenticityValidator,
     DateValidator,
@@ -61,7 +62,9 @@ class ValidationService:
         }
         document.metadata_json = metadata
         codes = {issue.code for issue in result.issues}
-        if "summary_evidence_requires_expert_review" in codes:
+        if "summary_evidence_requires_expert_review" in codes or (
+            document.data_type == DataType.PENALTY.value and result.valid
+        ):
             status = ReviewStatus.REQUIRES_EXPERT_REVIEW.value
         else:
             status = (
@@ -138,6 +141,26 @@ class ValidationService:
                         "Structured fields require valid immutable field evidence",
                     )
                 )
+            if isinstance(record, Penalty):
+                try:
+                    PenaltySourceIdentityService(self.settings).validate(
+                        session,
+                        document,
+                        record,
+                    )
+                except ValueError as exc:
+                    code = (
+                        "penalty_source_identity_reimport_required"
+                        if str(exc) == "penalty_source_identity_reimport_required"
+                        else "penalty_source_identity_consistency_failed"
+                    )
+                    issues.append(
+                        ValidationIssue(
+                            "PenaltySourceIdentityValidator",
+                            code,
+                            "Penalty source identity must match immutable draft provenance",
+                        )
+                    )
         return ValidationResult(valid=not issues, issues=issues)
 
     def _document_issues(self, session: Session, document: SourceDocument) -> list[ValidationIssue]:

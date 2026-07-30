@@ -39,6 +39,12 @@ from app.services.field_evidence import (
 from app.services.knowledge import KnowledgeIndexService
 from app.services.parsed_artifacts import ParsedArtifactService
 from app.services.parsing.base import ParsedDocument, ParsedPage
+from app.services.penalty_entries import (
+    build_penalty_identity_material,
+    build_penalty_source_entry_fragments,
+    penalty_source_entry_fingerprint,
+    source_entry_content_sha256,
+)
 from app.services.review import ReviewService
 from app.services.review.service import payload_hash
 
@@ -89,6 +95,9 @@ def setup_penalty(session):
     session.flush()
     penalty = Penalty(
         document_id=document.id,
+        source_entry_index=1,
+        source_entry_fingerprint="1" * 64,
+        punished_entity="演示违法事实",
         illegal_facts="演示违法事实",
         original_sales_wording_disclosed=False,
         original_sales_wording=None,
@@ -124,6 +133,45 @@ def materialize_documents(session, data_type: str) -> ReviewService:
         )
         for record in document_records(session, document):
             record.field_evidence_json = evidence_for_record(document, record)
+            if isinstance(record, Penalty):
+                identity_fields = {
+                    "punished_entity": record.punished_entity,
+                    "penalty_result": record.penalty_result,
+                    "illegal_facts": record.illegal_facts,
+                    "document_number": record.document_number,
+                }
+                fragments = build_penalty_source_entry_fragments(
+                    identity_fields,
+                    record.field_evidence_json,
+                )
+                content_sha256 = source_entry_content_sha256(
+                    build_penalty_identity_material(
+                        identity_fields,
+                        record.field_evidence_json,
+                    )
+                )
+                record.source_entry_fingerprint = penalty_source_entry_fingerprint(
+                    raw_artifact_sha256=document.sha256,
+                    source_entry_content_sha256=content_sha256,
+                )
+                document.metadata_json = {
+                    **document.metadata_json,
+                    "structured_draft_provenance": [
+                        {
+                            "structured_record_id": record.id,
+                            "record_type": DataType.PENALTY.value,
+                            "pilot_id": None,
+                            "draft_generation_method": None,
+                            "draft_generation_version": None,
+                            "source_entry_locator": {
+                                "table_index": 1,
+                                "logical_row": record.source_entry_index,
+                            },
+                            "source_entry_fragments": fragments,
+                            "source_entry_content_sha256": content_sha256,
+                        }
+                    ],
+                }
     session.commit()
     return ReviewService(Settings(database_url="sqlite://", data_dir=data_dir))
 

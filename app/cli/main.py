@@ -37,6 +37,12 @@ from app.services.collection import (
 )
 from app.services.knowledge import KnowledgeIndexService
 from app.services.parsing import ParsingService
+from app.services.penalty_entries import (
+    build_penalty_identity_material,
+    build_penalty_source_entry_fragments,
+    penalty_source_entry_fingerprint,
+    source_entry_content_sha256,
+)
 from app.services.pilot.reporting import PilotReportService
 from app.services.pilot.service import (
     PilotConfigurationError,
@@ -557,16 +563,67 @@ def seed() -> None:
             )
         penalty_doc = documents[DataType.PENALTY.value]
         if not session.scalar(select(Penalty).where(Penalty.document_id == penalty_doc.id)):
-            session.add(
-                Penalty(
-                    document_id=penalty_doc.id,
-                    illegal_facts="虚构情景：演示材料信息披露不完整。",
-                    original_sales_wording_disclosed=False,
-                    original_sales_wording=None,
-                    source_quote="本演示处罚事实不对应任何真实机构或个人",
-                    final_review_status=ReviewStatus.PARSED.value,
-                )
+            punished_entity = "本演示处罚事实不对应任何真实机构或个人"
+            illegal_facts = "虚构情景：演示材料信息披露不完整，仅用于验证字段校验。"
+            penalty_fields = {
+                "punished_entity": punished_entity,
+                "illegal_facts": illegal_facts,
+            }
+            penalty_evidence = {}
+            for field_name, quote in penalty_fields.items():
+                start = (penalty_doc.raw_text or "").index(quote)
+                penalty_evidence[field_name] = [
+                    {
+                        "quote": quote,
+                        "page_number": 1,
+                        "start_offset": start,
+                        "end_offset": start + len(quote),
+                        "mode": "verbatim",
+                    }
+                ]
+            identity_material = build_penalty_identity_material(
+                penalty_fields,
+                penalty_evidence,
             )
+            fragments = build_penalty_source_entry_fragments(
+                penalty_fields,
+                penalty_evidence,
+            )
+            content_sha256 = source_entry_content_sha256(identity_material)
+            penalty = Penalty(
+                document_id=penalty_doc.id,
+                source_entry_index=1,
+                source_entry_fingerprint=penalty_source_entry_fingerprint(
+                    raw_artifact_sha256=penalty_doc.sha256,
+                    source_entry_content_sha256=content_sha256,
+                ),
+                punished_entity=punished_entity,
+                illegal_facts=illegal_facts,
+                original_sales_wording_disclosed=False,
+                original_sales_wording=None,
+                source_quote=punished_entity,
+                field_evidence_json=penalty_evidence,
+                final_review_status=ReviewStatus.PARSED.value,
+            )
+            session.add(penalty)
+            session.flush()
+            metadata = dict(penalty_doc.metadata_json)
+            metadata["structured_draft_provenance"] = [
+                {
+                    "structured_record_id": penalty.id,
+                    "record_type": DataType.PENALTY.value,
+                    "pilot_id": None,
+                    "draft_generation_method": None,
+                    "draft_generation_version": None,
+                    "source_entry_locator": {
+                        "table_index": 1,
+                        "logical_row": 1,
+                    },
+                    "source_entry_fragments": fragments,
+                    "source_entry_content_sha256": content_sha256,
+                }
+            ]
+            penalty_doc.metadata_json = metadata
         product_doc = documents[DataType.PRODUCT_DOCUMENT.value]
         if not session.scalar(
             select(ProductDocument).where(ProductDocument.document_id == product_doc.id)

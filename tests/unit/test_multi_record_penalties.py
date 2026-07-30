@@ -1,0 +1,1717 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+from sqlalchemy.exc import IntegrityError
+
+from app.core.config import Settings
+from app.core.exceptions import ReviewDecisionError, StructuredRecordError
+from app.models import (
+    AuthenticityDecisionLog,
+    Penalty,
+    ReviewBatch,
+    ReviewBatchItem,
+    ReviewDecision,
+    SourceDocument,
+    StructuredDraftRevision,
+)
+from app.models.enums import (
+    AuthenticityType,
+    DataType,
+    KnowledgeIndexStatus,
+    ReviewStatus,
+)
+from app.schemas.structured import (
+    StructuredDraftEnvelope,
+    StructuredDraftRevisionEnvelope,
+)
+from app.services.field_evidence import PENALTY_DOCUMENT_NUMBER_TRANSFORMATION
+from app.services.knowledge import KnowledgeIndexService
+from app.services.parsed_artifacts import ParsedArtifactService
+from app.services.parsing.base import ParsedDocument, ParsedPage
+from app.services.penalty_entries import (
+    build_penalty_identity_material,
+    build_penalty_source_entry_fragments,
+    canonical_source_entry_fragments,
+    penalty_source_entry_fingerprint,
+    source_entry_content_sha256,
+    validate_penalty_identity_evidence_exact,
+)
+from app.services.penalty_identity import PenaltySourceIdentityService
+from app.services.review import ReviewService
+from app.services.review.service import payload_hash
+from app.services.review_payload import portable_record_key
+from app.services.structured_records import StructuredRecordService
+from app.services.structured_revisions import StructuredDraftRevisionService
+from app.services.validation import ValidationService
+from migrations.versions import b9c8d7e6f5a4_support_multi_record_penalties as migration
+
+
+def make_document(
+    session,
+    text: str = "违法事实一\n违法事实二\n修订事实一",
+    *,
+    source_url: str = "https://example.test/penalty",
+    nfra_doc_id: str | None = None,
+    parsed_metadata: dict[str, object] | None = None,
+) -> SourceDocument:
+    data_dir = session.info["data_dir"]
+    raw_path = data_dir / "raw" / f"{hashlib.sha256(source_url.encode()).hexdigest()}.json"
+    raw_path.parent.mkdir(parents=True, exist_ok=True)
+    raw_path.write_text(text, encoding="utf-8")
+    document = SourceDocument(
+        data_type=DataType.PENALTY.value,
+        source_url=source_url,
+        raw_file_path=str(raw_path),
+        raw_text=text,
+        sha256=hashlib.sha256(raw_path.read_bytes()).hexdigest(),
+        authenticity_type=AuthenticityType.PENDING_VERIFICATION.value,
+        parse_status="parsed",
+        final_review_status=ReviewStatus.PARSED.value,
+    )
+    session.add(document)
+    session.flush()
+    ParsedArtifactService(Settings(data_dir=data_dir)).persist(
+        session,
+        document,
+        ParsedDocument(
+            title="处罚测试",
+            plain_text=text,
+            pages=[ParsedPage(page_number=1, text=text)],
+            metadata=(
+                parsed_metadata
+                if parsed_metadata is not None
+                else (
+                    {"nfra": {"doc_id": nfra_doc_id}, "source_format": "nfra_public_json"}
+                    if nfra_doc_id
+                    else {}
+                )
+            ),
+        ),
+        parser_name="TestParser",
+    )
+    session.commit()
+    return document
+
+
+def envelope(
+    document: SourceDocument,
+    index: int,
+    text: str,
+    *,
+    locator: dict[str, object] | None = None,
+) -> StructuredDraftEnvelope:
+    stable_locator = locator or {"table_index": 1, "logical_row": index}
+    start = (document.raw_text or "").index(text)
+    fields = {
+        "source_entry_index": index,
+        "punished_entity": text,
+        "illegal_facts": text,
+        "original_sales_wording_disclosed": False,
+        "source_quote": text,
+    }
+    evidence_item = {
+        "quote": text,
+        "page_number": 1,
+        "start_offset": start,
+        "end_offset": start + len(text),
+        "mode": "verbatim",
+    }
+    field_evidence = {
+        "punished_entity": [evidence_item],
+        "illegal_facts": [evidence_item],
+    }
+    fragments = build_penalty_source_entry_fragments(fields, field_evidence)
+    content_sha256 = source_entry_content_sha256(
+        build_penalty_identity_material(fields, field_evidence)
+    )
+    fingerprint = penalty_source_entry_fingerprint(
+        raw_artifact_sha256=document.sha256,
+        source_entry_content_sha256=content_sha256,
+    )
+    return StructuredDraftEnvelope(
+        document_id=document.id,
+        record_type=DataType.PENALTY,
+        source_entry_locator=stable_locator,
+        source_entry_fragments=fragments,
+        source_entry_content_sha256=content_sha256,
+        fields={**fields, "source_entry_fingerprint": fingerprint},
+        field_evidence=field_evidence,
+    )
+
+
+def service(session) -> StructuredRecordService:
+    return StructuredRecordService(Settings(data_dir=session.info["data_dir"]))
+
+
+def complete_envelope(
+    document: SourceDocument,
+    *,
+    index: int = 1,
+    locator: dict[str, object] | None = None,
+) -> StructuredDraftEnvelope:
+    entity = "某保险公司"
+    result = "罚款10万元"
+    fact = "销售误导"
+    evidence = {}
+    for field_name, quote in (
+        ("punished_entity", entity),
+        ("penalty_result", result),
+    ):
+        start = (document.raw_text or "").index(quote)
+        evidence[field_name] = [
+            {
+                "quote": quote,
+                "page_number": 1,
+                "start_offset": start,
+                "end_offset": start + len(quote),
+                "mode": "verbatim",
+            }
+        ]
+    fact_start = (document.raw_text or "").index(fact)
+    evidence["illegal_facts"] = [
+        {
+            "quote": fact,
+            "page_number": 1,
+            "start_offset": fact_start,
+            "end_offset": fact_start + len(fact),
+            "mode": "verbatim",
+        }
+    ]
+    fields = {
+        "source_entry_index": index,
+        "punished_entity": entity,
+        "illegal_facts": fact,
+        "penalty_result": result,
+        "original_sales_wording_disclosed": False,
+        "source_quote": fact,
+    }
+    fragments = build_penalty_source_entry_fragments(fields, evidence)
+    content_sha256 = source_entry_content_sha256(build_penalty_identity_material(fields, evidence))
+    return StructuredDraftEnvelope(
+        document_id=document.id,
+        record_type=DataType.PENALTY,
+        source_entry_locator=locator or {"table_index": 1, "logical_row": index},
+        source_entry_fragments=fragments,
+        source_entry_content_sha256=content_sha256,
+        fields={
+            **fields,
+            "source_entry_fingerprint": penalty_source_entry_fingerprint(
+                raw_artifact_sha256=document.sha256,
+                source_entry_content_sha256=content_sha256,
+            ),
+        },
+        field_evidence=evidence,
+    )
+
+
+def document_number_envelope(document: SourceDocument) -> StructuredDraftEnvelope:
+    candidate = complete_envelope(document).model_dump(mode="json")
+    quote = "乌金罚决字\n〔2025〕\n9\n号"
+    start = (document.raw_text or "").index(quote)
+    candidate["fields"]["document_number"] = quote
+    candidate["field_evidence"]["document_number"] = [
+        {
+            "quote": quote,
+            "page_number": 1,
+            "start_offset": start,
+            "end_offset": start + len(quote),
+            "mode": "verbatim",
+        }
+    ]
+    material = build_penalty_identity_material(
+        candidate["fields"],
+        candidate["field_evidence"],
+    )
+    fragments = build_penalty_source_entry_fragments(
+        candidate["fields"],
+        candidate["field_evidence"],
+    )
+    content_sha256 = source_entry_content_sha256(material)
+    candidate["source_entry_fragments"] = fragments
+    candidate["source_entry_content_sha256"] = content_sha256
+    candidate["fields"]["source_entry_fingerprint"] = penalty_source_entry_fingerprint(
+        raw_artifact_sha256=document.sha256,
+        source_entry_content_sha256=content_sha256,
+    )
+    return StructuredDraftEnvelope.model_validate(candidate)
+
+
+def make_penalty_reviewable(session, document: SourceDocument) -> None:
+    document.final_review_status = ReviewStatus.REQUIRES_EXPERT_REVIEW.value
+    document.authenticity_type = AuthenticityType.VERIFIED_PUBLIC.value
+    document.metadata_json = {
+        **document.metadata_json,
+        "automatic_validation": {"valid": True, "issues": []},
+    }
+    for record in session.query(Penalty).filter_by(document_id=document.id):
+        record.final_review_status = ReviewStatus.REQUIRES_EXPERT_REVIEW.value
+    session.commit()
+
+
+def penalty_review_payload(
+    row: dict[str, object],
+    corrections: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "batch_id": row["batch_id"],
+        "batch_item_id": row["batch_item_id"],
+        "reviewed_payload_hash": payload_hash(row),
+        "review_payload_schema_version": row["review_payload_schema_version"],
+        "schema_version": "2.0",
+        "record_id": row["record_id"],
+        "record_type": row["record_type"],
+        "final_status": ReviewStatus.APPROVED_WITH_REVISION.value,
+        "field_reviews": {},
+        "corrections": corrections,
+        "evidence_quality": "A",
+        "review_comment": "处罚身份一致性测试",
+        "reviewer": "reviewer",
+    }
+
+
+def test_penalty_fingerprint_is_stable_and_has_fixed_serialization() -> None:
+    inputs = {
+        "raw_artifact_sha256": "a" * 64,
+        "source_entry_content_sha256": "b" * 64,
+    }
+
+    first = penalty_source_entry_fingerprint(**inputs)
+    second = penalty_source_entry_fingerprint(**inputs)
+
+    assert first == second
+    assert len(first) == 64
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [("raw_artifact_sha256", "c" * 64), ("source_entry_content_sha256", "d" * 64)],
+)
+def test_penalty_fingerprint_binds_every_material_input(
+    field: str,
+    replacement: object,
+) -> None:
+    inputs = {
+        "raw_artifact_sha256": "a" * 64,
+        "source_entry_content_sha256": "b" * 64,
+    }
+    baseline = penalty_source_entry_fingerprint(**inputs)
+
+    assert penalty_source_entry_fingerprint(**{**inputs, field: replacement}) != baseline
+
+
+def test_one_document_imports_multiple_penalties_with_distinct_identities(session) -> None:
+    document = make_document(session)
+
+    first = service(session).import_draft(session, envelope(document, 1, "违法事实一"))
+    second = service(session).import_draft(session, envelope(document, 2, "违法事实二"))
+
+    assert first.id != second.id
+    assert first.source_entry_index == 1
+    assert second.source_entry_index == 2
+    assert first.source_entry_fingerprint != second.source_entry_fingerprint
+    assert session.query(Penalty).filter_by(document_id=document.id).count() == 2
+
+
+def test_duplicate_entry_index_rolls_back_whole_jsonl_batch(session, tmp_path: Path) -> None:
+    document = make_document(session)
+    first = envelope(document, 1, "违法事实一")
+    duplicate = envelope(
+        document,
+        1,
+        "违法事实二",
+        locator={"table_index": 1, "logical_row": 2},
+    )
+    path = tmp_path / "duplicate-index.jsonl"
+    path.write_text(
+        "\n".join(
+            json.dumps(item.model_dump(mode="json"), ensure_ascii=False)
+            for item in (first, duplicate)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    imported, errors = service(session).import_jsonl(session, path)
+
+    assert imported == 0
+    assert "penalty_source_entry_duplicate" in errors[0]
+    assert session.query(Penalty).filter_by(document_id=document.id).count() == 0
+
+
+def test_fingerprint_mismatch_rolls_back_whole_jsonl_batch(session, tmp_path: Path) -> None:
+    document = make_document(session)
+    first = envelope(document, 1, "违法事实一")
+    invalid_payload = envelope(document, 2, "违法事实二").model_dump(mode="json")
+    invalid_payload["fields"]["source_entry_fingerprint"] = first.fields["source_entry_fingerprint"]
+    path = tmp_path / "duplicate-fingerprint.jsonl"
+    path.write_text(
+        "\n".join(
+            (
+                json.dumps(first.model_dump(mode="json"), ensure_ascii=False),
+                json.dumps(invalid_payload, ensure_ascii=False),
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    imported, errors = service(session).import_jsonl(session, path)
+
+    assert imported == 0
+    assert "penalty_source_entry_fingerprint_mismatch" in errors[0]
+    assert session.query(Penalty).filter_by(document_id=document.id).count() == 0
+
+
+def test_database_rejects_duplicate_index_and_fingerprint_per_document(session) -> None:
+    document = make_document(session)
+    first = service(session).import_draft(session, envelope(document, 1, "违法事实一"))
+    session.add(
+        Penalty(
+            document_id=document.id,
+            source_entry_index=1,
+            source_entry_fingerprint=first.source_entry_fingerprint,
+            illegal_facts="违法事实二",
+            original_sales_wording_disclosed=False,
+            source_quote="违法事实二",
+            final_review_status=ReviewStatus.PARSED.value,
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
+def test_review_rows_sort_penalties_by_entry_index_and_keys_are_distinct(session) -> None:
+    document = make_document(session)
+    record_two = service(session).import_draft(session, envelope(document, 2, "违法事实二"))
+    record_one = service(session).import_draft(session, envelope(document, 1, "违法事实一"))
+
+    row = ReviewService(Settings(data_dir=session.info["data_dir"]))._document_review_row(
+        session, document, 1, 1
+    )
+    records = row["parsed_fields"]["records"]
+
+    assert [record["source_entry_index"] for record in records] == [1, 2]
+    assert records[0]["structured_record_id"] == record_one.id
+    assert records[1]["structured_record_id"] == record_two.id
+    assert len({record["portable_record_key"] for record in records}) == 2
+
+
+def test_penalty_portable_key_is_stable_across_database_ids() -> None:
+    record = {
+        "structured_record_id": 10,
+        "source_entry_index": 3,
+        "source_entry_fingerprint": "b" * 64,
+        "illegal_facts": "违法事实",
+        "source_quote": "违法事实",
+        "field_evidence": {},
+        "draft_provenance": None,
+    }
+    changed = {**record, "structured_record_id": 999}
+
+    assert portable_record_key("a" * 64, "penalty", record) == portable_record_key(
+        "a" * 64,
+        "penalty",
+        changed,
+    )
+
+
+def test_revision_targets_only_one_penalty_record(session) -> None:
+    document = make_document(session)
+    first = service(session).import_draft(session, envelope(document, 1, "违法事实一"))
+    second = service(session).import_draft(session, envelope(document, 2, "违法事实二"))
+    start = (document.raw_text or "").index("修订事实一")
+    revision = StructuredDraftRevisionEnvelope(
+        document_id=document.id,
+        record_type=DataType.PENALTY,
+        structured_record_id=first.id,
+        fields={"authority": "修订事实一"},
+        field_evidence={
+            "authority": [
+                {
+                    "quote": "修订事实一",
+                    "page_number": 1,
+                    "start_offset": start,
+                    "end_offset": start + len("修订事实一"),
+                    "mode": "verbatim",
+                }
+            ]
+        },
+    )
+
+    StructuredDraftRevisionService(Settings(data_dir=session.info["data_dir"])).revise(
+        session, revision, reason="修正单条记录", actor="tester"
+    )
+
+    assert first.authority == "修订事实一"
+    assert second.illegal_facts == "违法事实二"
+    assert second.authority is None
+
+
+@pytest.mark.parametrize("field_name", ["punished_entity", "illegal_facts"])
+def test_pre_review_identity_field_cannot_rebind_to_another_entry(
+    session,
+    field_name: str,
+) -> None:
+    document = make_document(session)
+    first = service(session).import_draft(session, envelope(document, 1, "违法事实一"))
+    second = service(session).import_draft(session, envelope(document, 2, "违法事实二"))
+    start = (document.raw_text or "").index("违法事实二")
+    revision = StructuredDraftRevisionEnvelope(
+        document_id=document.id,
+        record_type=DataType.PENALTY,
+        structured_record_id=first.id,
+        fields={field_name: "违法事实二"},
+        field_evidence={
+            field_name: [
+                {
+                    "quote": "违法事实二",
+                    "page_number": 1,
+                    "start_offset": start,
+                    "end_offset": start + len("违法事实二"),
+                    "mode": "verbatim",
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(
+        StructuredRecordError,
+        match="penalty_source_identity_rebind_required",
+    ):
+        StructuredDraftRevisionService(Settings(data_dir=session.info["data_dir"])).revise(
+            session,
+            revision,
+            reason="不得换绑处罚条目",
+            actor="tester",
+        )
+
+    assert getattr(first, field_name) == "违法事实一"
+    assert second.punished_entity == "违法事实二"
+    assert second.illegal_facts == "违法事实二"
+    assert session.query(StructuredDraftRevision).count() == 0
+
+
+def test_review_correction_cannot_rebind_identity_and_rolls_back(session) -> None:
+    document = make_document(session)
+    first = service(session).import_draft(session, envelope(document, 1, "违法事实一"))
+    service(session).import_draft(session, envelope(document, 2, "违法事实二"))
+    make_penalty_reviewable(session, document)
+    review_service = ReviewService(Settings(data_dir=session.info["data_dir"]))
+    batch = review_service.export_batch(session, DataType.PENALTY.value, "jsonl")
+    row = json.loads(Path(batch.export_path).read_text(encoding="utf-8").splitlines()[0])
+    start = (document.raw_text or "").index("违法事实二")
+    corrections = {
+        "records": [
+            {
+                "structured_record_id": first.id,
+                "fields": {"punished_entity": "违法事实二"},
+                "field_evidence": {
+                    "punished_entity": [
+                        {
+                            "quote": "违法事实二",
+                            "page_number": 1,
+                            "start_offset": start,
+                            "end_offset": start + len("违法事实二"),
+                            "mode": "verbatim",
+                        }
+                    ]
+                },
+            }
+        ]
+    }
+
+    with pytest.raises(
+        ReviewDecisionError,
+        match="penalty_source_identity_rebind_required",
+    ):
+        review_service.apply_decision(
+            session,
+            penalty_review_payload(row, corrections),
+            batch.id,
+        )
+
+    assert first.punished_entity == "违法事实一"
+    assert document.final_review_status == ReviewStatus.REQUIRES_EXPERT_REVIEW.value
+    assert session.query(ReviewDecision).count() == 0
+    assert session.query(AuthenticityDecisionLog).count() == 0
+    assert session.query(ReviewBatchItem).filter_by(batch_id=batch.id).one().decision_id is None
+
+
+def test_review_correction_can_normalize_same_document_number_identity(session) -> None:
+    quote = "乌金罚决字\n〔2025〕\n9\n号"
+    document = make_document(
+        session,
+        text=f"某保险公司\n{quote}\n销售误导\n罚款10万元",
+    )
+    record = service(session).import_draft(session, document_number_envelope(document))
+    fingerprint_before = record.source_entry_fingerprint
+    provenance_before = json.loads(
+        json.dumps(document.metadata_json["structured_draft_provenance"][0])
+    )
+    make_penalty_reviewable(session, document)
+    review_service = ReviewService(Settings(data_dir=session.info["data_dir"]))
+    batch = review_service.export_batch(session, DataType.PENALTY.value, "jsonl")
+    row = json.loads(Path(batch.export_path).read_text(encoding="utf-8").splitlines()[0])
+    key_before = row["parsed_fields"]["records"][0]["portable_record_key"]
+    start = (document.raw_text or "").index(quote)
+    corrections = {
+        "records": [
+            {
+                "structured_record_id": record.id,
+                "fields": {"document_number": "乌金罚决字〔2025〕9号"},
+                "field_evidence": {
+                    "document_number": [
+                        {
+                            "quote": quote,
+                            "page_number": 1,
+                            "start_offset": start,
+                            "end_offset": start + len(quote),
+                            "mode": "normalized",
+                            "transformation_note": (PENALTY_DOCUMENT_NUMBER_TRANSFORMATION),
+                        }
+                    ]
+                },
+            }
+        ]
+    }
+
+    review_service.apply_decision(
+        session,
+        penalty_review_payload(row, corrections),
+        batch.id,
+    )
+
+    provenance_after = document.metadata_json["structured_draft_provenance"][0]
+    after_row = review_service._document_review_row(
+        session,
+        document,
+        batch.id,
+        int(row["batch_item_id"]),
+    )
+    assert record.document_number == "乌金罚决字〔2025〕9号"
+    assert record.source_entry_fingerprint == fingerprint_before
+    assert (
+        provenance_after["source_entry_content_sha256"]
+        == provenance_before["source_entry_content_sha256"]
+    )
+    assert provenance_after["source_entry_fragments"] == provenance_before["source_entry_fragments"]
+    assert after_row["parsed_fields"]["records"][0]["portable_record_key"] != key_before
+
+
+def test_missing_penalty_identity_provenance_fails_validation(session) -> None:
+    document = make_document(session)
+    record = service(session).import_draft(session, envelope(document, 1, "违法事实一"))
+    document.metadata_json = {
+        **document.metadata_json,
+        "structured_draft_provenance": [],
+    }
+
+    result = ValidationService(Settings(data_dir=session.info["data_dir"])).evaluate_document(
+        session,
+        document,
+        [record],
+    )
+
+    assert result.valid is False
+    assert any(
+        issue.validator == "PenaltySourceIdentityValidator"
+        and issue.code == "penalty_source_identity_consistency_failed"
+        for issue in result.issues
+    )
+
+
+def test_ambiguous_penalty_identity_provenance_fails_closed(session) -> None:
+    document = make_document(session)
+    record = service(session).import_draft(session, envelope(document, 1, "违法事实一"))
+    provenance = document.metadata_json["structured_draft_provenance"][0]
+    document.metadata_json = {
+        **document.metadata_json,
+        "structured_draft_provenance": [provenance, dict(provenance)],
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="penalty_source_identity_provenance_ambiguous",
+    ):
+        PenaltySourceIdentityService(Settings(data_dir=session.info["data_dir"])).validate(
+            session,
+            document,
+            record,
+        )
+
+
+def test_direct_identity_field_tampering_is_detected_by_validation(session) -> None:
+    document = make_document(session)
+    record = service(session).import_draft(session, envelope(document, 1, "违法事实一"))
+    record.illegal_facts = "违法事实二"
+
+    result = ValidationService(Settings(data_dir=session.info["data_dir"])).evaluate_document(
+        session,
+        document,
+        [record],
+    )
+
+    assert result.valid is False
+    assert any(
+        issue.code == "penalty_source_identity_consistency_failed" for issue in result.issues
+    )
+
+
+def test_identity_tampering_blocks_review_export(session) -> None:
+    document = make_document(session)
+    record = service(session).import_draft(session, envelope(document, 1, "违法事实一"))
+    start = (document.raw_text or "").index("违法事实二")
+    record.punished_entity = "违法事实二"
+    record.field_evidence_json = {
+        **record.field_evidence_json,
+        "punished_entity": [
+            {
+                "quote": "违法事实二",
+                "page_number": 1,
+                "start_offset": start,
+                "end_offset": start + len("违法事实二"),
+                "mode": "verbatim",
+            }
+        ],
+    }
+    make_penalty_reviewable(session, document)
+
+    with pytest.raises(
+        ReviewDecisionError,
+        match="penalty_source_identity_consistency_failed",
+    ):
+        ReviewService(Settings(data_dir=session.info["data_dir"])).export_batch(
+            session,
+            DataType.PENALTY.value,
+            "jsonl",
+        )
+
+
+def test_identity_tampering_blocks_knowledge_index(session) -> None:
+    document = make_document(session)
+    record = service(session).import_draft(session, envelope(document, 1, "违法事实一"))
+    start = (document.raw_text or "").index("违法事实二")
+    record.illegal_facts = "违法事实二"
+    record.field_evidence_json = {
+        **record.field_evidence_json,
+        "illegal_facts": [
+            {
+                "quote": "违法事实二",
+                "page_number": 1,
+                "start_offset": start,
+                "end_offset": start + len("违法事实二"),
+                "mode": "verbatim",
+            }
+        ],
+    }
+    document.final_review_status = ReviewStatus.APPROVED.value
+    document.authenticity_type = AuthenticityType.VERIFIED_PUBLIC.value
+    document.metadata_json = {
+        **document.metadata_json,
+        "automatic_validation": {"valid": True, "issues": []},
+    }
+    record.final_review_status = ReviewStatus.APPROVED.value
+    session.commit()
+
+    summary = KnowledgeIndexService(Settings(data_dir=session.info["data_dir"])).index_approved(
+        session
+    )
+
+    assert "penalty_source_identity_consistency_failed" in summary.rejected[document.id]
+    assert document.knowledge_index_status == KnowledgeIndexStatus.NOT_INDEXED.value
+
+
+def test_revision_jsonl_identity_failure_rolls_back_all_records(
+    session,
+    tmp_path: Path,
+) -> None:
+    document = make_document(session)
+    first = service(session).import_draft(session, envelope(document, 1, "违法事实一"))
+    second = service(session).import_draft(session, envelope(document, 2, "违法事实二"))
+    authority_start = (document.raw_text or "").index("修订事实一")
+    second_start = (document.raw_text or "").index("违法事实一")
+    valid = StructuredDraftRevisionEnvelope(
+        document_id=document.id,
+        record_type=DataType.PENALTY,
+        structured_record_id=first.id,
+        fields={"authority": "修订事实一"},
+        field_evidence={
+            "authority": [
+                {
+                    "quote": "修订事实一",
+                    "page_number": 1,
+                    "start_offset": authority_start,
+                    "end_offset": authority_start + len("修订事实一"),
+                    "mode": "verbatim",
+                }
+            ]
+        },
+    )
+    invalid = StructuredDraftRevisionEnvelope(
+        document_id=document.id,
+        record_type=DataType.PENALTY,
+        structured_record_id=second.id,
+        fields={"illegal_facts": "违法事实一"},
+        field_evidence={
+            "illegal_facts": [
+                {
+                    "quote": "违法事实一",
+                    "page_number": 1,
+                    "start_offset": second_start,
+                    "end_offset": second_start + len("违法事实一"),
+                    "mode": "verbatim",
+                }
+            ]
+        },
+    )
+    path = tmp_path / "penalty-identity-revisions.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                valid.model_dump_json(),
+                invalid.model_dump_json(),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    revised, errors = StructuredDraftRevisionService(
+        Settings(data_dir=session.info["data_dir"])
+    ).import_jsonl(
+        session,
+        path,
+        reason="批量修订必须原子",
+        actor="tester",
+    )
+
+    assert revised == 0
+    assert "penalty_source_identity_rebind_required" in errors[0]
+    assert first.authority is None
+    assert second.illegal_facts == "违法事实二"
+    assert session.query(StructuredDraftRevision).count() == 0
+
+
+def test_cross_document_exact_duplicate_is_marked_but_not_deleted(session) -> None:
+    first_document = make_document(session, source_url="https://example.test/a")
+    second_document = make_document(
+        session,
+        text="违法事实一\n违法事实二\n修订事实一\n另一原件",
+        source_url="https://example.test/b",
+    )
+    first = service(session).import_draft(
+        session,
+        envelope(first_document, 1, "违法事实一"),
+    )
+    second = service(session).import_draft(
+        session,
+        envelope(second_document, 1, "违法事实一"),
+    )
+
+    assert first.duplicate_candidate is True
+    assert second.duplicate_candidate is True
+    assert session.query(Penalty).count() == 2
+
+
+def test_cross_document_high_similarity_is_only_marked_for_human_resolution(session) -> None:
+    first_text = "某保险销售人员在产品介绍过程中连续多次使用误导性宣传表述"
+    second_text = "某保险销售人员在产品介绍过程中连续多次使用误导性宣传措辞"
+    first_document = make_document(
+        session,
+        text=first_text,
+        source_url="https://example.test/similar-a",
+    )
+    second_document = make_document(
+        session,
+        text=second_text,
+        source_url="https://example.test/similar-b",
+    )
+    first = service(session).import_draft(
+        session,
+        envelope(first_document, 1, first_text),
+    )
+    second = service(session).import_draft(
+        session,
+        envelope(second_document, 1, second_text),
+    )
+
+    assert first.duplicate_candidate is True
+    assert second.duplicate_candidate is True
+    assert session.query(Penalty).count() == 2
+
+
+def test_penalty_validation_requires_expert_review_and_never_auto_indexes(session) -> None:
+    document = make_document(session)
+    service(session).import_draft(session, envelope(document, 1, "违法事实一"))
+
+    result = ValidationService(Settings(data_dir=session.info["data_dir"])).validate_document(
+        session, document
+    )
+
+    assert result.valid is True
+    assert document.final_review_status == ReviewStatus.REQUIRES_EXPERT_REVIEW.value
+    assert document.knowledge_index_status == KnowledgeIndexStatus.NOT_INDEXED.value
+
+
+def test_migration_downgrade_fails_closed_for_multi_record_document(monkeypatch) -> None:
+    class Result:
+        @staticmethod
+        def scalar_one_or_none() -> int:
+            return 42
+
+    class Connection:
+        @staticmethod
+        def execute(statement):
+            return Result()
+
+    monkeypatch.setattr(migration.op, "get_bind", lambda: Connection())
+
+    with pytest.raises(RuntimeError, match="cannot_downgrade_multi_record_penalties"):
+        migration.downgrade()
+
+
+def test_legacy_migration_fingerprint_is_deterministic() -> None:
+    first = migration._legacy_fingerprint("a" * 64, "不可变旧记录")
+    second = migration._legacy_fingerprint("a" * 64, "不可变旧记录")
+
+    assert first == second
+    assert len(first) == 64
+
+
+def test_legacy_migration_marks_exact_provenance_without_forging_locator() -> None:
+    metadata = {
+        "existing": {"preserved": True},
+        "structured_draft_provenance": [
+            {
+                "structured_record_id": 7,
+                "record_type": "penalty",
+                "pilot_id": "PEN-LEGACY",
+                "draft_generation_method": "legacy_import",
+                "draft_generation_version": "v0.8",
+            }
+        ],
+    }
+
+    marked = migration._mark_legacy_penalty_provenance(metadata, 7)
+    provenance = marked["structured_draft_provenance"][0]
+
+    assert marked["existing"] == {"preserved": True}
+    assert provenance["pilot_id"] == "PEN-LEGACY"
+    assert provenance["draft_generation_method"] == "legacy_import"
+    assert provenance["draft_generation_version"] == "v0.8"
+    assert provenance["identity_version"] == "legacy_source_quote_v1"
+    assert provenance["source_identity_status"] == "reimport_required"
+    assert "source_entry_locator" not in provenance
+    assert "source_entry_fragments" not in provenance
+    assert "source_entry_content_sha256" not in provenance
+
+
+@pytest.mark.parametrize(
+    "provenance",
+    [
+        [],
+        [
+            {"structured_record_id": 7, "record_type": "penalty"},
+            {"structured_record_id": 7, "record_type": "penalty"},
+        ],
+    ],
+)
+def test_legacy_migration_rejects_missing_or_ambiguous_provenance(
+    provenance: list[dict[str, object]],
+) -> None:
+    with pytest.raises(
+        RuntimeError,
+        match="cannot_backfill_legacy_penalty_identity_marker",
+    ):
+        migration._mark_legacy_penalty_provenance(
+            {"structured_draft_provenance": provenance},
+            7,
+        )
+
+
+def test_legacy_penalty_isolated_from_revision_validation_review_and_index(session) -> None:
+    document = make_document(session, text="某保险公司\n罚款10万元\n销售误导\n修订事实一")
+    record = service(session).import_draft(session, complete_envelope(document))
+    provenance = dict(document.metadata_json["structured_draft_provenance"][0])
+    provenance.update(
+        {
+            "identity_version": "legacy_source_quote_v1",
+            "source_identity_status": "reimport_required",
+        }
+    )
+    document.metadata_json = {
+        **document.metadata_json,
+        "structured_draft_provenance": [provenance],
+    }
+    session.commit()
+
+    validation = ValidationService(Settings(data_dir=session.info["data_dir"])).evaluate_document(
+        session,
+        document,
+        [record],
+    )
+    assert validation.valid is False
+    assert any(
+        issue.validator == "PenaltySourceIdentityValidator"
+        and issue.code == "penalty_source_identity_reimport_required"
+        for issue in validation.issues
+    )
+
+    start = (document.raw_text or "").index("修订事实一")
+    revision = StructuredDraftRevisionEnvelope(
+        document_id=document.id,
+        record_type=DataType.PENALTY,
+        structured_record_id=record.id,
+        fields={"authority": "修订事实一"},
+        field_evidence={
+            "authority": [
+                {
+                    "quote": "修订事实一",
+                    "page_number": 1,
+                    "start_offset": start,
+                    "end_offset": start + len("修订事实一"),
+                    "mode": "verbatim",
+                }
+            ]
+        },
+    )
+    with pytest.raises(
+        StructuredRecordError,
+        match="penalty_source_identity_reimport_required",
+    ):
+        StructuredDraftRevisionService(Settings(data_dir=session.info["data_dir"])).revise(
+            session,
+            revision,
+            reason="legacy身份不得普通修订",
+            actor="tester",
+        )
+
+    make_penalty_reviewable(session, document)
+    with pytest.raises(
+        ReviewDecisionError,
+        match="penalty_source_identity_reimport_required",
+    ):
+        ReviewService(Settings(data_dir=session.info["data_dir"])).export_batch(
+            session,
+            DataType.PENALTY.value,
+            "jsonl",
+        )
+    session.rollback()
+
+    document = session.get(SourceDocument, document.id)
+    assert document is not None
+    reasons = KnowledgeIndexService(Settings(data_dir=session.info["data_dir"])).rejection_reasons(
+        session, document
+    )
+    assert "penalty_source_identity_reimport_required" in reasons
+    assert session.query(ReviewDecision).count() == 0
+    assert session.query(AuthenticityDecisionLog).count() == 0
+    assert document.knowledge_index_status == KnowledgeIndexStatus.NOT_INDEXED.value
+
+
+def test_legacy_penalty_approved_with_revision_fails_before_decisions(session) -> None:
+    document = make_document(session, text="某保险公司\n罚款10万元\n销售误导\n修订事实一")
+    record = service(session).import_draft(session, complete_envelope(document))
+    make_penalty_reviewable(session, document)
+    review_service = ReviewService(Settings(data_dir=session.info["data_dir"]))
+    batch = review_service.export_batch(session, DataType.PENALTY.value, "jsonl")
+    item = session.query(ReviewBatchItem).filter_by(batch_id=batch.id).one()
+    provenance = dict(document.metadata_json["structured_draft_provenance"][0])
+    provenance.update(
+        {
+            "identity_version": "legacy_source_quote_v1",
+            "source_identity_status": "reimport_required",
+        }
+    )
+    document.metadata_json = {
+        **document.metadata_json,
+        "structured_draft_provenance": [provenance],
+    }
+    current_row = review_service._document_review_row(
+        session,
+        document,
+        batch.id,
+        item.id,
+    )
+    item.payload_hash = payload_hash(current_row)
+    session.commit()
+    start = (document.raw_text or "").index("修订事实一")
+    corrections = {
+        "records": [
+            {
+                "structured_record_id": record.id,
+                "fields": {"authority": "修订事实一"},
+                "field_evidence": {
+                    "authority": [
+                        {
+                            "quote": "修订事实一",
+                            "page_number": 1,
+                            "start_offset": start,
+                            "end_offset": start + len("修订事实一"),
+                            "mode": "verbatim",
+                        }
+                    ]
+                },
+            }
+        ]
+    }
+
+    with pytest.raises(
+        ReviewDecisionError,
+        match="penalty_source_identity_reimport_required",
+    ):
+        review_service.apply_decision(
+            session,
+            penalty_review_payload(current_row, corrections),
+            batch.id,
+        )
+
+    assert record.authority is None
+    assert session.query(ReviewDecision).count() == 0
+    assert session.query(AuthenticityDecisionLog).count() == 0
+    assert item.decision_id is None
+
+
+def test_same_fragments_ignore_index_and_locator_and_duplicate_is_rejected(session) -> None:
+    document = make_document(session, text="某保险公司\n罚款10万元\n销售误导")
+    first = complete_envelope(document, index=1)
+    second = complete_envelope(
+        document,
+        index=2,
+        locator={"table_index": 9, "numbered_entry": 7},
+    )
+
+    assert first.fields["source_entry_fingerprint"] == second.fields["source_entry_fingerprint"]
+    service(session).import_draft(session, first)
+    with pytest.raises(StructuredRecordError, match="penalty_source_entry_duplicate"):
+        service(session).import_draft(session, second)
+
+
+def test_exact_penalty_identity_quotes_import_successfully(session) -> None:
+    document = make_document(session, text="某保险公司\n罚款10万元\n销售误导")
+
+    record = service(session).import_draft(session, complete_envelope(document))
+
+    assert record.punished_entity == "某保险公司"
+    assert record.penalty_result == "罚款10万元"
+    assert record.illegal_facts == "销售误导"
+
+
+def test_invalid_source_fragment_offset_fails_closed(session) -> None:
+    document = make_document(session, text="某保险公司\n罚款10万元\n销售误导")
+    payload = complete_envelope(document).model_dump(mode="json")
+    fragments = payload["source_entry_fragments"]
+    fragments[0]["start_offset"] += 1
+    candidate = StructuredDraftEnvelope.model_validate(payload)
+
+    with pytest.raises(
+        StructuredRecordError,
+        match="penalty_source_entry_fragment_invalid",
+    ):
+        service(session).import_draft(session, candidate)
+
+
+def test_widened_identity_quote_is_rejected_and_cannot_create_second_fingerprint(
+    session,
+) -> None:
+    text = "某保险公司销售误导，被罚款10万元"
+    document = make_document(session, text=text)
+    first = complete_envelope(
+        document,
+        locator={"table_index": 1, "logical_row": 1},
+    )
+    service(session).import_draft(session, first)
+    payload = complete_envelope(
+        document,
+        index=2,
+        locator={"table_index": 1, "logical_row": 2},
+    ).model_dump(mode="json")
+    widened = "某保险公司销售误导"
+    payload["field_evidence"]["punished_entity"][0].update(
+        {"quote": widened, "start_offset": 0, "end_offset": len(widened)}
+    )
+    payload["source_entry_fragments"][0].update(
+        {"quote": widened, "start_offset": 0, "end_offset": len(widened)}
+    )
+
+    with pytest.raises(
+        StructuredRecordError,
+        match="penalty_source_identity_evidence_not_exact",
+    ):
+        service(session).import_draft(
+            session,
+            StructuredDraftEnvelope.model_validate(payload),
+        )
+    assert session.query(Penalty).filter_by(document_id=document.id).count() == 1
+
+
+@pytest.mark.parametrize(
+    "fragments",
+    [
+        [
+            {"quote": "甲乙丙", "start_offset": 0, "end_offset": 3},
+            {"quote": "丙丁", "start_offset": 2, "end_offset": 4},
+        ],
+        [
+            {"quote": "甲乙丙丁", "start_offset": 0, "end_offset": 4},
+            {"quote": "乙丙", "start_offset": 1, "end_offset": 3},
+        ],
+    ],
+)
+def test_overlapping_identity_fragments_fail_closed(fragments) -> None:
+    with pytest.raises(ValueError, match="penalty_source_entry_fragment_overlap"):
+        canonical_source_entry_fragments(fragments)
+
+
+def test_adjacent_and_duplicate_identity_fragments_are_canonicalized_by_offset() -> None:
+    shared = {"quote": "乙丙", "start_offset": 2, "end_offset": 4}
+    result = canonical_source_entry_fragments(
+        [
+            {"quote": "丁戊", "start_offset": 4, "end_offset": 6},
+            shared,
+            {"quote": "甲", "start_offset": 0, "end_offset": 1},
+            dict(shared),
+            {"quote": "乙", "start_offset": 1, "end_offset": 2},
+        ]
+    )
+
+    assert result == [
+        {"quote": "甲", "start_offset": 0, "end_offset": 1},
+        {"quote": "乙", "start_offset": 1, "end_offset": 2},
+        shared,
+        {"quote": "丁戊", "start_offset": 4, "end_offset": 6},
+    ]
+
+
+def test_identical_fragment_shared_by_identity_fields_is_deduplicated_and_imported(
+    session,
+) -> None:
+    document = make_document(session, text="同一原文片段")
+    candidate = envelope(document, 1, "同一原文片段")
+
+    assert [item.model_dump() for item in candidate.source_entry_fragments or []] == [
+        {
+            "quote": "同一原文片段",
+            "start_offset": 0,
+            "end_offset": len("同一原文片段"),
+        }
+    ]
+    assert service(session).import_draft(session, candidate).punished_entity == "同一原文片段"
+
+
+def test_controlled_normalized_identity_evidence_must_resolve_exactly() -> None:
+    validate_penalty_identity_evidence_exact(
+        "document_number",
+        "白金罚决字",
+        [
+            {
+                "quote": "白金罚决字  ",
+                "mode": "normalized",
+                "transformation_note": "whitespace_normalized",
+            }
+        ],
+    )
+
+    with pytest.raises(ValueError, match="penalty_source_identity_evidence_not_exact"):
+        validate_penalty_identity_evidence_exact(
+            "document_number",
+            "白金罚决字",
+            [
+                {
+                    "quote": "白金罚决字附加文字",
+                    "mode": "normalized",
+                    "transformation_note": "whitespace_normalized",
+                }
+            ],
+        )
+
+
+@pytest.mark.parametrize("missing_field", ["punished_entity", "penalty_result"])
+def test_identity_requires_entity_and_result_fragments(session, missing_field: str) -> None:
+    document = make_document(session, text="某保险公司\n罚款10万元\n销售误导")
+    payload = complete_envelope(document).model_dump(mode="json")
+    evidence_item = payload["field_evidence"][missing_field][0]
+    payload["source_entry_fragments"] = [
+        item
+        for item in payload["source_entry_fragments"]
+        if item["start_offset"] != evidence_item["start_offset"]
+    ]
+    with pytest.raises(
+        StructuredRecordError,
+        match="penalty_source_entry_fragment_set_mismatch",
+    ):
+        service(session).import_draft(
+            session,
+            StructuredDraftEnvelope.model_validate(payload),
+        )
+
+
+def test_extra_unrelated_fragment_is_rejected(session) -> None:
+    document = make_document(
+        session,
+        text="某保险公司\n罚款10万元\n销售误导\n无关标题文字",
+    )
+    payload = complete_envelope(document).model_dump(mode="json")
+    unrelated = "无关标题文字"
+    start = (document.raw_text or "").index(unrelated)
+    payload["source_entry_fragments"].append(
+        {
+            "quote": unrelated,
+            "start_offset": start,
+            "end_offset": start + len(unrelated),
+        }
+    )
+
+    with pytest.raises(
+        StructuredRecordError,
+        match="penalty_source_entry_fragment_set_mismatch",
+    ):
+        service(session).import_draft(
+            session,
+            StructuredDraftEnvelope.model_validate(payload),
+        )
+
+
+def test_missing_illegal_facts_fragment_is_rejected(session) -> None:
+    document = make_document(session, text="某保险公司\n罚款10万元\n销售误导")
+    payload = complete_envelope(document).model_dump(mode="json")
+    fact = payload["field_evidence"]["illegal_facts"][0]
+    payload["source_entry_fragments"] = [
+        item
+        for item in payload["source_entry_fragments"]
+        if item["start_offset"] != fact["start_offset"]
+    ]
+
+    with pytest.raises(
+        StructuredRecordError,
+        match="penalty_source_entry_fragment_set_mismatch",
+    ):
+        service(session).import_draft(
+            session,
+            StructuredDraftEnvelope.model_validate(payload),
+        )
+
+
+def test_penalty_punished_entity_is_required(session) -> None:
+    document = make_document(session, text="某保险公司\n罚款10万元\n销售误导")
+    payload = complete_envelope(document).model_dump(mode="json")
+    payload["fields"]["punished_entity"] = None
+    payload["field_evidence"].pop("punished_entity")
+    entity_quote = "某保险公司"
+    payload["source_entry_fragments"] = [
+        item for item in payload["source_entry_fragments"] if item["quote"] != entity_quote
+    ]
+    payload["source_entry_content_sha256"] = "a" * 64
+    payload["fields"]["source_entry_fingerprint"] = "b" * 64
+
+    with pytest.raises(
+        StructuredRecordError,
+        match="penalty_punished_entity_required",
+    ):
+        service(session).import_draft(
+            session,
+            StructuredDraftEnvelope.model_validate(payload),
+        )
+
+
+def test_same_identity_quotes_at_different_offsets_have_same_fingerprint(session) -> None:
+    block = "某保险公司\n罚款10万元\n销售误导"
+    document = make_document(session, text=f"{block}\n分隔文字\n{block}")
+    first = complete_envelope(document, index=1)
+    second_payload = complete_envelope(
+        document,
+        index=2,
+        locator={"table_index": 2, "numbered_entry": 2},
+    ).model_dump(mode="json")
+    second_block_start = (document.raw_text or "").rindex(block)
+    first_block_start = (document.raw_text or "").index(block)
+    shift = second_block_start - first_block_start
+    for items in second_payload["field_evidence"].values():
+        for item in items:
+            item["start_offset"] += shift
+            item["end_offset"] += shift
+    for item in second_payload["source_entry_fragments"]:
+        item["start_offset"] += shift
+        item["end_offset"] += shift
+    second = StructuredDraftEnvelope.model_validate(second_payload)
+
+    assert first.fields["source_entry_fingerprint"] == second.fields["source_entry_fingerprint"]
+    service(session).import_draft(session, first)
+    with pytest.raises(StructuredRecordError, match="penalty_source_entry_duplicate"):
+        service(session).import_draft(session, second)
+
+
+def test_source_entry_content_hash_mismatch_is_rejected(session) -> None:
+    document = make_document(session, text="某保险公司\n罚款10万元\n销售误导")
+    payload = complete_envelope(document).model_dump(mode="json")
+    payload["source_entry_content_sha256"] = "f" * 64
+
+    with pytest.raises(
+        StructuredRecordError,
+        match="penalty_source_entry_content_sha256_mismatch",
+    ):
+        service(session).import_draft(
+            session,
+            StructuredDraftEnvelope.model_validate(payload),
+        )
+
+
+def test_nfra_locator_validation_fails_closed(session) -> None:
+    invalid_locators = [
+        {"nfra_doc_id": "999", "table_index": 1, "logical_row": 1},
+        {"nfra_doc_id": "123", "table_index": True, "logical_row": 1},
+        {
+            "nfra_doc_id": "123",
+            "table_index": 1,
+            "logical_row": 1,
+            "numbered_entry": 1,
+        },
+        {"nfra_doc_id": "123", "table_index": 1, "random": 1},
+    ]
+    for position, locator in enumerate(invalid_locators, 1):
+        document = make_document(
+            session,
+            text=f"某保险公司\n罚款10万元\n销售误导\n{position}",
+            source_url=f"https://example.test/invalid-locator-{position}",
+            nfra_doc_id="123",
+        )
+        candidate = complete_envelope(document, locator=locator)
+
+        with pytest.raises(
+            StructuredRecordError,
+            match="penalty_source_entry_locator_invalid",
+        ):
+            service(session).import_draft(session, candidate)
+
+
+def test_nfra_parsed_metadata_requires_nonempty_doc_id(session) -> None:
+    document = make_document(
+        session,
+        text="某保险公司\n罚款10万元\n销售误导",
+        parsed_metadata={"source_format": "nfra_public_json", "nfra": {}},
+    )
+    candidate = complete_envelope(
+        document,
+        locator={"nfra_doc_id": "caller-value", "table_index": 1, "logical_row": 1},
+    )
+
+    with pytest.raises(
+        StructuredRecordError,
+        match="penalty_source_entry_locator_invalid",
+    ):
+        service(session).import_draft(session, candidate)
+
+
+def test_non_nfra_artifact_rejects_nfra_locator(session) -> None:
+    document = make_document(
+        session,
+        text="某保险公司\n罚款10万元\n销售误导",
+        parsed_metadata={"source_format": "pdf"},
+    )
+    candidate = complete_envelope(
+        document,
+        locator={"nfra_doc_id": "123", "table_index": 1, "logical_row": 1},
+    )
+
+    with pytest.raises(
+        StructuredRecordError,
+        match="penalty_source_entry_locator_invalid",
+    ):
+        service(session).import_draft(session, candidate)
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "source_entry_index",
+        "source_entry_fingerprint",
+        "source_entry_content_sha256",
+        "source_entry_fragments",
+        "source_entry_locator",
+    ],
+)
+def test_penalty_source_identity_is_locked_during_revision(
+    session,
+    field_name: str,
+) -> None:
+    document = make_document(session)
+    record = service(session).import_draft(session, envelope(document, 1, "违法事实一"))
+    revision = StructuredDraftRevisionEnvelope(
+        document_id=document.id,
+        record_type=DataType.PENALTY,
+        structured_record_id=record.id,
+        fields={field_name: "changed"},
+        field_evidence={},
+    )
+
+    with pytest.raises(StructuredRecordError, match="penalty_source_identity_locked"):
+        StructuredDraftRevisionService(Settings(data_dir=session.info["data_dir"])).revise(
+            session, revision, reason="不得修改身份", actor="tester"
+        )
+
+
+def test_duplicate_candidate_does_not_mutate_approved_existing_record(session) -> None:
+    first_document = make_document(session, source_url="https://example.test/protected-a")
+    first = service(session).import_draft(
+        session,
+        envelope(first_document, 1, "违法事实一"),
+    )
+    first_document.final_review_status = ReviewStatus.APPROVED.value
+    session.commit()
+    review_service = ReviewService(Settings(data_dir=session.info["data_dir"]))
+    before = review_service._document_review_row(session, first_document, 1, 1)
+    before_key = before["parsed_fields"]["records"][0]["portable_record_key"]
+    before_hash = payload_hash(before)
+    second_document = make_document(
+        session,
+        text="违法事实一\n违法事实二\n修订事实一\n另一原件",
+        source_url="https://example.test/protected-b",
+    )
+
+    second = service(session).import_draft(
+        session,
+        envelope(second_document, 1, "违法事实一"),
+    )
+
+    assert second.duplicate_candidate is True
+    assert first.duplicate_candidate is False
+    after = review_service._document_review_row(session, first_document, 1, 1)
+    assert after["parsed_fields"]["records"][0]["portable_record_key"] == before_key
+    assert payload_hash(after) == before_hash
+
+
+def test_duplicate_candidate_does_not_mutate_indexed_existing_record(session) -> None:
+    first_document = make_document(session, source_url="https://example.test/indexed-a")
+    first = service(session).import_draft(
+        session,
+        envelope(first_document, 1, "违法事实一"),
+    )
+    first_document.knowledge_index_status = KnowledgeIndexStatus.INDEXED.value
+    first_document.indexed_at = datetime.now(UTC)
+    session.commit()
+    second_document = make_document(
+        session,
+        text="违法事实一\n违法事实二\n修订事实一\n索引保护",
+        source_url="https://example.test/indexed-b",
+    )
+
+    second = service(session).import_draft(
+        session,
+        envelope(second_document, 1, "违法事实一"),
+    )
+
+    assert second.duplicate_candidate is True
+    assert first.duplicate_candidate is False
+
+
+def test_verified_rejected_existing_record_is_fully_protected(session) -> None:
+    first_document = make_document(session, source_url="https://example.test/rejected-a")
+    first = service(session).import_draft(
+        session,
+        envelope(first_document, 1, "违法事实一"),
+    )
+    first_document.authenticity_type = AuthenticityType.VERIFIED_PUBLIC.value
+    first_document.final_review_status = ReviewStatus.REJECTED.value
+    session.commit()
+    review_service = ReviewService(Settings(data_dir=session.info["data_dir"]))
+    before_row = review_service._document_review_row(session, first_document, 1, 1)
+    before_record = {
+        "duplicate_candidate": first.duplicate_candidate,
+        "fields": (
+            first.punished_entity,
+            first.document_number,
+            first.illegal_facts,
+            first.penalty_result,
+            first.source_entry_fingerprint,
+        ),
+        "evidence": json.loads(json.dumps(first.field_evidence_json)),
+        "metadata": json.loads(json.dumps(first_document.metadata_json)),
+        "portable_record_key": before_row["parsed_fields"]["records"][0]["portable_record_key"],
+        "payload_hash": payload_hash(before_row),
+    }
+    second_document = make_document(
+        session,
+        text="违法事实一\n另一原件",
+        source_url="https://example.test/rejected-b",
+    )
+
+    second = service(session).import_draft(
+        session,
+        envelope(second_document, 1, "违法事实一"),
+    )
+
+    assert second.duplicate_candidate is True
+    assert first.duplicate_candidate is False
+    assert (
+        first.punished_entity,
+        first.document_number,
+        first.illegal_facts,
+        first.penalty_result,
+        first.source_entry_fingerprint,
+    ) == before_record["fields"]
+    assert first.field_evidence_json == before_record["evidence"]
+    assert first_document.metadata_json == before_record["metadata"]
+    after_row = review_service._document_review_row(session, first_document, 1, 1)
+    assert (
+        after_row["parsed_fields"]["records"][0]["portable_record_key"]
+        == before_record["portable_record_key"]
+    )
+    assert payload_hash(after_row) == before_record["payload_hash"]
+
+
+def test_review_decision_protects_existing_record_from_duplicate_mutation(session) -> None:
+    first_document = make_document(session, source_url="https://example.test/decision-a")
+    first = service(session).import_draft(
+        session,
+        envelope(first_document, 1, "违法事实一"),
+    )
+    batch = ReviewBatch(
+        batch_name="protected",
+        data_type=DataType.PENALTY.value,
+        record_count=1,
+        export_path="/tmp/protected.jsonl",
+        export_sha256="a" * 64,
+        schema_version="2.0",
+        status="completed",
+    )
+    session.add(batch)
+    session.flush()
+    session.add(
+        ReviewDecision(
+            batch_id=batch.id,
+            record_type=DataType.PENALTY.value,
+            record_id=first_document.id,
+            decision=ReviewStatus.REJECTED.value,
+            field_reviews_json={},
+            corrections_json={},
+            evidence_quality="A",
+            reviewer="reviewer",
+            reviewed_payload_hash="b" * 64,
+            schema_version="2.0",
+        )
+    )
+    session.commit()
+    second_document = make_document(
+        session,
+        text="违法事实一\n另一决定原件",
+        source_url="https://example.test/decision-b",
+    )
+
+    second = service(session).import_draft(
+        session,
+        envelope(second_document, 1, "违法事实一"),
+    )
+
+    assert second.duplicate_candidate is True
+    assert first.duplicate_candidate is False
+
+
+def test_fragment_set_failure_rolls_back_whole_jsonl_batch(session, tmp_path: Path) -> None:
+    document = make_document(
+        session,
+        text="违法事实一\n违法事实二\n修订事实一\n无关片段",
+    )
+    first = envelope(document, 1, "违法事实一")
+    invalid = envelope(document, 2, "违法事实二").model_dump(mode="json")
+    unrelated = "无关片段"
+    start = (document.raw_text or "").index(unrelated)
+    invalid["source_entry_fragments"].append(
+        {
+            "quote": unrelated,
+            "start_offset": start,
+            "end_offset": start + len(unrelated),
+        }
+    )
+    path = tmp_path / "fragment-set-mismatch.jsonl"
+    path.write_text(
+        "\n".join(
+            (
+                json.dumps(first.model_dump(mode="json"), ensure_ascii=False),
+                json.dumps(invalid, ensure_ascii=False),
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    imported, errors = service(session).import_jsonl(session, path)
+
+    assert imported == 0
+    assert "penalty_source_entry_fragment_set_mismatch" in errors[0]
+    assert session.query(Penalty).filter_by(document_id=document.id).count() == 0
+
+
+def test_identity_evidence_failure_rolls_back_whole_jsonl_batch(
+    session,
+    tmp_path: Path,
+) -> None:
+    document = make_document(
+        session,
+        text="违法事实一\n违法事实二\n附加上下文",
+    )
+    first = envelope(document, 1, "违法事实一")
+    invalid = envelope(document, 2, "违法事实二").model_dump(mode="json")
+    widened = "违法事实二\n附加上下文"
+    invalid["field_evidence"]["punished_entity"][0].update(
+        {
+            "quote": widened,
+            "start_offset": (document.raw_text or "").index(widened),
+            "end_offset": (document.raw_text or "").index(widened) + len(widened),
+        }
+    )
+    path = tmp_path / "identity-evidence-not-exact.jsonl"
+    path.write_text(
+        "\n".join(
+            (
+                json.dumps(first.model_dump(mode="json"), ensure_ascii=False),
+                json.dumps(invalid, ensure_ascii=False),
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    imported, errors = service(session).import_jsonl(session, path)
+
+    assert imported == 0
+    assert "penalty_source_identity_evidence_not_exact" in errors[0]
+    assert session.query(Penalty).filter_by(document_id=document.id).count() == 0
+
+
+def test_penalty_identity_provenance_is_saved_and_bound_to_portable_key(session) -> None:
+    document = make_document(session, text="某保险公司\n罚款10万元\n销售误导")
+    record = service(session).import_draft(session, complete_envelope(document))
+    provenance = document.metadata_json["structured_draft_provenance"][0]
+
+    assert provenance["structured_record_id"] == record.id
+    assert "identity_version" not in provenance
+    assert "source_identity_status" not in provenance
+    assert len(provenance["source_entry_fragments"]) == 3
+    assert provenance["source_entry_content_sha256"] == source_entry_content_sha256(
+        build_penalty_identity_material(
+            {
+                "punished_entity": record.punished_entity,
+                "penalty_result": record.penalty_result,
+                "illegal_facts": record.illegal_facts,
+                "document_number": record.document_number,
+            },
+            record.field_evidence_json,
+        )
+    )
+    row = ReviewService(Settings(data_dir=session.info["data_dir"]))._document_review_row(
+        session,
+        document,
+        1,
+        1,
+    )
+    exported = row["parsed_fields"]["records"][0]
+    assert (
+        exported["draft_provenance"]["source_entry_fragments"]
+        == provenance["source_entry_fragments"]
+    )
