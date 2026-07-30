@@ -996,7 +996,7 @@ def make_failed_draft(
             final_review_status=ReviewStatus.AUTO_VALIDATION_FAILED.value,
         )
     else:
-        text, old_value = "旧违法事实 新违法事实", "旧违法事实"
+        text, old_value = "处罚主体 旧违法事实 新机关", "旧违法事实"
         document = make_document(
             session,
             data_type,
@@ -1006,15 +1006,58 @@ def make_failed_draft(
         record = Penalty(
             document_id=document.id,
             source_entry_index=1,
-            source_entry_fingerprint="4" * 64,
+            source_entry_fingerprint="0" * 64,
+            punished_entity="处罚主体",
+            authority=None,
             illegal_facts=old_value,
             original_sales_wording_disclosed=False,
             source_quote=old_value,
-            field_evidence_json={"illegal_facts": evidence(document, old_value)},
+            field_evidence_json={
+                "punished_entity": evidence(document, "处罚主体"),
+                "illegal_facts": evidence(document, old_value),
+            },
             final_review_status=ReviewStatus.AUTO_VALIDATION_FAILED.value,
         )
-    document.metadata_json = {"automatic_validation": {"valid": False, "issues": ["old"]}}
     session.add(record)
+    session.flush()
+    if isinstance(record, Penalty):
+        identity_fields = {
+            "punished_entity": record.punished_entity,
+            "penalty_result": record.penalty_result,
+            "illegal_facts": record.illegal_facts,
+            "document_number": record.document_number,
+        }
+        fragments = build_penalty_source_entry_fragments(
+            identity_fields,
+            record.field_evidence_json,
+        )
+        content_sha256 = source_entry_content_sha256(
+            build_penalty_identity_material(
+                identity_fields,
+                record.field_evidence_json,
+            )
+        )
+        record.source_entry_fingerprint = penalty_source_entry_fingerprint(
+            raw_artifact_sha256=document.sha256,
+            source_entry_content_sha256=content_sha256,
+        )
+        document.metadata_json = {
+            "automatic_validation": {"valid": False, "issues": ["old"]},
+            "structured_draft_provenance": [
+                {
+                    "structured_record_id": record.id,
+                    "record_type": DataType.PENALTY.value,
+                    "pilot_id": None,
+                    "draft_generation_method": None,
+                    "draft_generation_version": None,
+                    "source_entry_locator": {"table_index": 1, "logical_row": 1},
+                    "source_entry_fragments": fragments,
+                    "source_entry_content_sha256": content_sha256,
+                }
+            ],
+        }
+    else:
+        document.metadata_json = {"automatic_validation": {"valid": False, "issues": ["old"]}}
     session.commit()
     return document, record
 
@@ -1023,7 +1066,7 @@ def make_failed_draft(
     ("data_type", "field_name", "new_value"),
     [
         (DataType.PRODUCT_DOCUMENT.value, "product_name", "新产品"),
-        (DataType.PENALTY.value, "illegal_facts", "新违法事实"),
+        (DataType.PENALTY.value, "authority", "新机关"),
     ],
 )
 def test_auto_validation_failed_primary_draft_can_be_revised(
@@ -1562,6 +1605,39 @@ def test_punished_entity_correction_without_new_evidence_is_rejected(session) ->
         final_review_status=ReviewStatus.PENDING_REVIEW.value,
     )
     session.add(record)
+    session.flush()
+    identity_fields = {
+        "punished_entity": record.punished_entity,
+        "penalty_result": record.penalty_result,
+        "illegal_facts": record.illegal_facts,
+        "document_number": record.document_number,
+    }
+    fragments = build_penalty_source_entry_fragments(
+        identity_fields,
+        record.field_evidence_json,
+    )
+    content_sha256 = source_entry_content_sha256(
+        build_penalty_identity_material(identity_fields, record.field_evidence_json)
+    )
+    record.source_entry_fingerprint = penalty_source_entry_fingerprint(
+        raw_artifact_sha256=document.sha256,
+        source_entry_content_sha256=content_sha256,
+    )
+    document.metadata_json = {
+        **document.metadata_json,
+        "structured_draft_provenance": [
+            {
+                "structured_record_id": record.id,
+                "record_type": DataType.PENALTY.value,
+                "pilot_id": None,
+                "draft_generation_method": None,
+                "draft_generation_version": None,
+                "source_entry_locator": {"table_index": 1, "logical_row": 1},
+                "source_entry_fragments": fragments,
+                "source_entry_content_sha256": content_sha256,
+            }
+        ],
+    }
     session.commit()
     service = ReviewService(settings_for(session))
     batch, row = exported_review(session, service, DataType.PENALTY.value)

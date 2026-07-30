@@ -55,6 +55,19 @@ Identity fields are immutable during structured-draft revision. Duplicate detect
 the newly imported record, but it never mutates an existing record that has a
 `ReviewDecision`, is `verified_public`, has any human decision result, or is indexed.
 
+Pre-review revisions, `approved_with_revision`, deterministic validation, review export and
+knowledge-index admission all run the same source-identity consistency check. The current or
+candidate fixed fields and evidence must reproduce exactly one matching provenance entry, the
+same canonical fragments, content SHA-256 and stored fingerprint. A new, removed or replaced
+identity quote fails with `penalty_source_identity_rebind_required`; missing, ambiguous or
+internally inconsistent provenance fails closed.
+
+The only normalization that may change a penalty identity field without rebinding its source
+quote is an explicitly field-scoped controlled transformation. The
+`collapse_unicode_whitespace_for_penalty_document_number_v1` transformation is restricted to
+`Penalty.document_number`, accepts a bounded Chinese penalty-document-number form, and removes
+Unicode whitespace only. It cannot be used for other identity or long-text fields.
+
 Database uniqueness guards `(document_id, source_entry_index)` and
 `(document_id, source_entry_fingerprint)`. The migration deterministically backfills legacy
 single-record rows. Downgrade fails closed once any source document contains multiple

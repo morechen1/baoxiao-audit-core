@@ -11,6 +11,7 @@ from app.repositories import DocumentRepository
 from app.services.field_evidence import EVIDENCE_FIELDS, FieldEvidenceService
 from app.services.integrity import RawArtifactIntegrityService
 from app.services.parsed_artifacts import ParsedArtifactIntegrityService
+from app.services.penalty_identity import PenaltySourceIdentityService
 from app.services.validation.validators import (
     AuthenticityValidator,
     DateValidator,
@@ -140,6 +141,21 @@ class ValidationService:
                         "Structured fields require valid immutable field evidence",
                     )
                 )
+            if isinstance(record, Penalty):
+                try:
+                    PenaltySourceIdentityService(self.settings).validate(
+                        session,
+                        document,
+                        record,
+                    )
+                except ValueError:
+                    issues.append(
+                        ValidationIssue(
+                            "PenaltySourceIdentityValidator",
+                            "penalty_source_identity_consistency_failed",
+                            "Penalty source identity must match immutable draft provenance",
+                        )
+                    )
         return ValidationResult(valid=not issues, issues=issues)
 
     def _document_issues(self, session: Session, document: SourceDocument) -> list[ValidationIssue]:

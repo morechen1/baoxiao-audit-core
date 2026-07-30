@@ -26,6 +26,7 @@ from app.models import (
     DataSource,
     DocumentOccurrence,
     EvaluationSample,
+    Penalty,
     PilotCollectionItem,
     RegulatoryCase,
     ReviewBatch,
@@ -60,6 +61,7 @@ from app.services.field_evidence import EVIDENCE_FIELDS, FieldEvidenceService
 from app.services.integrity import RawArtifactIntegrityService
 from app.services.knowledge import KnowledgeIndexService
 from app.services.parsed_artifacts import ParsedArtifactIntegrityService
+from app.services.penalty_identity import PenaltySourceIdentityService
 from app.services.review_payload import (
     REVIEW_PAYLOAD_SCHEMA_VERSION,
     canonical_portable_source_url,
@@ -237,6 +239,15 @@ class ReviewService:
                         )
                     except FieldEvidenceError as exc:
                         raise ReviewDecisionError(str(exc)) from exc
+                    if isinstance(structured_record, Penalty):
+                        try:
+                            PenaltySourceIdentityService(self.settings).validate(
+                                session,
+                                document,
+                                structured_record,
+                            )
+                        except ValueError as exc:
+                            raise ReviewDecisionError(str(exc)) from exc
             try:
                 with session.begin_nested():
                     session.add(
@@ -662,6 +673,17 @@ class ReviewService:
                 )
             except (PydanticValidationError, FieldEvidenceError) as exc:
                 raise ReviewDecisionError("invalid_correction_value") from exc
+            if isinstance(target, Penalty):
+                try:
+                    PenaltySourceIdentityService(self.settings).validate(
+                        session,
+                        document,
+                        target,
+                        candidate_fields=validated,
+                        candidate_evidence=validated_evidence,
+                    )
+                except ValueError as exc:
+                    raise ReviewDecisionError(str(exc)) from exc
             validated_updates.append(
                 (
                     target,

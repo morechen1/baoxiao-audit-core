@@ -9,11 +9,12 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.exceptions import FieldEvidenceError, StructuredRecordError
-from app.models import SourceDocument, StructuredDraftRevision
+from app.models import Penalty, SourceDocument, StructuredDraftRevision
 from app.models.enums import DataType, ReviewStatus
 from app.schemas.structured import StructuredDraftRevisionEnvelope
 from app.services.field_evidence import EVIDENCE_FIELDS, FieldEvidenceService
 from app.services.parsed_artifacts import ParsedArtifactIntegrityService
+from app.services.penalty_identity import PenaltySourceIdentityService
 from app.services.state_machine import StateMachineService
 from app.services.structured_records import DRAFT_MODELS, ENTITY_MODELS
 
@@ -43,13 +44,18 @@ class StructuredDraftRevisionService:
         if not path.is_file() or path.suffix.lower() != ".jsonl":
             raise StructuredRecordError("revision_file_invalid")
         revised = 0
-        errors: list[str] = []
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if not line.strip():
                 continue
             try:
                 envelope = StructuredDraftRevisionEnvelope.model_validate_json(line)
-                self.revise(session, envelope, reason=reason, actor=actor)
+                self.revise(
+                    session,
+                    envelope,
+                    reason=reason,
+                    actor=actor,
+                    commit=False,
+                )
                 revised += 1
             except (
                 json.JSONDecodeError,
@@ -57,8 +63,9 @@ class StructuredDraftRevisionService:
                 StructuredRecordError,
             ) as exc:
                 session.rollback()
-                errors.append(f"line {line_number}: {exc}")
-        return revised, errors
+                return 0, [f"line {line_number}: {exc}"]
+        session.commit()
+        return revised, []
 
     def revise(
         self,
@@ -67,6 +74,7 @@ class StructuredDraftRevisionService:
         *,
         reason: str,
         actor: str,
+        commit: bool = True,
     ) -> Any:
         document = session.get(SourceDocument, envelope.document_id)
         if not document or document.data_type != envelope.record_type.value:
@@ -114,7 +122,10 @@ class StructuredDraftRevisionService:
                 )
                 session.delete(target)
                 self._reset_validation(session, document, reason)
-                session.commit()
+                if commit:
+                    session.commit()
+                else:
+                    session.flush()
                 return None
             candidate = {**previous_fields, **envelope.fields}
             evidence = {**previous_evidence, **envelope.field_evidence}
@@ -148,6 +159,17 @@ class StructuredDraftRevisionService:
             )
         except (PydanticValidationError, FieldEvidenceError) as exc:
             raise StructuredRecordError(str(exc)) from exc
+        if isinstance(target, Penalty):
+            try:
+                PenaltySourceIdentityService(self.settings).validate(
+                    session,
+                    document,
+                    target,
+                    candidate_fields=validated_draft,
+                    candidate_evidence=validated_evidence,
+                )
+            except ValueError as exc:
+                raise StructuredRecordError(str(exc)) from exc
         if envelope.action == "add":
             target = entity_model(
                 document_id=document.id,
@@ -175,7 +197,10 @@ class StructuredDraftRevisionService:
             actor,
         )
         self._reset_validation(session, document, reason)
-        session.commit()
+        if commit:
+            session.commit()
+        else:
+            session.flush()
         return target
 
     @staticmethod
