@@ -50,10 +50,11 @@ def postgres_migration_url(monkeypatch) -> Generator[str, None, None]:
     with admin_engine.connect() as connection:
         connection.exec_driver_sql(f"CREATE DATABASE {quoted_name}")
     test_url: URL = configured_url.set(database=database_name)
-    monkeypatch.setenv("DATABASE_URL", test_url.render_as_string(hide_password=False))
+    rendered_test_url = test_url.render_as_string(False)
+    monkeypatch.setenv("DATABASE_URL", rendered_test_url)
     get_settings.cache_clear()
     try:
-        yield test_url.render_as_string(hide_password=False)
+        yield rendered_test_url
     finally:
         get_settings.cache_clear()
         with admin_engine.connect() as connection:
