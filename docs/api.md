@@ -18,6 +18,7 @@
 | GET | `/regulatory-cases` | 按类别、用途、审核状态或真实性筛选监管案例 |
 | GET | `/regulatory-cases/{id}` | 查看监管案例、字段证据与索引资格 |
 | POST | `/knowledge/index-approved` | 标记符合资格的可信记录 |
+| GET | `/api/v1/knowledge/search` | 查询经物化的可信法规、产品与处罚知识块 |
 
 未捕获异常返回 `{"error":{"code","message","details"}}`。FastAPI 自身的输入错误返回
 标准 422 结构；下一阶段可统一转换为同一错误信封。
@@ -35,5 +36,19 @@
 `can_index` 和明确的 `index_rejection_reasons`。只有用途为 `retrieval_only` 且通过
 全部审核、真实性、解析完整性和字段证据门禁的案例才会显示可索引；外部评测候选和
 封存测试集均不可索引。
+
+## 可信知识搜索
+
+`GET /api/v1/knowledge/search` 支持 `query`、可重复的 `record_types`/
+`pilot_ids`/`evidence_quality`、`authority`、`date_from`、`date_to`、`limit` 和
+`offset`。`query` 最长 500 字符，`limit` 为 1–100。规范化后的空查询必须提供
+`record_types`、`pilot_ids`、`authority`、日期或 `evidence_quality` 过滤，否则返回
+`knowledge_search_filter_required`。结果只来自活跃的 `verified_public` 已审核、已准入块，不包含
+`RegulatoryCase`。
+
+每条结果返回确定性分数/排名、记录与来源身份、原文 snippet、命中 token、
+已验证 occurrence URL/locator、字段证据引用和块哈希。排序是
+`trusted_lexical_rank_v1`，不是标准 BM25。详细公式与失败关闭边界见
+[可信知识检索基础层](trusted-retrieval-foundation.md)。
 
 本 API 当前只适用于受控环境，不包含生产级身份认证、权限系统或自动法律结论。

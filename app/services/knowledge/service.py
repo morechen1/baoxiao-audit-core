@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session
 
@@ -26,6 +27,13 @@ from app.services.integrity import RawArtifactIntegrityService
 from app.services.parsed_artifacts import ParsedArtifactIntegrityService
 from app.services.penalty_identity import PenaltySourceIdentityService
 from app.services.state_machine import StateMachineService
+
+if TYPE_CHECKING:
+    from app.services.knowledge.materialization import (
+        RebuildAllSummary,
+        RebuildSummary,
+        VerificationReport,
+    )
 
 
 @dataclass
@@ -69,6 +77,40 @@ class KnowledgeIndexService:
             summary.indexed += 1
         session.commit()
         return summary
+
+    def rebuild_document_chunks(self, session: Session, document_id: int) -> RebuildSummary:
+        from app.services.knowledge.materialization import (
+            TrustedKnowledgeMaterializationService,
+        )
+
+        return TrustedKnowledgeMaterializationService(self.settings).rebuild_document_chunks(
+            session, document_id
+        )
+
+    def rebuild_all_trusted_chunks(self, session: Session) -> RebuildAllSummary:
+        from app.services.knowledge.materialization import (
+            TrustedKnowledgeMaterializationService,
+        )
+
+        return TrustedKnowledgeMaterializationService(self.settings).rebuild_all_trusted_chunks(
+            session
+        )
+
+    def retire_document_chunks(self, session: Session, document_id: int) -> int:
+        from app.services.knowledge.materialization import (
+            TrustedKnowledgeMaterializationService,
+        )
+
+        return TrustedKnowledgeMaterializationService(self.settings).retire_document_chunks(
+            session, document_id
+        )
+
+    def verify_chunks(self, session: Session) -> VerificationReport:
+        from app.services.knowledge.materialization import (
+            TrustedKnowledgeMaterializationService,
+        )
+
+        return TrustedKnowledgeMaterializationService(self.settings).verify(session)
 
     def rejection_reasons(self, session: Session, document: SourceDocument) -> list[str]:
         reasons: list[str] = []
