@@ -324,9 +324,9 @@ def test_disabled_external_provider_fails_with_public_code() -> None:
     [
         "可能存在风险信号",
         "需要进一步核验",
-        "现有证据显示该表述需要复核",
+        "现有证据显示可能存在风险信号，需要进一步核验",
         "当前证据不足以作出结论",
-        "该处罚案例可作为相似执法参考",
+        "该处罚案例可作为相似执法参考，需要进一步核验",
     ],
 )
 def test_unsupported_claim_detector_allows_cautious_language(text: str) -> None:
@@ -1341,7 +1341,7 @@ def test_partially_supported_rejects_deterministic_certainty(bad_text: str) -> N
     [
         "可能存在风险信号。",
         "当前证据仅能提供部分支持。",
-        "仍需结合原始营销材料和合同进一步核验。",
+        "需要进一步核验，仍需结合原始营销材料。",
         "当前证据不足以作出确定结论。",
         "需要进一步核验该表述。",
     ],
@@ -1406,23 +1406,219 @@ def test_cross_finding_claim_per_finding_evidence_passes() -> None:
 def test_evidence_insufficient_finding_cannot_borrow_other_finding_citations(
     session: Any, monkeypatch: Any
 ) -> None:
-    """evidence_insufficient finding using another finding's citation → rejected."""
-    screening_id, built = _persist_screening_graph(session)
-    service = ControlledExplanationService()
-    monkeypatch.setattr(service.context_builder, "build", lambda *_args: built)
-    response = DeterministicFixtureProvider().generate(
-        ExplanationProviderRequest(
-            audience="institution", prompt=load_prompt("institution"), context=built.payload
-        )
+    """F002 is evidence_insufficient, borrows F001's E001 → rejected."""
+    # Build two-finding context: F001=supported with E001, F002=evidence_insufficient
+    segment = AllowedEvidenceSegment(
+        field_name="article_text",
+        quote="不得利用监管机构名义作引人误解的宣传",
+        evidence_snapshot={"field_name": "article_text", "mode": "verbatim"},
+        original_quote_length=18,
+        truncated=False,
     )
-    output = json.loads(response.raw_json)
-    output["finding_explanations"][0]["finding_key"] = "F002"
-    output["finding_explanations"][0]["explanation"]["finding_keys"] = ["F002"]
-    output["finding_explanations"][0]["why_it_matters"]["finding_keys"] = ["F002"]
-    output["finding_explanations"][0]["evidence_assessment"]["finding_keys"] = ["F002"]
-    for action in output["finding_explanations"][0]["review_actions"]:
-        action["finding_keys"] = ["F002"]
-    with pytest.raises(ExplanationError, match="explanation_unknown_finding_key"):
+    visible = VisibleSegmentV1(
+        field_name="article_text",
+        quote="不得利用监管机构名义作引人误解的宣传",
+        truncated=False,
+        original_quote_length=18,
+    )
+    evidence_f001 = ControlledEvidence(
+        citation_key="E001",
+        support_type="normative_basis",
+        source_title="保险销售行为管理办法",
+        source_url="https://example.test/regulation",
+        pilot_id="REG-001",
+        record_type="regulation",
+        chunk_kind="article_text",
+        quote=segment.quote,
+        source_locator={"article_number": "第十七条"},
+        evidence_references=[segment.evidence_snapshot],
+        context_scope="not_applicable",
+        chunk_identity_sha256="a" * 64,
+        chunk_content_sha256="b" * 64,
+        evidence_field_name="article_text",
+        visible_segments=[visible],
+    )
+    f001 = ControlledFinding(
+        finding_key="F001",
+        rule_id="regulatory_endorsement",
+        category="监管背书",
+        severity="high",
+        signal_strength="strong",
+        matched_text="监管推荐",
+        raw_start_offset=0,
+        raw_end_offset=4,
+        deterministic_explanation="该表达可能造成监管背书误解。",
+        review_question="是否存在监管背书暗示？",
+        evidence_status="supported",
+        evidence=[evidence_f001],
+    )
+    f002 = ControlledFinding(
+        finding_key="F002",
+        rule_id="concealment_or_minimization_of_exclusions",
+        category="免责弱化",
+        severity="high",
+        signal_strength="strong",
+        matched_text="没有免责",
+        raw_start_offset=5,
+        raw_end_offset=9,
+        deterministic_explanation="该表达可能弱化责任免除。",
+        review_question="是否完整提示责任免除？",
+        evidence_status="evidence_insufficient",
+        evidence=[],
+    )
+    context = ControlledRAGContext(
+        context_schema_version="controlled_rag_context_v1",
+        screening_run_payload_sha256="e" * 64,
+        trusted_index_payload_hash="f" * 64,
+        material={"title": "T", "material_type": "advertisement", "input_sha256": "1" * 64},
+        findings=[f001, f002],
+    )
+    binding_e001 = EvidenceBinding(
+        finding_key="F001",
+        finding_id=1,
+        link_id=1,
+        citation_key="E001",
+        quote=segment.quote,
+        chunk_identity_sha256="a" * 64,
+        chunk_content_sha256="b" * 64,
+        source_url="https://example.test/regulation",
+        source_locator={"article_number": "第十七条"},
+        support_type="normative_basis",
+        source_title="保险销售行为管理办法",
+        pilot_id="REG-001",
+        record_type="regulation",
+        chunk_kind="article_text",
+        context_scope="not_applicable",
+        allowed_quote_segments=(segment,),
+        semantic_anchors=("监管机构",),
+    )
+    built = BuiltContext(
+        context, canonical_sha256(context.model_dump(mode="json")), {"E001": binding_e001}
+    )
+    prompt = load_prompt("institution")
+
+    # Scenario 1: F002 claim using E001 → E001 belongs to F001, not F002
+    output = {
+        "schema_version": "institution_explanation_v1",
+        "executive_summary": {
+            "claim_type": "deterministic_template",
+            "text": "以下内容仅解释已持久化的确定性筛查发现。",
+            "finding_keys": ["F001", "F002"],
+            "citations": [],
+        },
+        "finding_explanations": [
+            {
+                "finding_key": "F001",
+                "explanation": {
+                    "claim_type": "deterministic_finding_explanation",
+                    "text": "现有证据显示可能存在风险信号，需要进一步核验。",
+                    "finding_keys": ["F001"],
+                    "citations": [{"citation_key": "E001", "cited_quote": segment.quote}],
+                },
+                "why_it_matters": {
+                    "claim_type": "deterministic_template",
+                    "text": f001.deterministic_explanation,
+                    "finding_keys": ["F001"],
+                    "citations": [],
+                },
+                "evidence_assessment": {
+                    "claim_type": "evidence_assessment",
+                    "text": "现有证据显示可能存在风险信号，需要进一步核验。",
+                    "finding_keys": ["F001"],
+                    "citations": [{"citation_key": "E001", "cited_quote": segment.quote}],
+                },
+                "review_actions": [
+                    {
+                        "claim_type": "deterministic_template",
+                        "text": f001.review_question,
+                        "finding_keys": ["F001"],
+                        "citations": [],
+                    }
+                ],
+            },
+            {
+                "finding_key": "F002",
+                "explanation": {
+                    "claim_type": "deterministic_finding_explanation",
+                    "text": "需要进一步核验，当前证据不足以作出结论。",
+                    "finding_keys": ["F002"],
+                    "citations": [{"citation_key": "E001", "cited_quote": segment.quote}],
+                },
+                "why_it_matters": {
+                    "claim_type": "deterministic_template",
+                    "text": f002.deterministic_explanation,
+                    "finding_keys": ["F002"],
+                    "citations": [],
+                },
+                "evidence_assessment": {
+                    "claim_type": "evidence_assessment",
+                    "text": "需要进一步核验，当前证据不足以作出结论。",
+                    "finding_keys": ["F002"],
+                    "citations": [],
+                },
+                "review_actions": [
+                    {
+                        "claim_type": "deterministic_template",
+                        "text": f002.review_question,
+                        "finding_keys": ["F002"],
+                        "citations": [],
+                    }
+                ],
+            },
+        ],
+        "cross_finding_observations": [],
+        "manual_review_priorities": [],
+        "disclaimer": prompt.required_disclaimer,
+    }
+    with pytest.raises(ExplanationError, match="explanation_citation_wrong_finding"):
         ControlledExplanationValidator().validate(
-            json.dumps(output, ensure_ascii=False), load_prompt("institution"), built
+            json.dumps(output, ensure_ascii=False), prompt, built
+        )
+
+    # Scenario 2: F002 with proper uncertainty template, zero citations → passes
+    output["finding_explanations"][1]["explanation"]["citations"] = []
+    output["finding_explanations"][1]["explanation"]["claim_type"] = "deterministic_template"
+    output["finding_explanations"][1]["explanation"]["text"] = (
+        "当前证据不足以作出结论，需要进一步核验。"
+    )
+    output["finding_explanations"][1]["evidence_assessment"]["citations"] = []
+    output["finding_explanations"][1]["evidence_assessment"]["claim_type"] = (
+        "deterministic_template"
+    )
+    output["finding_explanations"][1]["evidence_assessment"]["text"] = (
+        "当前证据不足以作出结论，需要进一步核验。"
+    )
+    for action in output["finding_explanations"][1]["review_actions"]:
+        action["citations"] = []
+        action["claim_type"] = "deterministic_template"
+    validated = ControlledExplanationValidator().validate(
+        json.dumps(output, ensure_ascii=False), prompt, built
+    )
+    assert validated.output["schema_version"] == "institution_explanation_v1"
+
+    # Scenario 3: cross-finding claim F001+F002 using only E001 → F002 missing
+    output["cross_finding_observations"] = [
+        {
+            "claim_type": "cautious_cross_finding_observation",
+            "text": "F001与F002均需要进一步核验。",
+            "finding_keys": ["F001", "F002"],
+            "citations": [{"citation_key": "E001", "cited_quote": segment.quote}],
+        }
+    ]
+    # Reset F002 explanation to valid state first
+    output["finding_explanations"][1]["explanation"]["citations"] = []
+    output["finding_explanations"][1]["explanation"]["claim_type"] = "deterministic_template"
+    output["finding_explanations"][1]["explanation"]["text"] = (
+        "当前证据不足以作出结论，需要进一步核验。"
+    )
+    output["finding_explanations"][1]["evidence_assessment"]["citations"] = []
+    output["finding_explanations"][1]["evidence_assessment"]["claim_type"] = (
+        "deterministic_template"
+    )
+    output["finding_explanations"][1]["evidence_assessment"]["text"] = (
+        "当前证据不足以作出结论，需要进一步核验。"
+    )
+    with pytest.raises(ExplanationError, match="explanation_citation_wrong_finding"):
+        ControlledExplanationValidator().validate(
+            json.dumps(output, ensure_ascii=False), prompt, built
         )

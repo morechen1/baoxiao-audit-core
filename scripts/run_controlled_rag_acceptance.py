@@ -322,88 +322,128 @@ def _execute_fixture_corpus_offline(samples: list[dict[str, Any]]) -> dict[str, 
     from tests.unit.test_controlled_explanations import _built_context
 
     results: list[dict[str, Any]] = []
-    valid_count = 0
-    invalid_count = 0
-    invalid_rejected = 0
-    invalid_error_match = 0
-    rejected_artifact_count = 0
-    uncited_count = 0
-    trivial_count = 0
-    metadata_count = 0
     for sample in samples:
         scenario = str(sample["scenario"])
-        expected = str(sample["expected"])
+        expected_status = "passed" if sample["expected"] == "passed" else sample["expected"]
         audience = str(sample["audience"])
         prompt = load_prompt(audience)
         built = _built_context()
         request = ExplanationProviderRequest(
             audience=audience, prompt=prompt, context=built.payload
         )
+        actual_status: str
+        actual_error_code: str | None = None
+        run_status: str
+        artifact_count = 0
         if scenario in {"provider_timeout", "provider_exception"}:
             try:
                 DeterministicFixtureProvider(scenario).generate(request)
-                actual = "passed"
+                actual_status = "passed"
+                actual_error_code = None
                 run_status = "completed"
+                artifact_count = 1
             except Exception as exc:
-                actual = str(exc)
+                actual_status = str(exc)
+                actual_error_code = str(exc)
                 run_status = "failed"
         else:
             try:
                 raw = DeterministicFixtureProvider(scenario).generate(request).raw_json
                 ControlledExplanationValidator().validate(raw, prompt, built)
-                actual = "passed"
+                actual_status = "passed"
+                actual_error_code = None
                 run_status = "completed"
+                artifact_count = 1
             except ExplanationError as exc:
-                actual = str(exc)
+                actual_status = str(exc)
+                actual_error_code = str(exc)
                 run_status = "rejected"
             except Exception:
-                actual = "provider_exception"
+                actual_status = "provider_exception"
+                actual_error_code = "provider_exception"
                 run_status = "failed"
-        passed = actual == expected
-        artifact_count = 0
-        if expected != "passed" and passed:
-            artifact_count = 1
+        passed = actual_status == expected_status
         results.append(
             {
                 "sample_id": sample["id"],
                 "audience": audience,
-                "expected": expected,
-                "actual": actual,
+                "expected_status": expected_status,
+                "actual_status": actual_status,
+                "expected_error_code": (None if expected_status == "passed" else expected_status),
+                "actual_error_code": actual_error_code,
                 "passed": passed,
                 "explanation_run_status": run_status,
-                "validation_status": "passed" if run_status == "completed" else "rejected",
-                "error_code": actual if not passed else None,
                 "artifact_count": artifact_count,
                 "scenario": scenario,
             }
         )
-        if expected == "passed":
-            valid_count += 1
-        else:
-            invalid_count += 1
-            if run_status in {"rejected", "failed"}:
-                invalid_rejected += 1
-            if passed:
-                invalid_error_match += 1
-            rejected_artifact_count += artifact_count
-        if expected != "passed" and passed:
-            if scenario in {"no_citations", "uncited_claim", "executive_uncited"}:
-                uncited_count += 1
-            if scenario == "trivial_quote":
-                trivial_count += 1
-            if scenario in {"metadata_quote", "metadata_pilot_id", "metadata_url"}:
-                metadata_count += 1
+    valid = [item for item in results if item["expected_status"] == "passed"]
+    invalid = [item for item in results if item["expected_status"] != "passed"]
+    rejected_runs = [item for item in invalid if item["explanation_run_status"] == "rejected"]
+    failed_runs = [item for item in invalid if item["explanation_run_status"] == "failed"]
     return {
         "results": results,
-        "valid_executed": valid_count,
-        "valid_passed": sum(item["expected"] == "passed" and item["passed"] for item in results),
-        "invalid_executed": invalid_count,
-        "invalid_rejected": invalid_rejected,
-        "invalid_error_code_match_count": invalid_error_match,
-        "rejected_artifact_count": rejected_artifact_count,
-        "uncited_claim_rejection_count": uncited_count,
-        "trivial_quote_rejection_count": trivial_count,
-        "metadata_quote_rejection_count": metadata_count,
+        "constructed_valid_executed": len(valid),
+        "constructed_valid_passed": sum(item["passed"] for item in valid),
+        "constructed_valid_failed": len(valid) - sum(item["passed"] for item in valid),
+        "constructed_valid_artifact_count": sum(
+            item["artifact_count"] for item in valid if item["passed"]
+        ),
+        "constructed_invalid_executed": len(invalid),
+        "constructed_invalid_blocked": len(rejected_runs) + len(failed_runs),
+        "constructed_invalid_unexpected_pass": sum(item["passed"] for item in invalid),
+        "invalid_error_code_match_count": sum(
+            item["expected_error_code"] == item["actual_error_code"] for item in invalid
+        ),
+        "rejected_run_count": len(rejected_runs),
+        "failed_run_count": len(failed_runs),
+        "invalid_failed_or_rejected_count": len(rejected_runs) + len(failed_runs),
+        "rejected_artifact_count": sum(item["artifact_count"] for item in invalid),
+        "uncited_claim_rejection_count": sum(
+            item["scenario"] in {"no_citations", "uncited_claim", "executive_uncited"}
+            and item["passed"]
+            for item in invalid
+        ),
+        "trivial_quote_rejection_count": sum(
+            item["scenario"] == "trivial_quote" and item["passed"] for item in invalid
+        ),
+        "metadata_quote_rejection_count": sum(
+            item["scenario"] in {"metadata_quote", "metadata_pilot_id", "metadata_url"}
+            and item["passed"]
+            for item in invalid
+        ),
+    }
+
+
+def _exercise_budget_pressure() -> dict[str, Any]:
+    from tests.unit.test_controlled_explanations import _budget_context
+
+    try:
+        ctx_20_4 = _budget_context(20, 4)
+        preserves_minimum = all(len(finding.evidence) >= 1 for finding in ctx_20_4.payload.findings)
+    except Exception:
+        preserves_minimum = False
+    try:
+        ctx_20_4i = _budget_context(20, 4, illustrative=True)
+        preserves_minimum = preserves_minimum and all(
+            len(finding.evidence) >= 1 for finding in ctx_20_4i.payload.findings
+        )
+    except Exception:
+        preserves_minimum = False
+    fail_closed = False
+    try:
+        from app.core.exceptions import ExplanationError
+        from tests.unit.test_controlled_explanations import _budget_context as _bc
+
+        _bc(33, 1)
+    except ExplanationError:
+        fail_closed = True
+    except Exception:
+        pass
+    return {
+        "executed": 3,
+        "preserves_minimum": preserves_minimum,
+        "fail_closed": fail_closed,
     }
 
 
@@ -466,6 +506,32 @@ def main() -> None:
     )
     institution_prompt = load_prompt("institution")
     consumer_prompt = load_prompt("consumer")
+
+    valid_artifact_count_db = 0
+    if db_available:
+        budget_exercise = _exercise_budget_pressure()
+        context_budget_pressure_executed = True
+        context_budget_preserves_minimum_evidence = budget_exercise.get("preserves_minimum", False)
+        context_too_large_fail_closed = budget_exercise.get("fail_closed", False)
+        valid_artifact_count_db = primary["sample_count"] * 2 + (
+            1 if primary["deterministic_rerun"] else 0
+        )
+        deterministic_rerun_artifact_count = 1 if primary["deterministic_rerun"] else 0
+    else:
+        context_budget_pressure_executed = False
+        context_budget_preserves_minimum_evidence = False
+        context_too_large_fail_closed = False
+        deterministic_rerun_artifact_count = 0
+
+    formal_institution_count = primary["sample_count"] if db_available else 0
+    formal_consumer_count = primary["sample_count"] if db_available else 0
+
+    constructed_valid_artifacts = evaluation["constructed_valid_artifact_count"]
+    evidence_insufficient_artifacts = 1 if evidence_insufficient_pass else 0
+    total_valid_artifact_count = (
+        valid_artifact_count_db + constructed_valid_artifacts + evidence_insufficient_artifacts
+    )
+
     report = {
         "schema_version": "controlled_rag_acceptance_report_v2",
         "prompt_version": institution_prompt.prompt_version,
@@ -478,22 +544,29 @@ def main() -> None:
         "provider_version": "controlled_fixture_provider_v2",
         "database_executed": db_available,
         "postgresql_executed": False,
+        "comparison_database_executed": False,
         "docker_executed": False,
+        "alembic_check_executed": False,
+        "formal_database_acceptance_completed": False,
+        "offline_constructed_evaluation_completed": True,
         "screening_sample_count": primary["sample_count"],
         "screening_finding_count": primary["screening_finding_count"],
         "reviewed_evidence_link_count": primary["reviewed_evidence_link_count"],
         "trusted_knowledge_chunk_count": primary["trusted_knowledge_chunk_count"],
         "formal_context_count": len(primary["contexts"]),
-        "formal_institution_artifact_count": (primary["sample_count"] if db_available else 0),
-        "formal_consumer_artifact_count": (primary["sample_count"] if db_available else 0),
-        "deterministic_rerun_artifact_count": 1
-        if (db_available and primary["deterministic_rerun"])
-        else 0,
+        "formal_institution_artifact_count": formal_institution_count,
+        "formal_consumer_artifact_count": formal_consumer_count,
+        "formal_valid_artifact_count": valid_artifact_count_db,
+        "deterministic_rerun_artifact_count": deterministic_rerun_artifact_count,
         "regulatory_case_citation_count": primary["regulatory_case_citation_count"],
         "cross_database_context_sha_stability": context_stable,
         "cross_database_artifact_sha_stability": artifact_stable,
-        "historical_prompt_snapshot_stability": primary["historical_prompt_snapshot_stability"],
-        "historical_context_snapshot_stability": primary["historical_context_snapshot_stability"],
+        "historical_prompt_snapshot_stability": primary.get(
+            "historical_prompt_snapshot_stability", False
+        ),
+        "historical_context_snapshot_stability": primary.get(
+            "historical_context_snapshot_stability", False
+        ),
         "deterministic_rerun": primary["deterministic_rerun"],
         "constructed_response_samples": len(fixture["samples"]),
         "constructed_valid_expected": sum(
@@ -502,33 +575,64 @@ def main() -> None:
         "constructed_invalid_expected": sum(
             item["expected"] != "passed" for item in fixture["samples"]
         ),
-        "constructed_valid_executed": evaluation["valid_executed"],
-        "constructed_valid_passed": evaluation["valid_passed"],
-        "constructed_valid_artifact_count": sum(
-            item["passed"] for item in evaluation["results"] if item["expected"] == "passed"
+        "constructed_valid_executed": evaluation["constructed_valid_executed"],
+        "constructed_valid_passed": evaluation["constructed_valid_passed"],
+        "constructed_valid_failed": evaluation.get("constructed_valid_failed", 0),
+        "constructed_valid_artifact_count": constructed_valid_artifacts,
+        "constructed_invalid_executed": evaluation["constructed_invalid_executed"],
+        "constructed_invalid_blocked": evaluation["constructed_invalid_blocked"],
+        "constructed_invalid_unexpected_pass": evaluation.get(
+            "constructed_invalid_unexpected_pass", 0
         ),
-        "constructed_invalid_executed": evaluation["invalid_executed"],
-        "constructed_invalid_blocked": evaluation["invalid_rejected"],
         "invalid_error_code_match_count": evaluation["invalid_error_code_match_count"],
+        "rejected_run_count": evaluation["rejected_run_count"],
+        "failed_run_count": evaluation["failed_run_count"],
+        "invalid_failed_or_rejected_count": evaluation["invalid_failed_or_rejected_count"],
         "rejected_artifact_count": evaluation["rejected_artifact_count"],
-        "evidence_insufficient_valid_artifact_count": 1 if evidence_insufficient_pass else 0,
-        "rejected_run_count": 0 if db_available else 0,
-        "failed_run_count": 0,
-        "invalid_failed_or_rejected_count": evaluation["invalid_rejected"] if db_available else 0,
+        "evidence_insufficient_valid_artifact_count": evidence_insufficient_artifacts,
+        "total_valid_artifact_count": total_valid_artifact_count,
+        "artifact_count_formula": (
+            "formal_valid_artifact_count"
+            " + constructed_valid_artifact_count"
+            " + evidence_insufficient_valid_artifact_count"
+            " = total_valid_artifact_count"
+        ),
         "uncited_claim_rejection_count": evaluation["uncited_claim_rejection_count"],
         "trivial_quote_rejection_count": evaluation["trivial_quote_rejection_count"],
         "metadata_quote_rejection_count": evaluation["metadata_quote_rejection_count"],
-        "cross_finding_missing_citation_rejection_count": 0,
-        "partial_certainty_rejection_count": 0,
+        "cross_finding_missing_citation_rejection_count": sum(
+            item["actual_error_code"] == "explanation_citation_wrong_finding" and not item["passed"]
+            for item in evaluation["results"]
+        ),
+        "partial_certainty_rejection_count": sum(
+            item["actual_error_code"] == "explanation_missing_uncertainty" and not item["passed"]
+            for item in evaluation["results"]
+        ),
         "hidden_segment_rejection_count": 0,
         "evidence_insufficient_context_pass": evidence_insufficient_pass,
-        "context_budget_pressure_executed": True,
-        "context_budget_preserves_minimum_evidence": True,
-        "context_too_large_fail_closed": True,
+        "context_budget_pressure_executed": context_budget_pressure_executed,
+        "context_budget_preserves_minimum_evidence": context_budget_preserves_minimum_evidence,
+        "context_too_large_fail_closed": context_too_large_fail_closed,
         "constructed_evaluation_results": evaluation["results"],
     }
     report["sensitive_data_scan"] = _sensitive_scan(report)
     if db_available:
+        constructed_valid = all(
+            [
+                report["constructed_valid_executed"] == 12,
+                report["constructed_valid_passed"] == 12,
+                report["constructed_valid_failed"] == 0,
+            ]
+        )
+        constructed_invalid = all(
+            [
+                report["constructed_invalid_executed"] == 43,
+                report["constructed_invalid_blocked"] == 43,
+                report["constructed_invalid_unexpected_pass"] == 0,
+                report["invalid_error_code_match_count"] == 43,
+                report["rejected_artifact_count"] == 0,
+            ]
+        )
         if not all(
             [
                 report["formal_context_count"] == 60,
@@ -539,24 +643,29 @@ def main() -> None:
                 report["historical_context_snapshot_stability"],
                 report["deterministic_rerun"],
                 report["sensitive_data_scan"],
-                report["constructed_valid_executed"] == 12,
-                report["constructed_valid_passed"] == 12,
-                report["constructed_invalid_executed"] == 43,
-                report["constructed_invalid_blocked"] == 43,
-                report["invalid_error_code_match_count"] == 43,
-                report["rejected_artifact_count"] == 0,
+                constructed_valid,
+                constructed_invalid,
                 evidence_insufficient_pass,
+                report["context_budget_pressure_executed"],
+                report["context_too_large_fail_closed"],
             ]
         ):
             raise SystemExit("controlled_rag_acceptance_failed")
     else:
-        if not all(
+        offline_gate = all(
             [
+                report["constructed_valid_executed"] == 12,
+                report["constructed_valid_passed"] == 12,
+                report["constructed_valid_failed"] == 0,
+                report["constructed_invalid_executed"] == 43,
+                report["constructed_invalid_blocked"] == 43,
+                report["constructed_invalid_unexpected_pass"] == 0,
+                report["invalid_error_code_match_count"] == 43,
+                report["rejected_artifact_count"] == 0,
                 report["sensitive_data_scan"],
-                report["constructed_valid_expected"] == 12,
-                report["constructed_invalid_expected"] == 43,
             ]
-        ):
+        )
+        if not offline_gate:
             raise SystemExit("controlled_rag_acceptance_failed")
     args.json_report.parent.mkdir(parents=True, exist_ok=True)
     args.json_report.write_text(
@@ -564,6 +673,11 @@ def main() -> None:
         encoding="utf-8",
     )
     lines = ["# Controlled RAG acceptance report", ""]
+    if not db_available:
+        lines.append("该报告仅证明离线构造响应验证，不代表PostgreSQL正式数据验收完成。")
+        lines.append("")
+        lines.append("formal_database_acceptance_completed: `false`")
+        lines.append("")
     lines.extend(f"- {key}: `{value}`" for key, value in sorted(report.items()))
     args.markdown_report.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, sort_keys=True))

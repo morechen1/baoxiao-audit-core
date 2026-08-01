@@ -24,10 +24,18 @@ from app.services.explanation.schemas import (
 )
 
 UNCERTAINTY_EXPRESSIONS = (
+    "可能存在",
+    "可能涉及",
+    "风险信号",
     "需要进一步核验",
+    "尚需核验",
+    "部分支持",
+    "当前证据有限",
+    "当前证据不足",
+    "尚不能作出确定结论",
+    "仍需结合原始材料",
+    "不能据此直接认定",
     "当前证据不足以作出结论",
-    "可能存在风险信号",
-    "现有证据显示",
 )
 PARTIAL_CERTAINTY_PATTERNS = (
     r"已经得到确定证明",
@@ -43,6 +51,8 @@ PARTIAL_CERTAINTY_PATTERNS = (
     r"结论明确",
     r"必然",
     r"一定构成",
+    r"证据充分[^证]",
+    r"可以得出明确结论",
 )
 LEGAL_CONCLUSION_PATTERNS = (
     r"已违法",
@@ -227,10 +237,9 @@ class ControlledExplanationValidator:
             row_claims = [claim for claim, _ in self._row_claims(row)]
             narrative = "\n".join(claim.text for claim in row_claims)
             row_citation_count = sum(len(claim.citations) for claim in row_claims)
-            if context_finding.evidence_status in {
-                "partially_supported",
-                "evidence_insufficient",
-            } and not any(value in narrative for value in UNCERTAINTY_EXPRESSIONS):
+            if context_finding.evidence_status == "evidence_insufficient" and not any(
+                value in narrative for value in UNCERTAINTY_EXPRESSIONS
+            ):
                 raise ExplanationError("explanation_missing_uncertainty")
             if context_finding.evidence_status in {"supported", "partially_supported"}:
                 if row_citation_count == 0:
@@ -289,7 +298,7 @@ class ControlledExplanationValidator:
         if not claim.citations:
             raise ExplanationError("explanation_unsupported_claim")
         citations = self.citations.validate(built, scope, list(claim.citations))
-        self._check_partial_certainty(claim, scope, context_by_key)
+        self._check_partial_uncertainty(claim, scope, context_by_key)
         self._check_cross_finding_citation_coverage(scope, citations)
         cited_text = "\n".join(item.cited_quote for item in citations)
         deterministic_text = "\n".join(
@@ -322,7 +331,7 @@ class ControlledExplanationValidator:
         return result
 
     @staticmethod
-    def _check_partial_certainty(
+    def _check_partial_uncertainty(
         claim: GroundedClaimV1,
         scope: set[str],
         context_by_key: dict[str, Any],
@@ -332,9 +341,13 @@ class ControlledExplanationValidator:
         )
         if not has_partial or claim.claim_type == "deterministic_template":
             return
+        if not claim.text.strip() or not claim.citations:
+            raise ExplanationError("explanation_missing_uncertainty")
         for pattern in PARTIAL_CERTAINTY_PATTERNS:
             if re.search(pattern, claim.text):
                 raise ExplanationError("explanation_missing_uncertainty")
+        if not any(value in claim.text for value in UNCERTAINTY_EXPRESSIONS):
+            raise ExplanationError("explanation_missing_uncertainty")
 
     @staticmethod
     def _check_cross_finding_citation_coverage(
