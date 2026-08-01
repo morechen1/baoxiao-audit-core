@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from sqlalchemy import select
@@ -11,6 +11,7 @@ from app.models import FindingEvidenceLink, KnowledgeChunk, RiskFinding, Screeni
 from app.models.enums import DataType, ScreeningStatus
 from app.services.explanation.prompts import canonical_json_bytes, canonical_sha256
 from app.services.explanation.schemas import (
+    AllowedEvidenceSegment,
     ControlledEvidence,
     ControlledFinding,
     ControlledRAGContext,
@@ -27,6 +28,21 @@ SUPPORT_TYPE_PRIORITY = {
     "enforcement_example": 1,
     "product_term_context": 2,
 }
+ALLOWED_EVIDENCE_FIELDS = {
+    "normative_basis": ("article_text",),
+    "enforcement_example": ("illegal_facts", "original_sales_wording", "legal_basis"),
+    "product_term_context": (
+        "waiting_period",
+        "cooling_off_period",
+        "exclusions",
+        "cash_value_description",
+        "surrender_risk",
+        "insurance_responsibility",
+        "guaranteed_benefit",
+        "non_guaranteed_benefit",
+    ),
+}
+SUPPORTED_EVIDENCE_STATUSES = {"supported", "partially_supported"}
 
 
 @dataclass(frozen=True)
@@ -40,6 +56,14 @@ class EvidenceBinding:
     chunk_content_sha256: str
     source_url: str
     source_locator: dict[str, Any]
+    support_type: str
+    source_title: str
+    pilot_id: str | None
+    record_type: str
+    chunk_kind: str
+    context_scope: str
+    allowed_quote_segments: tuple[AllowedEvidenceSegment, ...]
+    semantic_anchors: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -49,8 +73,69 @@ class BuiltContext:
     bindings: dict[str, EvidenceBinding]
 
 
+class AllowedEvidenceQuoteBuilderV1:
+    version = "allowed_evidence_quote_builder_v1"
+
+    def build(self, link: FindingEvidenceLink) -> tuple[AllowedEvidenceSegment, ...]:
+        allowed = ALLOWED_EVIDENCE_FIELDS.get(link.support_type)
+        if allowed is None or not link.support_evaluation_passed:
+            raise ExplanationError("explanation_citation_snapshot_mismatch")
+        matched_fields = set(link.matched_evidence_fields)
+        field_order = {value: index for index, value in enumerate(allowed)}
+        segments: list[AllowedEvidenceSegment] = []
+        seen: set[tuple[str, str, int | None, int | None]] = set()
+        for reference in link.evidence_references_snapshot_json:
+            field_name = str(reference.get("field_name") or "")
+            mode = str(reference.get("mode") or "verbatim")
+            quote = str(reference.get("quote") or "").strip()
+            if (
+                field_name not in field_order
+                or field_name not in matched_fields
+                or mode not in {"verbatim", "normalized"}
+                or not quote
+            ):
+                continue
+            key = (
+                field_name,
+                quote,
+                _optional_int(reference.get("start_offset")),
+                _optional_int(reference.get("end_offset")),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            window = _evidence_window(
+                quote,
+                tuple(str(value) for value in link.actual_matched_substrings),
+                MAX_QUOTE_LENGTH,
+            )
+            segments.append(
+                AllowedEvidenceSegment(
+                    field_name=field_name,
+                    quote=window,
+                    evidence_snapshot={
+                        key: value for key, value in reference.items() if key != "quote"
+                    },
+                )
+            )
+        segments.sort(
+            key=lambda item: (
+                field_order[item.field_name],
+                _optional_int(item.evidence_snapshot.get("start_offset")) or -1,
+                _optional_int(item.evidence_snapshot.get("end_offset")) or -1,
+                item.quote,
+            )
+        )
+        if not segments:
+            raise ExplanationError("explanation_citation_snapshot_mismatch")
+        return tuple(segments[:8])
+
+
 class ControlledRAGContextBuilder:
     version = CONTEXT_SCHEMA_VERSION
+
+    def __init__(self) -> None:
+        self.allowed_quotes = AllowedEvidenceQuoteBuilderV1()
 
     def build(self, session: Session, screening_run_id: int) -> BuiltContext:
         run = session.scalar(
@@ -85,8 +170,7 @@ class ControlledRAGContextBuilder:
         for finding_ordinal, finding in enumerate(findings, start=1):
             finding_key = f"F{finding_ordinal:03d}"
             links = self._sorted_links(finding)
-            if not links:
-                raise ExplanationError("explanation_finding_evidence_missing")
+            self._validate_finding_evidence_status(finding.evidence_status, links)
             evidence_rows: list[ControlledEvidence] = []
             for link in links[:MAX_EVIDENCE_PER_FINDING]:
                 citation_key = f"E{citation_ordinal:03d}"
@@ -131,11 +215,20 @@ class ControlledRAGContextBuilder:
         return BuiltContext(context, canonical_sha256(payload), bindings)
 
     @staticmethod
+    def _validate_finding_evidence_status(status: str, links: list[FindingEvidenceLink]) -> None:
+        if status in SUPPORTED_EVIDENCE_STATUSES and not links:
+            raise ExplanationError("explanation_finding_evidence_missing")
+        if status == "evidence_insufficient" and links:
+            raise ExplanationError("explanation_finding_evidence_inconsistent")
+        if status not in {*SUPPORTED_EVIDENCE_STATUSES, "evidence_insufficient"}:
+            raise ExplanationError("explanation_finding_evidence_status_invalid")
+
+    @staticmethod
     def _sorted_links(finding: RiskFinding) -> list[FindingEvidenceLink]:
         return sorted(
             finding.evidence_links,
             key=lambda link: (
-                SUPPORT_TYPE_PRIORITY[link.support_type],
+                SUPPORT_TYPE_PRIORITY.get(link.support_type, 99),
                 link.retrieval_rank,
                 -link.retrieval_score,
                 str(link.source_document_snapshot_json.get("pilot_id") or ""),
@@ -143,8 +236,8 @@ class ControlledRAGContextBuilder:
             ),
         )
 
-    @staticmethod
     def _evidence(
+        self,
         session: Session,
         finding_key: str,
         citation_key: str,
@@ -161,6 +254,14 @@ class ControlledRAGContextBuilder:
             or chunk.chunk_content_sha256 != link.chunk_content_sha256
             or chunk.source_locator_json != source_locator
             or chunk.source_url != source.get("source_url")
+            or chunk.title != source.get("title")
+            or chunk.pilot_id != source.get("pilot_id")
+            or chunk.record_type != source.get("record_type")
+            or chunk.chunk_kind != source.get("chunk_kind")
+            or chunk.authenticity_status != source.get("authenticity_status")
+            or chunk.review_status != source.get("review_status")
+            or chunk.evidence_reference_json != link.evidence_references_snapshot_json
+            or not link.support_evaluation_passed
             or not source_locator
         ):
             raise ExplanationError("explanation_citation_snapshot_mismatch")
@@ -174,36 +275,46 @@ class ControlledRAGContextBuilder:
         portable_url = canonical_portable_source_url(source.get("source_url"))
         if not isinstance(portable_url, str) or not portable_url:
             raise ExplanationError("explanation_citation_snapshot_mismatch")
-        quote = chunk.text
-        if not quote.strip():
-            raise ExplanationError("explanation_citation_snapshot_mismatch")
-        short_quote = quote[:MAX_QUOTE_LENGTH]
+        segments = self.allowed_quotes.build(link)
+        primary = segments[0]
         evidence = ControlledEvidence(
             citation_key=citation_key,
             support_type=link.support_type,
-            source_title=str(source.get("title") or "未命名来源"),
+            source_title=str(source["title"]),
             source_url=portable_url,
             pilot_id=str(source["pilot_id"]) if source.get("pilot_id") else None,
             record_type=record_type,
-            chunk_kind=str(source.get("chunk_kind") or chunk.chunk_kind),
-            quote=short_quote,
+            chunk_kind=str(source["chunk_kind"]),
+            quote=primary.quote,
             source_locator=source_locator,
-            evidence_references=link.evidence_references_snapshot_json,
+            evidence_references=[item.evidence_snapshot for item in segments],
             context_scope=link.context_scope,
             chunk_identity_sha256=link.chunk_identity_sha256,
             chunk_content_sha256=link.chunk_content_sha256,
-            truncated=len(quote) > len(short_quote),
+            evidence_field_name=primary.field_name,
+            truncated=any(
+                len(str(item.evidence_snapshot.get("quote") or "")) > len(item.quote)
+                for item in segments
+            ),
         )
         return evidence, EvidenceBinding(
             finding_key=finding_key,
             finding_id=link.finding_id,
             link_id=link.id,
             citation_key=citation_key,
-            quote=short_quote,
+            quote=primary.quote,
             chunk_identity_sha256=link.chunk_identity_sha256,
             chunk_content_sha256=link.chunk_content_sha256,
             source_url=portable_url,
             source_locator=source_locator,
+            support_type=link.support_type,
+            source_title=str(source["title"]),
+            pilot_id=str(source["pilot_id"]) if source.get("pilot_id") else None,
+            record_type=record_type,
+            chunk_kind=str(source["chunk_kind"]),
+            context_scope=link.context_scope,
+            allowed_quote_segments=segments,
+            semantic_anchors=tuple(str(value) for value in link.actual_matched_substrings),
         )
 
     @staticmethod
@@ -211,21 +322,70 @@ class ControlledRAGContextBuilder:
         context: ControlledRAGContext,
         bindings: dict[str, EvidenceBinding],
     ) -> tuple[ControlledRAGContext, dict[str, EvidenceBinding]]:
-        if (
-            len(canonical_json_bytes(context.model_dump(mode="json")).decode("utf-8"))
-            <= MAX_CONTEXT_CHARACTERS
-        ):
+        if _context_length(context) <= MAX_CONTEXT_CHARACTERS:
             return context, bindings
         rows = [item.model_copy(deep=True) for item in context.findings]
         kept = dict(bindings)
-        for finding in reversed(rows):
-            while finding.evidence:
-                removed = finding.evidence.pop()
-                kept.pop(removed.citation_key, None)
-                candidate = context.model_copy(update={"findings": rows, "truncated": True})
-                if (
-                    len(canonical_json_bytes(candidate.model_dump(mode="json")).decode("utf-8"))
-                    <= MAX_CONTEXT_CHARACTERS
-                ):
-                    return candidate, kept
+
+        for quote_limit in (320, 160, 96, 64, 48, 32):
+            for finding in rows:
+                for index, evidence in enumerate(finding.evidence):
+                    binding = kept[evidence.citation_key]
+                    shortened = tuple(
+                        item.model_copy(
+                            update={
+                                "quote": _evidence_window(
+                                    item.quote, binding.semantic_anchors, quote_limit
+                                )
+                            }
+                        )
+                        for item in binding.allowed_quote_segments
+                    )
+                    primary = shortened[0].quote
+                    finding.evidence[index] = evidence.model_copy(
+                        update={
+                            "quote": primary,
+                            "evidence_field_name": shortened[0].field_name,
+                            "truncated": True,
+                        }
+                    )
+                    kept[evidence.citation_key] = replace(
+                        binding,
+                        quote=primary,
+                        allowed_quote_segments=shortened,
+                    )
+            candidate = context.model_copy(update={"findings": rows, "truncated": True})
+            if _context_length(candidate) <= MAX_CONTEXT_CHARACTERS:
+                return candidate, kept
+
+        for target_count in (2, 1):
+            for finding in rows:
+                if len(finding.evidence) <= target_count:
+                    continue
+                removed = finding.evidence[target_count:]
+                finding.evidence = finding.evidence[:target_count]
+                for item in removed:
+                    kept.pop(item.citation_key, None)
+            candidate = context.model_copy(update={"findings": rows, "truncated": True})
+            if _context_length(candidate) <= MAX_CONTEXT_CHARACTERS:
+                return candidate, kept
         raise ExplanationError("explanation_context_too_large")
+
+
+def _context_length(context: ControlledRAGContext) -> int:
+    return len(canonical_json_bytes(context.model_dump(mode="json")).decode("utf-8"))
+
+
+def _evidence_window(value: str, anchors: tuple[str, ...], limit: int) -> str:
+    if len(value) <= limit:
+        return value
+    positions = [value.find(anchor) for anchor in anchors if anchor and value.find(anchor) >= 0]
+    center = min(positions) if positions else len(value) // 2
+    start = max(0, center - limit // 3)
+    end = min(len(value), start + limit)
+    start = max(0, end - limit)
+    return value[start:end]
+
+
+def _optional_int(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None

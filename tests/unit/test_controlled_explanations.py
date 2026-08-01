@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -44,6 +44,7 @@ from app.services.explanation.providers import (
     provider_configuration_sha256,
 )
 from app.services.explanation.schemas import (
+    AllowedEvidenceSegment,
     ControlledEvidence,
     ControlledFinding,
     ControlledRAGContext,
@@ -66,6 +67,14 @@ EVAL_SAMPLES = cast(
 
 
 def _built_context(id_offset: int = 0) -> BuiltContext:
+    segment_one = AllowedEvidenceSegment(
+        field_name="article_text",
+        quote="不得利用监管机构名义对保险产品作引人误解的宣传",
+        evidence_snapshot={
+            "field_name": "article_text",
+            "mode": "verbatim",
+        },
+    )
     evidence_one = ControlledEvidence(
         citation_key="E001",
         support_type="normative_basis",
@@ -76,10 +85,19 @@ def _built_context(id_offset: int = 0) -> BuiltContext:
         chunk_kind="article_text",
         quote="不得利用监管机构名义对保险产品作引人误解的宣传",
         source_locator={"article_number": "第十七条"},
-        evidence_references=[{"field_name": "article_text", "quote": "不得引人误解"}],
+        evidence_references=[segment_one.evidence_snapshot],
         context_scope="not_applicable",
         chunk_identity_sha256="a" * 64,
         chunk_content_sha256="b" * 64,
+        evidence_field_name="article_text",
+    )
+    segment_two = AllowedEvidenceSegment(
+        field_name="exclusions",
+        quote="本合同责任免除事项以正式合同约定为准",
+        evidence_snapshot={
+            "field_name": "exclusions",
+            "mode": "verbatim",
+        },
     )
     evidence_two = ControlledEvidence(
         citation_key="E002",
@@ -91,10 +109,11 @@ def _built_context(id_offset: int = 0) -> BuiltContext:
         chunk_kind="exclusions",
         quote="本合同责任免除事项以正式合同约定为准",
         source_locator={"field_name": "exclusions"},
-        evidence_references=[{"field_name": "exclusions", "quote": "责任免除"}],
+        evidence_references=[segment_two.evidence_snapshot],
         context_scope="illustrative_not_material_specific",
         chunk_identity_sha256="c" * 64,
         chunk_content_sha256="d" * 64,
+        evidence_field_name="exclusions",
     )
     payload = ControlledRAGContext(
         context_schema_version="controlled_rag_context_v1",
@@ -139,26 +158,42 @@ def _built_context(id_offset: int = 0) -> BuiltContext:
     )
     bindings = {
         "E001": EvidenceBinding(
-            "F001",
-            10 + id_offset,
-            20 + id_offset,
-            "E001",
-            evidence_one.quote,
-            evidence_one.chunk_identity_sha256,
-            evidence_one.chunk_content_sha256,
-            evidence_one.source_url,
-            evidence_one.source_locator,
+            finding_key="F001",
+            finding_id=10 + id_offset,
+            link_id=20 + id_offset,
+            citation_key="E001",
+            quote=evidence_one.quote,
+            chunk_identity_sha256=evidence_one.chunk_identity_sha256,
+            chunk_content_sha256=evidence_one.chunk_content_sha256,
+            source_url=evidence_one.source_url,
+            source_locator=evidence_one.source_locator,
+            support_type=evidence_one.support_type,
+            source_title=evidence_one.source_title,
+            pilot_id=evidence_one.pilot_id,
+            record_type=evidence_one.record_type,
+            chunk_kind=evidence_one.chunk_kind,
+            context_scope=evidence_one.context_scope,
+            allowed_quote_segments=(segment_one,),
+            semantic_anchors=("监管机构",),
         ),
         "E002": EvidenceBinding(
-            "F002",
-            11 + id_offset,
-            21 + id_offset,
-            "E002",
-            evidence_two.quote,
-            evidence_two.chunk_identity_sha256,
-            evidence_two.chunk_content_sha256,
-            evidence_two.source_url,
-            evidence_two.source_locator,
+            finding_key="F002",
+            finding_id=11 + id_offset,
+            link_id=21 + id_offset,
+            citation_key="E002",
+            quote=evidence_two.quote,
+            chunk_identity_sha256=evidence_two.chunk_identity_sha256,
+            chunk_content_sha256=evidence_two.chunk_content_sha256,
+            source_url=evidence_two.source_url,
+            source_locator=evidence_two.source_locator,
+            support_type=evidence_two.support_type,
+            source_title=evidence_two.source_title,
+            pilot_id=evidence_two.pilot_id,
+            record_type=evidence_two.record_type,
+            chunk_kind=evidence_two.chunk_kind,
+            context_scope=evidence_two.context_scope,
+            allowed_quote_segments=(segment_two,),
+            semantic_anchors=("责任免除",),
         ),
     }
     return BuiltContext(payload, canonical_sha256(payload.model_dump(mode="json")), bindings)
@@ -173,103 +208,6 @@ def _valid_payload(audience: str) -> tuple[dict[str, Any], PromptDefinition, Bui
     return json.loads(response.raw_json), prompt, built
 
 
-def _rows(payload: dict[str, Any], audience: str) -> list[dict[str, Any]]:
-    key = "finding_explanations" if audience == "institution" else "risk_explanations"
-    return cast(list[dict[str, Any]], payload[key])
-
-
-def _narrative_key(audience: str) -> str:
-    return "explanation" if audience == "institution" else "plain_language_explanation"
-
-
-def _mutate(payload: dict[str, Any], audience: str, scenario: str, prompt: PromptDefinition) -> str:
-    rows = _rows(payload, audience)
-    first = rows[0]
-    second = rows[1]
-    narrative = _narrative_key(audience)
-    if scenario in {
-        "valid",
-        "historical_prompt",
-        "historical_context",
-        "cross_database",
-        "deterministic_rerun",
-        "all_sources_distinguished",
-    }:
-        pass
-    elif scenario == "continuous_short_quote":
-        first["citations"][0]["cited_quote"] = first["citations"][0]["cited_quote"][2:8]
-    elif scenario == "unknown_finding":
-        first["finding_key"] = "F999"
-    elif scenario in {"unknown_citation", "unselected_chunk", "regulatory_case"}:
-        first["citations"][0]["citation_key"] = "E999"
-    elif scenario == "wrong_finding":
-        first["citations"][0] = deepcopy(second["citations"][0])
-    elif scenario == "tampered_quote":
-        first["citations"][0]["cited_quote"] = "不存在的篡改引文"
-    elif scenario == "joined_quote":
-        quote = first["citations"][0]["cited_quote"]
-        first["citations"][0]["cited_quote"] = quote[:4] + quote[-4:]
-    elif scenario == "new_risk":
-        extra = deepcopy(first)
-        extra["finding_key"] = "F999"
-        rows.append(extra)
-    elif scenario == "modified_severity":
-        first["severity"] = "critical"
-    elif scenario == "modified_matched_text":
-        first["matched_text"] = "模型新增文本"
-    elif scenario == "legal_illegal":
-        first[narrative] = "该材料已违法。"
-    elif scenario == "legal_fraud":
-        first[narrative] = "该材料构成欺诈。"
-    elif scenario == "certain_penalty":
-        first[narrative] = "该主体必将受到处罚。"
-    elif scenario == "advice_buy":
-        first[narrative] = "建议购买。"
-    elif scenario == "advice_surrender":
-        first[narrative] = "建议立即退保。"
-    elif scenario == "guaranteed_return":
-        first[narrative] = "本解释保证收益。"
-    elif scenario == "guaranteed_claim":
-        first[narrative] = "保证赔付。"
-    elif scenario in {"missing_uncertainty", "insufficient_hidden"}:
-        first[narrative] = "该风险已经得到确定证明。"
-        if audience == "institution":
-            first["evidence_assessment"] = "证据充分。"
-    elif scenario == "missing_disclaimer":
-        payload["disclaimer"] = ""
-    elif scenario == "missing_illustrative":
-        for key, value in list(second.items()):
-            if isinstance(value, str):
-                second[key] = value.replace(prompt.illustrative_product_disclaimer, "")
-    elif scenario == "no_citations":
-        first["citations"] = []
-    elif scenario == "missing_field":
-        payload.pop("executive_summary" if audience == "institution" else "overall_notice")
-    elif scenario == "extra_field":
-        first["unexpected"] = True
-    elif scenario == "oversized":
-        first[narrative] = "甲" * 4001
-    elif scenario == "html_script":
-        first[narrative] = "<script>alert(1)</script>"
-    elif scenario == "unicode_citation":
-        first["citations"][0]["citation_key"] = "E００１"
-    elif scenario == "duplicate_citation":
-        first["citations"].append(deepcopy(first["citations"][0]))
-    elif scenario == "forged_url":
-        first["citations"][0]["source_url"] = "https://evil.test"
-    elif scenario == "forged_locator":
-        first["citations"][0]["source_locator"] = {"page": 999}
-    elif scenario == "database_id_citation":
-        first["citations"][0]["citation_key"] = "1"
-    elif scenario == "markdown":
-        return "```json\n{}\n```"
-    elif scenario == "empty":
-        return ""
-    else:
-        raise AssertionError(f"unsupported scenario: {scenario}")
-    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
-
-
 @pytest.mark.parametrize("sample", EVAL_SAMPLES, ids=lambda value: value["id"])
 def test_controlled_rag_constructed_response_corpus(sample: dict[str, Any]) -> None:
     assert sample["constructed"] is True
@@ -280,12 +218,10 @@ def test_controlled_rag_constructed_response_corpus(sample: dict[str, Any]) -> N
     built = _built_context()
     request = ExplanationProviderRequest(audience=audience, prompt=prompt, context=built.payload)
     if scenario in {"provider_timeout", "provider_exception"}:
-        provider_scenario = "timeout" if scenario == "provider_timeout" else "exception"
         with pytest.raises(ProviderGenerationError, match=expected):
-            DeterministicFixtureProvider(provider_scenario).generate(request)
+            DeterministicFixtureProvider(scenario).generate(request)
         return
-    payload, _, _ = _valid_payload(audience)
-    raw = _mutate(payload, audience, scenario, prompt)
+    raw = DeterministicFixtureProvider(scenario).generate(request).raw_json
     if expected == "passed":
         validated = ControlledExplanationValidator().validate(raw, prompt, built)
         assert validated.output["schema_version"] == prompt.output_schema_version
@@ -296,9 +232,9 @@ def test_controlled_rag_constructed_response_corpus(sample: dict[str, Any]) -> N
 
 
 def test_fixture_corpus_has_required_valid_invalid_balance() -> None:
-    assert len(EVAL_SAMPLES) == 47
+    assert len(EVAL_SAMPLES) == 55
     assert sum(item["expected"] == "passed" for item in EVAL_SAMPLES) == 12
-    assert sum(item["expected"] != "passed" for item in EVAL_SAMPLES) == 35
+    assert sum(item["expected"] != "passed" for item in EVAL_SAMPLES) == 43
 
 
 def test_prompt_registry_has_one_strict_version_per_audience() -> None:
@@ -376,12 +312,14 @@ def test_disabled_external_provider_fails_with_public_code() -> None:
 )
 def test_unsupported_claim_detector_allows_cautious_language(text: str) -> None:
     payload, prompt, _ = _valid_payload("institution")
-    payload["finding_explanations"][0]["explanation"] = text
+    payload["finding_explanations"][0]["explanation"]["text"] = text
     output = ControlledExplanationValidator().validate(
         json.dumps(payload, ensure_ascii=False), prompt, _built_context()
     )
     assert (
-        UnsupportedClaimDetectorV1().detect(InstitutionExplanationV1.model_validate(output.output))
+        UnsupportedClaimDetectorV1().detect(
+            InstitutionExplanationV1.model_validate(output.output), prompt
+        )
         is None
     )
     assert UnsupportedClaimDetectorV1.version == "unsupported_claim_detector_v1"
@@ -532,16 +470,10 @@ def _persist_screening_graph(session: Any) -> tuple[int, BuiltContext]:
     context = _built_context().payload.model_copy(
         update={"findings": [_built_context().payload.findings[0]]}
     )
-    binding = EvidenceBinding(
-        "F001",
-        finding.id,
-        link.id,
-        "E001",
-        context.findings[0].evidence[0].quote,
-        link.chunk_identity_sha256,
-        link.chunk_content_sha256,
-        str(document.source_url),
-        link.source_locator_snapshot_json,
+    binding = replace(
+        _built_context().bindings["E001"],
+        finding_id=finding.id,
+        link_id=link.id,
     )
     built = BuiltContext(
         context,
@@ -568,6 +500,206 @@ def test_context_builder_reads_only_selected_trusted_evidence(
         built.payload_sha256
         == ControlledRAGContextBuilder().build(session, screening_id).payload_sha256
     )
+
+
+def test_evidence_insufficient_builds_and_persists_zero_citation_artifact(
+    session: Any, monkeypatch: Any
+) -> None:
+    screening_id, _ = _persist_screening_graph(session)
+    session.query(FindingEvidenceLink).delete()
+    finding = session.query(RiskFinding).one()
+    finding.evidence_status = "evidence_insufficient"
+    screening = session.get(ScreeningRun, screening_id)
+    assert screening is not None
+    screening.insufficient_evidence_count = 1
+    session.commit()
+    monkeypatch.setattr(
+        FindingEvidenceAssembler,
+        "verify_trusted_index",
+        lambda _self, _session: SimpleNamespace(payload_hash="f" * 64),
+    )
+    built = ControlledRAGContextBuilder().build(session, screening_id)
+    assert built.payload.findings[0].evidence == []
+    assert built.bindings == {}
+    run = ControlledExplanationService().create(
+        session,
+        screening_run_id=screening_id,
+        audience="institution",
+        provider_name="deterministic_fixture",
+    )
+    artifact = ControlledExplanationService().artifact(session, run.id)
+    assert run.status == "completed"
+    assert "当前证据不足以作出结论" in json.dumps(artifact["validated_output"], ensure_ascii=False)
+    assert ControlledExplanationService().citations(session, run.id) == []
+    assert session.query(ExplanationArtifact).one().citations == []
+
+
+def _budget_context(finding_count: int, evidence_per_finding: int) -> BuiltContext:
+    findings: list[ControlledFinding] = []
+    bindings: dict[str, EvidenceBinding] = {}
+    ordinal = 1
+    for finding_index in range(finding_count):
+        evidence_rows: list[ControlledEvidence] = []
+        for evidence_index in range(evidence_per_finding):
+            key = f"E{ordinal:03d}"
+            quote = f"规范证据{finding_index}-{evidence_index}。" + "严" * 580
+            segment = AllowedEvidenceSegment(
+                field_name="article_text",
+                quote=quote,
+                evidence_snapshot={
+                    "field_name": "article_text",
+                    "mode": "verbatim",
+                    "start_offset": finding_index * 1000 + evidence_index * 600,
+                    "end_offset": finding_index * 1000 + evidence_index * 600 + len(quote),
+                },
+            )
+            evidence = ControlledEvidence(
+                citation_key=key,
+                support_type="normative_basis",
+                source_title="监管规则" + "甲" * 30,
+                source_url=f"https://example.test/rule/{finding_index}",
+                pilot_id=f"REG-{finding_index:03d}",
+                record_type="regulation",
+                chunk_kind="article_text",
+                quote=quote,
+                source_locator={"article_number": f"第{finding_index + 1}条", "path": "层" * 30},
+                evidence_references=[segment.evidence_snapshot],
+                context_scope="not_applicable",
+                chunk_identity_sha256=f"{ordinal:064x}",
+                chunk_content_sha256=f"{ordinal + 1000:064x}",
+                evidence_field_name="article_text",
+            )
+            evidence_rows.append(evidence)
+            bindings[key] = EvidenceBinding(
+                finding_key=f"F{finding_index + 1:03d}",
+                finding_id=finding_index + 1,
+                link_id=ordinal,
+                citation_key=key,
+                quote=quote,
+                chunk_identity_sha256=evidence.chunk_identity_sha256,
+                chunk_content_sha256=evidence.chunk_content_sha256,
+                source_url=evidence.source_url,
+                source_locator=evidence.source_locator,
+                support_type=evidence.support_type,
+                source_title=evidence.source_title,
+                pilot_id=evidence.pilot_id,
+                record_type=evidence.record_type,
+                chunk_kind=evidence.chunk_kind,
+                context_scope=evidence.context_scope,
+                allowed_quote_segments=(segment,),
+                semantic_anchors=(f"规范证据{finding_index}-{evidence_index}",),
+            )
+            ordinal += 1
+        findings.append(
+            ControlledFinding(
+                finding_key=f"F{finding_index + 1:03d}",
+                rule_id="regulatory_endorsement",
+                category="监管背书",
+                severity="high",
+                signal_strength="strong",
+                matched_text=f"风险信号{finding_index}",
+                raw_start_offset=finding_index * 5,
+                raw_end_offset=finding_index * 5 + 4,
+                deterministic_explanation="该表达需要人工复核。",
+                review_question="是否需要核验？",
+                evidence_status="partially_supported",
+                evidence=evidence_rows,
+            )
+        )
+    context = ControlledRAGContext(
+        context_schema_version="controlled_rag_context_v1",
+        screening_run_payload_sha256="e" * 64,
+        trusted_index_payload_hash="f" * 64,
+        material={"title": "压力材料", "material_type": "advertisement", "input_sha256": "1" * 64},
+        findings=findings,
+    )
+    fitted, fitted_bindings = ControlledRAGContextBuilder._fit_budget(context, bindings)
+    return BuiltContext(
+        fitted,
+        canonical_sha256(fitted.model_dump(mode="json")),
+        fitted_bindings,
+    )
+
+
+@pytest.mark.parametrize("finding_count,evidence_count", [(20, 4)])
+def test_context_budget_preserves_minimum_evidence_and_valid_output(
+    finding_count: int, evidence_count: int
+) -> None:
+    first = _budget_context(finding_count, evidence_count)
+    second = _budget_context(finding_count, evidence_count)
+    assert first.payload_sha256 == second.payload_sha256
+    assert all(len(finding.evidence) >= 1 for finding in first.payload.findings)
+    visible_keys = {
+        evidence.citation_key for finding in first.payload.findings for evidence in finding.evidence
+    }
+    assert visible_keys == set(first.bindings)
+    prompt = load_prompt("institution")
+    response = DeterministicFixtureProvider().generate(
+        ExplanationProviderRequest(audience="institution", prompt=prompt, context=first.payload)
+    )
+    validated = ControlledExplanationValidator().validate(response.raw_json, prompt, first)
+    assert len(validated.output["finding_explanations"]) == finding_count
+
+
+def test_33_finding_context_fails_closed_instead_of_dropping_required_evidence() -> None:
+    with pytest.raises(ExplanationError, match="explanation_context_too_large"):
+        _budget_context(33, 1)
+
+
+@pytest.mark.parametrize("field", ["title", "pilot_id"])
+def test_context_builder_rejects_complete_source_snapshot_drift(
+    session: Any, monkeypatch: Any, field: str
+) -> None:
+    screening_id, _ = _persist_screening_graph(session)
+    link = session.query(FindingEvidenceLink).one()
+    snapshot = dict(link.source_document_snapshot_json)
+    snapshot[field] = "tampered"
+    link.source_document_snapshot_json = snapshot
+    session.commit()
+    monkeypatch.setattr(
+        FindingEvidenceAssembler,
+        "verify_trusted_index",
+        lambda _self, _session: SimpleNamespace(payload_hash="f" * 64),
+    )
+    with pytest.raises(ExplanationError, match="explanation_citation_snapshot_mismatch"):
+        ControlledRAGContextBuilder().build(session, screening_id)
+
+
+def test_prompt_snapshot_forbidden_patterns_and_claim_types_are_enforced() -> None:
+    payload, prompt, built = _valid_payload("institution")
+    forbidden = prompt.model_copy(
+        update={"forbidden_claim_patterns": (*prompt.forbidden_claim_patterns, "风险信号")}
+    )
+    with pytest.raises(ExplanationError, match="explanation_unsupported_claim"):
+        ControlledExplanationValidator().validate(
+            json.dumps(payload, ensure_ascii=False), forbidden, built
+        )
+    restricted = prompt.model_copy(update={"allowed_claim_types": ("deterministic_template",)})
+    with pytest.raises(ExplanationError, match="explanation_output_invalid_schema"):
+        ControlledExplanationValidator().validate(
+            json.dumps(payload, ensure_ascii=False), restricted, built
+        )
+
+
+def test_consumer_artifact_and_citations_resolve_server_side_source_catalog(
+    session: Any, monkeypatch: Any
+) -> None:
+    screening_id, built = _persist_screening_graph(session)
+    service = ControlledExplanationService()
+    monkeypatch.setattr(service.context_builder, "build", lambda *_args: built)
+    run = service.create(
+        session,
+        screening_run_id=screening_id,
+        audience="consumer",
+        provider_name="deterministic_fixture",
+    )
+    artifact = service.artifact(session, run.id)
+    resolved = artifact["resolved_citations"]
+    assert resolved[0]["source_url"] == "https://example.test/regulation"
+    assert artifact["validated_output"]["evidence_links"] == resolved
+    catalog = service.citations(session, run.id)
+    assert catalog[0]["source_locator"] == {"article_number": "第十七条"}
+    assert catalog[0]["evidence_field_name"] == "article_text"
 
 
 def test_completed_service_persists_artifact_and_citations_without_raw_response(

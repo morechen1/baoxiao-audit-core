@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
 
@@ -18,7 +19,7 @@ from app.services.explanation.providers import (
     provider_configuration_sha256,
     provider_from_name,
 )
-from app.services.explanation.schemas import ExplanationProviderRequest
+from app.services.explanation.schemas import ExplanationProviderRequest, PromptDefinition
 from app.services.explanation.validators import ControlledExplanationValidator
 
 CITATION_ERROR_CODES = {
@@ -26,6 +27,8 @@ CITATION_ERROR_CODES = {
     "explanation_citation_wrong_finding",
     "explanation_citation_snapshot_mismatch",
     "explanation_duplicate_citation",
+    "explanation_citation_too_short",
+    "explanation_citation_not_substantive",
 }
 UNSUPPORTED_ERROR_CODES = {
     "explanation_unsupported_claim",
@@ -97,11 +100,16 @@ class ControlledExplanationService:
 
         raw_sha = hashlib.sha256(response.raw_json.encode("utf-8")).hexdigest()
         try:
-            validated = self.validator.validate(response.raw_json, prompt, built)
+            validation_prompt = PromptDefinition.model_validate(run.prompt_snapshot_json)
+            validated = self.validator.validate(response.raw_json, validation_prompt, built)
         except ExplanationError as exc:
             self._reject(session, run, str(exc))
             raise
         try:
+            resolved = [item.model_dump(mode="json") for item in validated.resolved_citations]
+            stored_output = deepcopy(validated.output)
+            if prompt.audience == "consumer":
+                stored_output["evidence_links"] = resolved
             artifact_payload = {
                 "output_schema_version": prompt.output_schema_version,
                 "prompt_sha256": run.prompt_sha256,
@@ -109,7 +117,8 @@ class ControlledExplanationService:
                 "provider_name": run.provider_name,
                 "provider_model": run.provider_model,
                 "provider_configuration_sha256": run.provider_configuration_sha256,
-                "validated_output": validated.output,
+                "validated_output": stored_output,
+                "resolved_citations": resolved,
                 "citations": [
                     {
                         "citation_key": item.citation_key,
@@ -127,7 +136,8 @@ class ControlledExplanationService:
                 explanation_run_id=run.id,
                 output_schema_version=prompt.output_schema_version,
                 raw_provider_response_sha256=raw_sha,
-                validated_output_json=validated.output,
+                validated_output_json=stored_output,
+                resolved_citations_json=resolved,
                 artifact_sha256=canonical_sha256(artifact_payload),
                 disclaimer=str(validated.output["disclaimer"]),
             )
@@ -138,10 +148,20 @@ class ControlledExplanationService:
                     ExplanationCitation(
                         explanation_artifact_id=artifact.id,
                         citation_key=item.citation_key,
+                        finding_key=item.finding_key,
                         finding_id=item.finding_id,
                         finding_evidence_link_id=item.finding_evidence_link_id,
                         chunk_identity_sha256=item.chunk_identity_sha256,
                         chunk_content_sha256=item.chunk_content_sha256,
+                        support_type=item.support_type,
+                        source_title=item.source_title,
+                        source_url=item.source_url,
+                        pilot_id=item.pilot_id,
+                        record_type=item.record_type,
+                        chunk_kind=item.chunk_kind,
+                        source_locator_snapshot_json=item.source_locator,
+                        context_scope=item.context_scope,
+                        evidence_field_name=item.evidence_field_name,
                         cited_quote=item.cited_quote,
                         quote_start_offset=item.quote_start_offset,
                         quote_end_offset=item.quote_end_offset,
@@ -193,6 +213,7 @@ class ControlledExplanationService:
             "output_schema_version": run.artifact.output_schema_version,
             "artifact_sha256": run.artifact.artifact_sha256,
             "validated_output": run.artifact.validated_output_json,
+            "resolved_citations": run.artifact.resolved_citations_json,
             "disclaimer": run.artifact.disclaimer,
         }
 
@@ -203,7 +224,17 @@ class ControlledExplanationService:
         return [
             {
                 "citation_key": item.citation_key,
+                "finding_key": item.finding_key,
                 "finding_id": item.finding_id,
+                "support_type": item.support_type,
+                "source_title": item.source_title,
+                "source_url": item.source_url,
+                "pilot_id": item.pilot_id,
+                "record_type": item.record_type,
+                "chunk_kind": item.chunk_kind,
+                "source_locator": item.source_locator_snapshot_json,
+                "context_scope": item.context_scope,
+                "evidence_field_name": item.evidence_field_name,
                 "chunk_identity_sha256": item.chunk_identity_sha256,
                 "chunk_content_sha256": item.chunk_content_sha256,
                 "cited_quote": item.cited_quote,

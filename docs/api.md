@@ -78,7 +78,10 @@
 `provider=deterministic_fixture|external`。当前 external Provider 默认禁用并返回
 `explanation_provider_not_configured`。服务只对 `completed` ScreeningRun 工作，并在调用
 Provider 前重新验证 finding 数量、可信索引 payload、已选块 identity/content hash、来源
-URL 与 locator。rejected/failed run 的 Artifact 端点返回稳定的
+完整来源快照和实质字段证据。`evidence_insufficient` finding 可以生成零引用但带固定
+不确定性表述的 Artifact。Artifact 的消费者来源目录及 `/citations` 返回服务端解析的
+真实 URL、标题、pilot ID、locator、字段名、context scope 和块哈希；模型不能提交这些
+来源元数据。rejected/failed run 的 Artifact 端点返回稳定的
 `explanation_artifact_not_available`，不会返回未验证自由文本或内部异常。
 
 完整上下文、引用、无依据陈述、历史快照和 illustrative 产品条款边界见

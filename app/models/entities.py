@@ -595,6 +595,7 @@ class ExplanationArtifact(Base):
     output_schema_version: Mapped[str] = mapped_column(String(80))
     raw_provider_response_sha256: Mapped[str] = mapped_column(String(64))
     validated_output_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    resolved_citations_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     artifact_sha256: Mapped[str] = mapped_column(String(64), index=True)
     disclaimer: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -634,6 +635,7 @@ class ExplanationCitation(Base):
         ForeignKey("explanation_artifacts.id", ondelete="CASCADE"), index=True
     )
     citation_key: Mapped[str] = mapped_column(String(20))
+    finding_key: Mapped[str] = mapped_column(String(20))
     finding_id: Mapped[int] = mapped_column(
         ForeignKey("risk_findings.id", ondelete="RESTRICT"), index=True
     )
@@ -642,6 +644,15 @@ class ExplanationCitation(Base):
     )
     chunk_identity_sha256: Mapped[str] = mapped_column(String(64))
     chunk_content_sha256: Mapped[str] = mapped_column(String(64))
+    support_type: Mapped[str] = mapped_column(String(40))
+    source_title: Mapped[str] = mapped_column(String(1000))
+    source_url: Mapped[str] = mapped_column(String(4096))
+    pilot_id: Mapped[str | None] = mapped_column(String(64))
+    record_type: Mapped[str] = mapped_column(String(50))
+    chunk_kind: Mapped[str] = mapped_column(String(80))
+    source_locator_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    context_scope: Mapped[str] = mapped_column(String(80))
+    evidence_field_name: Mapped[str] = mapped_column(String(80))
     cited_quote: Mapped[str] = mapped_column(Text)
     quote_start_offset: Mapped[int | None] = mapped_column(Integer)
     quote_end_offset: Mapped[int | None] = mapped_column(Integer)

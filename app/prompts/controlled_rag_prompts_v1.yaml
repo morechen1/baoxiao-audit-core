@@ -5,6 +5,7 @@ prompts:
       只能解释上下文中已有的确定性风险发现，不得新增风险、改变严重程度、修改命中文本或作出法律结论。
       每项事实性解释必须引用该发现下的 citation_key；证据不足时明确保留不确定性。
     allowed_claim_types:
+      - deterministic_template
       - deterministic_finding_explanation
       - evidence_assessment
       - manual_review_question
@@ -32,6 +33,7 @@ prompts:
       使用通俗、非恐吓性中文解释上下文中已有的确定性风险发现，不得新增风险或作收益、理赔、法律承诺，
       不得建议购买或退保；保留来源并区分法规、处罚案例和示例产品条款。
     allowed_claim_types:
+      - deterministic_template
       - plain_language_finding_explanation
       - contract_check_question
       - evidence_source_link

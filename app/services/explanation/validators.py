@@ -3,18 +3,22 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
+from collections.abc import Iterable
 from typing import Any
 
 from pydantic import ValidationError
 
 from app.core.exceptions import ExplanationError
-from app.services.explanation.context import BuiltContext
+from app.services.explanation.context import BuiltContext, EvidenceBinding
 from app.services.explanation.schemas import (
+    AllowedEvidenceSegment,
     ConsumerExplanationV1,
     ExplanationOutput,
+    GroundedClaimV1,
     InstitutionExplanationV1,
     OutputCitation,
     PromptDefinition,
+    ResolvedCitationV1,
     ValidatedCitation,
     ValidatedExplanation,
 )
@@ -44,13 +48,30 @@ UNSUPPORTED_CLAIM_PATTERNS = (
     r"不存在任何风险",
 )
 UNSAFE_MARKUP_PATTERN = re.compile(r"<\s*/?\s*(?:script|iframe|object|embed|html)\b", re.I)
+NUMBER_TOKEN_PATTERN = re.compile(
+    r"(?:[A-Za-z]+[\- ]?)?(?:\d+(?:\.\d+)?)(?:%|％|万?元|人|年|月|日|号)?"
+)
+MIN_SUBSTANTIVE_QUOTE_LENGTH = 6
+SHORT_DIRECT_WORDING_ALLOWLIST = frozenset({"优惠", "中奖"})
+CITATION_FORMAT_V1 = "E followed by exactly three ASCII digits"
+DETERMINISTIC_TEMPLATE_TEXT = frozenset(
+    {
+        "以下内容仅解释已持久化的确定性筛查发现。",
+        "这是对既有风险筛查结果的通俗说明。",
+        "当前证据不足以作出结论，需要进一步核验。",
+        "请核对正式保险合同。",
+    }
+)
 
 
 class UnsupportedClaimDetectorV1:
     version = "unsupported_claim_detector_v1"
 
-    def detect(self, output: ExplanationOutput) -> str | None:
+    def detect(self, output: ExplanationOutput, prompt: PromptDefinition) -> str | None:
         text = "\n".join(_narrative_strings(output.model_dump(mode="json")))
+        for pattern in prompt.forbidden_claim_patterns:
+            if re.search(pattern, text):
+                return _forbidden_pattern_code(pattern)
         if any(re.search(pattern, text) for pattern in LEGAL_CONCLUSION_PATTERNS):
             return "explanation_legal_conclusion_detected"
         if any(re.search(pattern, text) for pattern in FINANCIAL_ADVICE_PATTERNS):
@@ -66,7 +87,7 @@ class ExplanationCitationValidator:
     def validate(
         self,
         built: BuiltContext,
-        finding_key: str,
+        allowed_finding_keys: set[str],
         citations: list[OutputCitation],
     ) -> list[ValidatedCitation]:
         keys = [citation.citation_key for citation in citations]
@@ -77,15 +98,32 @@ class ExplanationCitationValidator:
             binding = built.bindings.get(citation.citation_key)
             if binding is None:
                 raise ExplanationError("explanation_unknown_citation_key")
-            if binding.finding_key != finding_key:
+            if binding.finding_key not in allowed_finding_keys:
                 raise ExplanationError("explanation_citation_wrong_finding")
-            start = binding.quote.find(citation.cited_quote)
-            if start < 0:
-                raise ExplanationError("explanation_citation_snapshot_mismatch")
+            normalized_length = len(re.sub(r"\s+", "", citation.cited_quote))
+            if (
+                normalized_length < MIN_SUBSTANTIVE_QUOTE_LENGTH
+                and citation.cited_quote not in SHORT_DIRECT_WORDING_ALLOWLIST
+            ):
+                raise ExplanationError("explanation_citation_too_short")
+            segment = self._segment(binding, citation.cited_quote)
+            if segment is None:
+                metadata_values = {
+                    binding.source_title,
+                    binding.source_url,
+                    binding.pilot_id or "",
+                }
+                code = (
+                    "explanation_citation_not_substantive"
+                    if citation.cited_quote in metadata_values
+                    else "explanation_citation_snapshot_mismatch"
+                )
+                raise ExplanationError(code)
+            start = segment.quote.find(citation.cited_quote)
             validated.append(
                 ValidatedCitation(
                     citation_key=citation.citation_key,
-                    finding_key=finding_key,
+                    finding_key=binding.finding_key,
                     finding_id=binding.finding_id,
                     finding_evidence_link_id=binding.link_id,
                     chunk_identity_sha256=binding.chunk_identity_sha256,
@@ -93,9 +131,25 @@ class ExplanationCitationValidator:
                     cited_quote=citation.cited_quote,
                     quote_start_offset=start,
                     quote_end_offset=start + len(citation.cited_quote),
+                    support_type=binding.support_type,
+                    source_title=binding.source_title,
+                    source_url=binding.source_url,
+                    pilot_id=binding.pilot_id,
+                    record_type=binding.record_type,
+                    chunk_kind=binding.chunk_kind,
+                    source_locator=binding.source_locator,
+                    context_scope=binding.context_scope,
+                    evidence_field_name=segment.field_name,
                 )
             )
         return validated
+
+    @staticmethod
+    def _segment(binding: EvidenceBinding, quote: str) -> AllowedEvidenceSegment | None:
+        for segment in binding.allowed_quote_segments:
+            if quote in segment.quote:
+                return segment
+        return None
 
 
 class ControlledExplanationValidator:
@@ -109,6 +163,8 @@ class ControlledExplanationValidator:
         prompt: PromptDefinition,
         built: BuiltContext,
     ) -> ValidatedExplanation:
+        if prompt.citation_format != CITATION_FORMAT_V1:
+            raise ExplanationError("explanation_output_invalid_schema")
         try:
             raw = json.loads(raw_json)
         except (json.JSONDecodeError, TypeError) as exc:
@@ -132,24 +188,43 @@ class ControlledExplanationValidator:
             raise ExplanationError("explanation_output_invalid_schema")
         context_by_key = {item.finding_key: item for item in built.payload.findings}
         row_keys = [row.finding_key for row in rows]
-        unknown = set(row_keys) - set(context_by_key)
-        if unknown:
+        if set(row_keys) - set(context_by_key):
             raise ExplanationError("explanation_unknown_finding_key")
         if Counter(row_keys) != Counter(context_by_key.keys()):
             raise ExplanationError("explanation_output_invalid_schema")
-        claim_error = self.claims.detect(output)
+        claim_error = self.claims.detect(output, prompt)
         if claim_error:
             raise ExplanationError(claim_error)
 
-        validated: list[ValidatedCitation] = []
+        validated_by_key: dict[str, ValidatedCitation] = {}
+        for claim, scope in self._claims(output):
+            self._validate_claim(
+                claim,
+                scope,
+                prompt,
+                built,
+                context_by_key,
+                validated_by_key,
+            )
+
         for row in rows:
             context_finding = context_by_key[row.finding_key]
-            narrative = self._row_narrative(row)
+            row_claims = [claim for claim, _ in self._row_claims(row)]
+            narrative = "\n".join(claim.text for claim in row_claims)
+            row_citation_count = sum(len(claim.citations) for claim in row_claims)
             if context_finding.evidence_status in {
                 "partially_supported",
                 "evidence_insufficient",
             } and not any(value in narrative for value in UNCERTAINTY_EXPRESSIONS):
                 raise ExplanationError("explanation_missing_uncertainty")
+            if context_finding.evidence_status in {"supported", "partially_supported"}:
+                if row_citation_count == 0:
+                    raise ExplanationError("explanation_unsupported_claim")
+            else:
+                if row_citation_count or any(
+                    claim.claim_type != "deterministic_template" for claim in row_claims
+                ):
+                    raise ExplanationError("explanation_unsupported_claim")
             if (
                 any(
                     evidence.context_scope == "illustrative_not_material_specific"
@@ -158,29 +233,151 @@ class ControlledExplanationValidator:
                 and prompt.illustrative_product_disclaimer not in narrative
             ):
                 raise ExplanationError("explanation_missing_product_context_disclaimer")
-            validated.extend(self.citations.validate(built, row.finding_key, list(row.citations)))
 
         if isinstance(output, ConsumerExplanationV1):
-            allowed = set(built.bindings)
-            for citation in output.evidence_links:
-                if citation.citation_key not in allowed:
-                    raise ExplanationError("explanation_unknown_citation_key")
-                binding = built.bindings[citation.citation_key]
-                if citation.cited_quote not in binding.quote:
-                    raise ExplanationError("explanation_citation_snapshot_mismatch")
+            catalog = self.citations.validate(
+                built,
+                set(context_by_key),
+                list(output.evidence_links),
+            )
+            expected = set(validated_by_key)
+            actual = {item.citation_key for item in catalog}
+            if actual != expected:
+                raise ExplanationError("explanation_output_invalid_schema")
+
+        validated = [validated_by_key[key] for key in sorted(validated_by_key)]
         return ValidatedExplanation(
             output=output.model_dump(mode="json"),
             citations=validated,
+            resolved_citations=[_resolved(item) for item in validated],
         )
 
+    def _validate_claim(
+        self,
+        claim: GroundedClaimV1,
+        scope: set[str],
+        prompt: PromptDefinition,
+        built: BuiltContext,
+        context_by_key: dict[str, Any],
+        validated_by_key: dict[str, ValidatedCitation],
+    ) -> None:
+        if not scope or scope - set(context_by_key):
+            raise ExplanationError("explanation_unknown_finding_key")
+        if claim.claim_type not in prompt.allowed_claim_types:
+            raise ExplanationError("explanation_output_invalid_schema")
+        if set(claim.finding_keys) != scope:
+            raise ExplanationError("explanation_unknown_finding_key")
+        if claim.claim_type == "deterministic_template":
+            if claim.citations or claim.text not in self._template_texts(scope, context_by_key):
+                raise ExplanationError("explanation_unsupported_claim")
+            return
+        if not claim.citations:
+            raise ExplanationError("explanation_unsupported_claim")
+        citations = self.citations.validate(built, scope, list(claim.citations))
+        cited_text = "\n".join(item.cited_quote for item in citations)
+        deterministic_text = "\n".join(
+            value
+            for key in scope
+            for value in (
+                context_by_key[key].matched_text,
+                context_by_key[key].deterministic_explanation,
+                context_by_key[key].review_question,
+            )
+        )
+        for token in NUMBER_TOKEN_PATTERN.findall(claim.text):
+            if token not in cited_text and token not in deterministic_text:
+                raise ExplanationError("explanation_unsupported_claim")
+        for item in citations:
+            previous = validated_by_key.get(item.citation_key)
+            if previous is not None and previous != item:
+                raise ExplanationError("explanation_citation_snapshot_mismatch")
+            validated_by_key[item.citation_key] = item
+
     @staticmethod
-    def _row_narrative(row: Any) -> str:
-        values = row.model_dump(mode="json")
-        return "\n".join(_narrative_strings(values))
+    def _template_texts(scope: set[str], context_by_key: dict[str, Any]) -> set[str]:
+        result = set(DETERMINISTIC_TEMPLATE_TEXT)
+        for key in scope:
+            finding = context_by_key[key]
+            result.update({finding.deterministic_explanation, finding.review_question})
+        return result
+
+    @staticmethod
+    def _row_claims(row: Any) -> Iterable[tuple[GroundedClaimV1, set[str]]]:
+        scope = {row.finding_key}
+        if hasattr(row, "explanation"):
+            yield row.explanation, scope
+            yield row.why_it_matters, scope
+            yield row.evidence_assessment, scope
+            for claim in row.review_actions:
+                yield claim, scope
+        else:
+            yield row.plain_language_explanation, scope
+            for claim in row.what_to_check:
+                yield claim, scope
+
+    def _claims(self, output: ExplanationOutput) -> Iterable[tuple[GroundedClaimV1, set[str]]]:
+        all_keys = {
+            row.finding_key
+            for row in (
+                output.finding_explanations
+                if isinstance(output, InstitutionExplanationV1)
+                else output.risk_explanations
+            )
+        }
+        if isinstance(output, InstitutionExplanationV1):
+            yield output.executive_summary, set(output.executive_summary.finding_keys)
+            for row in output.finding_explanations:
+                yield from self._row_claims(row)
+            for claim in output.cross_finding_observations:
+                yield claim, set(claim.finding_keys)
+            for claim in output.manual_review_priorities:
+                yield claim, set(claim.finding_keys)
+        else:
+            yield output.overall_notice, set(output.overall_notice.finding_keys)
+            for consumer_row in output.risk_explanations:
+                yield from self._row_claims(consumer_row)
+            for claim in output.questions_to_ask:
+                yield claim, set(claim.finding_keys)
+        if not all_keys:
+            raise ExplanationError("explanation_output_invalid_schema")
+
+
+def _resolved(item: ValidatedCitation) -> ResolvedCitationV1:
+    return ResolvedCitationV1(
+        citation_key=item.citation_key,
+        finding_key=item.finding_key,
+        support_type=item.support_type,
+        source_title=item.source_title,
+        source_url=item.source_url,
+        pilot_id=item.pilot_id,
+        record_type=item.record_type,
+        chunk_kind=item.chunk_kind,
+        source_locator=item.source_locator,
+        context_scope=item.context_scope,
+        evidence_field_name=item.evidence_field_name,
+        cited_quote=item.cited_quote,
+        chunk_identity_sha256=item.chunk_identity_sha256,
+        chunk_content_sha256=item.chunk_content_sha256,
+    )
+
+
+def _forbidden_pattern_code(pattern: str) -> str:
+    if any(value in pattern for value in ("违法", "欺诈", "处罚", "监管已经认定")):
+        return "explanation_legal_conclusion_detected"
+    if any(value in pattern for value in ("购买", "退保", "投资")):
+        return "explanation_financial_advice_detected"
+    return "explanation_unsupported_claim"
 
 
 def _narrative_strings(value: Any, key: str | None = None) -> list[str]:
-    if key in {"citation_key", "cited_quote"}:
+    if key in {
+        "citation_key",
+        "cited_quote",
+        "source_url",
+        "source_locator",
+        "source_title",
+        "disclaimer",
+    }:
         return []
     if isinstance(value, str):
         return [value]

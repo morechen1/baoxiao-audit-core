@@ -10,13 +10,17 @@
 
 `ControlledRAGContextBuilder` 输出 `controlled_rag_context_v1`。finding 与 citation 按
 PR #11 的稳定业务排序编号为 `F001`、`E001`，不使用数据库主键。上下文只包含材料基本
-信息、持久化 finding、已选 `FindingEvidenceLink` 快照和最多 600 字的连续证据摘录；
-每个 finding 最多四条证据，总上下文最多 30000 字。超限时按稳定逆序删除完整引用并标记
-`truncated=true`，不会拆散引用编号与 quote。
+信息、持久化 finding、已选 `FindingEvidenceLink` 快照和最多 600 字的连续实质字段证据；
+每个 finding 最多四条证据，总上下文最多 30000 字。超限时先围绕语义命中位置确定性缩短
+quote，再将每个 finding 的证据从四条降为两条、最后降为一条。`supported` 和
+`partially_supported` 永远保留至少一条证据；最小上下文仍超限时以
+`explanation_context_too_large` 失败关闭。`evidence_insufficient` 可以携带零条证据，
+但只能生成固定的不确定性说明和零 Citation。
 
 构建前重新验证可信索引 payload hash、活跃 KnowledgeChunk 的 identity/content hash、
-来源 URL 与 locator。`RegulatoryCase`、未入选块、原件全文、本地绝对路径、连接信息和
-秘密配置不会进入上下文。
+来源标题、pilot ID、record/chunk 类型、审核/真实性状态、URL、locator、字段证据引用和
+语义准入结果。`RegulatoryCase`、未入选块、原件全文、本地绝对路径、连接信息和秘密配置
+不会进入上下文。
 
 ## 提示词和 Provider
 
@@ -36,11 +40,25 @@ PR #11 的稳定业务排序编号为 `F001`、`E001`，不使用数据库主键
 
 机构端输出为 `institution_explanation_v1`，消费者端为
 `consumer_explanation_v1`；所有模型可见引用必须是 `E` 加三位 ASCII 数字。验证器依次
-检查严格 Schema、finding 归属、citation 归属、KnowledgeChunk 快照、连续 quote、
-不确定性、示例产品条款声明和固定 disclaimer。引用允许完整 quote 或连续短摘录，不允许
-改写、跨段拼接、伪造 URL/locator、数据库 ID 或未入选块。
+检查严格 Schema、finding 归属、citation 归属、KnowledgeChunk 完整来源快照、连续
+quote、不确定性、示例产品条款声明和固定 disclaimer。模型事实内容使用
+`GroundedClaimV1`，每一项 claim 明确列出 finding keys 和 citation keys；只有持久化的
+固定模板可不带引用。引用允许完整 quote 或连续短摘录，不允许改写、跨段拼接、伪造
+URL/locator、数据库 ID 或未入选块。
 
-`UnsupportedClaimDetectorV1` 是最低安全门，确定性拒绝违法/欺诈定性、必然处罚、保证
+`AllowedEvidenceQuoteBuilderV1` 只开放实质字段：法规依据限 `article_text`；处罚案例限
+`illegal_facts`、`original_sales_wording` 和必要的 `legal_basis`；产品上下文限等待期、
+犹豫期、责任免除、现金价值、退保风险等受控业务字段。标题、机关、主体、文号、日期、
+URL、pilot ID、单独处罚金额和 basic-information 标签只能展示为来源元数据，不能满足
+引用门禁。去除 Unicode 空白后少于六字符的引用默认拒绝，只有明确允许的短销售原话例外。
+
+验证完成后服务端根据不可变 binding 生成 `ResolvedCitationV1`，注入真实来源 URL、标题、
+locator、pilot ID、上下文范围和哈希。模型不能提供或改写这些来源字段；Artifact 和
+`/citations` 只返回持久化的来源快照，不随当前数据库内容变化。
+
+提示词快照中的 `allowed_claim_types`、`forbidden_claim_patterns` 和 `citation_format`
+均由验证器执行；新 run 使用新快照，历史 Artifact 不重新验证。`UnsupportedClaimDetectorV1`
+作为额外最低安全门，确定性拒绝违法/欺诈定性、必然处罚、保证
 赔付或收益、购买/退保建议、绝对退款和“无任何风险”等陈述。它不尝试替代人工语义审核。
 产品条款 evidence 的 `context_scope=illustrative_not_material_specific` 时，输出必须明确
 “示例产品条款不代表输入材料对应产品”，并提示核对正式合同。
@@ -53,6 +71,7 @@ SHA、上下文 SHA、安全 Provider 配置、结构化输出及稳定引用材
 异常创建 `failed` run。系统不自动重试；显式重试创建新 run，并通过 `retry_of_id` 保留
 关系。Artifact GET 只读历史快照，绝不再次调用 Provider。
 
-构造响应位于 `tests/fixtures/controlled_rag_eval_v1`，全部标记 `constructed=true`，不得
+构造响应位于 `tests/fixtures/controlled_rag_eval_v1`，全部标记 `constructed=true`，正式
+离线验收会逐条实际调用 Provider 和验证器，而不是只统计期望值。它们不得
 进入 `SourceDocument`、`KnowledgeChunk` 或正式证据。当前尚未绑定生产模型；下一阶段
 需单独完成供应商安全审计、密钥托管、超时/限流、生产评测和前端集成。

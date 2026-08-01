@@ -34,7 +34,7 @@
     {"id":"RAG-031","constructed":true,"audience":"institution","scenario":"missing_disclaimer","expected":"explanation_missing_disclaimer"},
     {"id":"RAG-032","constructed":true,"audience":"consumer","scenario":"missing_illustrative","expected":"explanation_missing_product_context_disclaimer"},
     {"id":"RAG-033","constructed":true,"audience":"institution","scenario":"regulatory_case","expected":"explanation_unknown_citation_key"},
-    {"id":"RAG-034","constructed":true,"audience":"consumer","scenario":"no_citations","expected":"explanation_output_invalid_schema"},
+    {"id":"RAG-034","constructed":true,"audience":"consumer","scenario":"no_citations","expected":"explanation_unsupported_claim"},
     {"id":"RAG-035","constructed":true,"audience":"institution","scenario":"missing_field","expected":"explanation_output_invalid_schema"},
     {"id":"RAG-036","constructed":true,"audience":"consumer","scenario":"extra_field","expected":"explanation_output_invalid_schema"},
     {"id":"RAG-037","constructed":true,"audience":"institution","scenario":"oversized","expected":"explanation_output_invalid_schema"},
@@ -47,6 +47,14 @@
     {"id":"RAG-044","constructed":true,"audience":"consumer","scenario":"markdown","expected":"explanation_output_invalid_schema"},
     {"id":"RAG-045","constructed":true,"audience":"institution","scenario":"empty","expected":"explanation_output_invalid_schema"},
     {"id":"RAG-046","constructed":true,"audience":"consumer","scenario":"provider_timeout","expected":"explanation_provider_timeout"},
-    {"id":"RAG-047","constructed":true,"audience":"institution","scenario":"provider_exception","expected":"explanation_provider_failed"}
+    {"id":"RAG-047","constructed":true,"audience":"institution","scenario":"provider_exception","expected":"explanation_provider_failed"},
+    {"id":"RAG-048","constructed":true,"audience":"institution","scenario":"uncited_claim","expected":"explanation_unsupported_claim"},
+    {"id":"RAG-049","constructed":true,"audience":"consumer","scenario":"trivial_quote","expected":"explanation_citation_too_short"},
+    {"id":"RAG-050","constructed":true,"audience":"institution","scenario":"metadata_quote","expected":"explanation_citation_not_substantive"},
+    {"id":"RAG-051","constructed":true,"audience":"consumer","scenario":"new_numeric_claim","expected":"explanation_unsupported_claim"},
+    {"id":"RAG-052","constructed":true,"audience":"institution","scenario":"unknown_claim_type","expected":"explanation_output_invalid_schema"},
+    {"id":"RAG-053","constructed":true,"audience":"consumer","scenario":"executive_uncited","expected":"explanation_unsupported_claim"},
+    {"id":"RAG-054","constructed":true,"audience":"institution","scenario":"metadata_pilot_id","expected":"explanation_citation_not_substantive"},
+    {"id":"RAG-055","constructed":true,"audience":"consumer","scenario":"metadata_url","expected":"explanation_citation_not_substantive"}
   ]
 }
