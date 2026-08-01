@@ -71,12 +71,21 @@ jobs:
           docker compose exec -T api alembic upgrade head
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://localhost:8000/health; then
-              exit 0
+              break
             fi
             sleep 2
           done
-          docker compose logs
-          exit 1
+          curl --fail --silent http://localhost:8000/health
+          screening_payload=$(curl --fail --silent \
+            -H 'Content-Type: application/json' \
+            -d '{"title":"CI筛查","material_type":"sales_script","raw_text":"保证收益","source_label":"ci_smoke"}' \
+            http://localhost:8000/api/v1/screenings)
+          run_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["screening_run_id"])' \
+            <<<"$screening_payload")
+          curl --fail --silent \
+            "http://localhost:8000/api/v1/screenings/$run_id/institution-report"
+          curl --fail --silent \
+            "http://localhost:8000/api/v1/screenings/$run_id/consumer-notice"
       - name: Compose logs on failure
         if: failure()
         run: docker compose logs

@@ -42,6 +42,9 @@ baoxiao-audit = "app.cli.main:app"
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"app/rules/insurance_marketing_rules_v1.json" = "app/rules/insurance_marketing_rules_v1.json"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

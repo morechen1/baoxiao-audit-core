@@ -57,6 +57,7 @@ from app.services.pilot.service import (
     write_collection_outcomes,
 )
 from app.services.review import ReviewService
+from app.services.screening import DeterministicScreeningService, load_ruleset
 from app.services.state_machine import StateMachineService
 from app.services.structured_records import StructuredRecordService
 from app.services.structured_revisions import StructuredDraftRevisionService
@@ -64,7 +65,78 @@ from app.services.validation import ValidationService
 
 app = typer.Typer(help="保销智审后端数据与审核工作流 CLI", no_args_is_help=True)
 knowledge_app = typer.Typer(help="可验证的可信词法检索管理", no_args_is_help=True)
+screening_app = typer.Typer(help="确定性营销合规风险筛查", no_args_is_help=True)
 app.add_typer(knowledge_app, name="knowledge")
+app.add_typer(screening_app, name="screening")
+
+
+@screening_app.command("run")
+def screening_run(
+    title: str = typer.Option(...),
+    material_type: str = typer.Option(..., "--material-type"),
+    text_file: Path = typer.Option(..., "--text-file", exists=True, dir_okay=False),
+    source_label: str = typer.Option("user_submission", "--source-label"),
+) -> None:
+    """Screen one plain-text marketing material using the shared service."""
+    raw_text = text_file.read_text(encoding="utf-8")
+    with SessionLocal() as session:
+        run = DeterministicScreeningService().run(
+            session,
+            title=title,
+            material_type=material_type,
+            raw_text=raw_text,
+            source_label=source_label,
+        )
+    typer.echo(
+        json.dumps(
+            {
+                "material_id": run.material_id,
+                "screening_run_id": run.id,
+                "status": run.status,
+                "finding_count": run.finding_count,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+
+
+@screening_app.command("show")
+def screening_show(run_id: int = typer.Argument(..., min=1)) -> None:
+    with SessionLocal() as session:
+        payload = DeterministicScreeningService().show(session, run_id)
+    typer.echo(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))
+
+
+@screening_app.command("institution-report")
+def screening_institution_report(run_id: int = typer.Argument(..., min=1)) -> None:
+    with SessionLocal() as session:
+        payload = DeterministicScreeningService().institution_report(session, run_id)
+    typer.echo(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))
+
+
+@screening_app.command("consumer-notice")
+def screening_consumer_notice(run_id: int = typer.Argument(..., min=1)) -> None:
+    with SessionLocal() as session:
+        payload = DeterministicScreeningService().consumer_notice(session, run_id)
+    typer.echo(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))
+
+
+@screening_app.command("rules")
+def screening_rules() -> None:
+    ruleset = load_ruleset()
+    typer.echo(
+        json.dumps(
+            {
+                "ruleset_version": ruleset.ruleset_version,
+                "ruleset_sha256": ruleset.sha256,
+                "rule_count": len(ruleset.rules),
+                "rules": [rule.model_dump(mode="json") for rule in ruleset.rules],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
 
 
 @knowledge_app.command("rebuild")

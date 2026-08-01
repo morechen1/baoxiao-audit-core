@@ -21,9 +21,11 @@ FastAPI 和 Typer CLI 共用 service/repository 层。PostgreSQL 保存来源、
 命名的原件，`data/parsed_artifacts` 保存按内容哈希命名的不可变解析 JSON。索引服务
 并为经审核、经公开来源验证且已准入的法规、产品和处罚记录物化可验证知识块。
 当前提供 PostgreSQL 中文确定性词法检索，不做 RAG、向量生成或自动法律结论。
+在该可信检索底座上还提供版本化、确定性的纯文本营销风险信号筛查及机构/消费者证据报告。
 
 详细设计见 [架构](docs/architecture.md)、[数据模型](docs/data-model.md) 和
 [可信知识检索基础层](docs/trusted-retrieval-foundation.md)。
+[确定性营销合规风险筛查](docs/deterministic-compliance-screening.md)。
 
 ## 快速启动
 
@@ -94,6 +96,9 @@ python -m app.cli.main knowledge rebuild
 python -m app.cli.main knowledge verify
 python -m app.cli.main knowledge search "销售误导" --record-type penalty
 python -m app.cli.main knowledge stats
+python -m app.cli.main screening run --title "测试营销话术" \
+  --material-type sales_script --text-file material.txt
+python -m app.cli.main screening rules
 python -m app.cli.main repair-status-consistency --dry-run
 python -m app.cli.main resubmit-for-review --record-type product_document \
   --record-id 123 --reason "已补充可核验官方来源"
@@ -128,6 +133,9 @@ curl 'http://localhost:8000/records?status=pending_review'
 curl 'http://localhost:8000/regulatory-cases?case_usage=external_test_candidate'
 curl 'http://localhost:8000/regulatory-cases/1'
 curl 'http://localhost:8000/api/v1/knowledge/search?query=销售误导&record_types=penalty'
+curl -X POST http://localhost:8000/api/v1/screenings \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"测试营销话术","material_type":"sales_script","raw_text":"保证收益","source_label":"user_submission"}'
 ```
 
 端点明细见 [API 文档](docs/api.md)。

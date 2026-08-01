@@ -40,3 +40,11 @@ class ReviewImportRequest(BaseModel):
 
 class StructuredImportRequest(BaseModel):
     path: Path
+
+
+class ScreeningCreateRequest(BaseModel):
+    title: str
+    material_type: str
+    raw_text: str
+    source_label: str = "user_submission"
+    external_reference: str | None = None

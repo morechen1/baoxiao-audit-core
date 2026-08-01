@@ -58,6 +58,33 @@ class KnowledgeIndexStatus(StrEnum):
     INDEX_FAILED = "index_failed"
 
 
+class MarketingMaterialType(StrEnum):
+    ADVERTISEMENT = "advertisement"
+    SALES_SCRIPT = "sales_script"
+    SOCIAL_MEDIA = "social_media"
+    SMS = "sms"
+    PRODUCT_INTRODUCTION = "product_introduction"
+    OTHER = "other"
+
+
+class ScreeningStatus(StrEnum):
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class FindingEvidenceStatus(StrEnum):
+    SUPPORTED = "supported"
+    PARTIALLY_SUPPORTED = "partially_supported"
+    EVIDENCE_INSUFFICIENT = "evidence_insufficient"
+
+
+class FindingSupportType(StrEnum):
+    NORMATIVE_BASIS = "normative_basis"
+    ENFORCEMENT_EXAMPLE = "enforcement_example"
+    PRODUCT_TERM_CONTEXT = "product_term_context"
+
+
 class SampleCategory(StrEnum):
     COMPLIANT = "compliant"
     BOUNDARY = "boundary"
@@ -94,3 +121,7 @@ KNOWLEDGE_INDEX_STATUS_VALUES = tuple(value.value for value in KnowledgeIndexSta
 DOCUMENT_DATA_TYPE_VALUES = tuple(value.value for value in DocumentDataType)
 REGULATORY_CASE_CATEGORY_VALUES = tuple(value.value for value in RegulatoryCaseCategory)
 REGULATORY_CASE_USAGE_VALUES = tuple(value.value for value in RegulatoryCaseUsage)
+MARKETING_MATERIAL_TYPE_VALUES = tuple(value.value for value in MarketingMaterialType)
+SCREENING_STATUS_VALUES = tuple(value.value for value in ScreeningStatus)
+FINDING_EVIDENCE_STATUS_VALUES = tuple(value.value for value in FindingEvidenceStatus)
+FINDING_SUPPORT_TYPE_VALUES = tuple(value.value for value in FindingSupportType)

@@ -19,6 +19,10 @@
 | GET | `/regulatory-cases/{id}` | 查看监管案例、字段证据与索引资格 |
 | POST | `/knowledge/index-approved` | 标记符合资格的可信记录 |
 | GET | `/api/v1/knowledge/search` | 查询经物化的可信法规、产品与处罚知识块 |
+| POST | `/api/v1/screenings` | 创建确定性营销风险筛查 |
+| GET | `/api/v1/screenings/{run_id}` | 读取筛查结果 |
+| GET | `/api/v1/screenings/{run_id}/institution-report` | 读取机构端证据报告 |
+| GET | `/api/v1/screenings/{run_id}/consumer-notice` | 读取消费者端固定风险提示 |
 
 未捕获异常返回 `{"error":{"code","message","details"}}`。FastAPI 自身的输入错误返回
 标准 422 结构；下一阶段可统一转换为同一错误信封。
@@ -52,3 +56,14 @@
 [可信知识检索基础层](trusted-retrieval-foundation.md)。
 
 本 API 当前只适用于受控环境，不包含生产级身份认证、权限系统或自动法律结论。
+
+## 确定性营销风险筛查
+
+`POST /api/v1/screenings` 只接受单份纯文本材料，`title` 最长 300 字符，`raw_text`
+最长 100000 字符，`material_type` 必须为受控枚举。HTML 标签或脚本只作为普通字符串，
+服务不访问 URL 或执行输入。创建前会验证整个可信知识索引；索引异常时以
+`screening_trusted_index_invalid` 失败关闭。
+
+输出只包含风险信号、待核验问题和可信证据快照，不构成违法认定。两个报告 GET 端点
+只读取已有 finding，不创建新记录。完整边界见
+[确定性营销合规风险筛查](deterministic-compliance-screening.md)。
