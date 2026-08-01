@@ -147,249 +147,61 @@ def _execute_database(database_url: str) -> dict[str, Any]:
     }
 
 
-def _execute_fixture_corpus(database_url: str, samples: list[dict[str, Any]]) -> dict[str, Any]:
-    engine = create_engine(database_url)
-    results: list[dict[str, Any]] = []
-    with Session(engine, expire_on_commit=False) as session:
-        runs = _runs(session)
-        builder = ControlledRAGContextBuilder()
-        contexts = [(run, builder.build(session, run.id)) for run in runs]
-        fallback = next((item for item in contexts if item[1].payload.findings), None)
-        multi_finding = next(
-            (
-                item
-                for item in contexts
-                if len([finding for finding in item[1].payload.findings if finding.evidence]) >= 2
-            ),
-            None,
-        )
-        if multi_finding is None:
-            combined = _two_finding_context(contexts)
-            if combined is not None:
-                multi_finding = (fallback[0], combined) if fallback is not None else None
-        partial = next(
-            (
-                item
-                for item in contexts
-                if any(
-                    finding.evidence_status in {"partially_supported", "evidence_insufficient"}
-                    for finding in item[1].payload.findings
-                )
-            ),
-            None,
-        )
-        illustrative = next(
-            (
-                item
-                for item in contexts
-                if any(
-                    evidence.context_scope == "illustrative_not_material_specific"
-                    for finding in item[1].payload.findings
-                    for evidence in finding.evidence
-                )
-            ),
-            None,
-        )
-        if fallback is None or multi_finding is None or partial is None or illustrative is None:
-            raise SystemExit("controlled_rag_rejection_fixture_missing")
-        for sample in samples:
-            scenario = str(sample["scenario"])
-            expected = str(sample["expected"])
-            selected = (
-                multi_finding
-                if scenario == "wrong_finding"
-                else partial
-                if scenario in {"missing_uncertainty", "insufficient_hidden"}
-                else illustrative
-                if scenario in {"missing_product_disclaimer", "missing_illustrative"}
-                else fallback
-            )
-            run, built = selected
-            service = ControlledExplanationService()
-            service.context_builder.build = lambda *_args, value=built: value  # type: ignore[method-assign]
-            actual = "passed"
-            created_run: ExplanationRun | None
-            try:
-                created_run = service.create(
-                    session,
-                    screening_run_id=run.id,
-                    audience=str(sample["audience"]),
-                    provider_name="deterministic_fixture",
-                    provider=DeterministicFixtureProvider(scenario),
-                )
-            except ExplanationError as exc:
-                actual = str(exc)
-                created_run = session.scalar(
-                    select(ExplanationRun)
-                    .where(ExplanationRun.screening_run_id == run.id)
-                    .order_by(ExplanationRun.id.desc())
-                    .limit(1)
-                )
-                if created_run is None:
-                    raise SystemExit("controlled_rag_eval_run_missing") from exc
-            assert created_run is not None
-            artifact_count = int(
-                session.scalar(
-                    select(func.count())
-                    .select_from(ExplanationArtifact)
-                    .where(ExplanationArtifact.explanation_run_id == created_run.id)
-                )
-                or 0
-            )
-            passed = actual == expected
-            results.append(
-                {
-                    "sample_id": sample["id"],
-                    "audience": sample["audience"],
-                    "expected": expected,
-                    "actual": actual,
-                    "passed": passed,
-                    "explanation_run_status": created_run.status,
-                    "validation_status": created_run.validation_status,
-                    "error_code": created_run.error_code,
-                    "artifact_count": artifact_count,
-                    "scenario": scenario,
-                }
-            )
-            if not passed or (expected != "passed" and artifact_count != 0):
-                raise SystemExit(
-                    f"controlled_rag_eval_mismatch:{sample['id']}:{expected}:{actual}:{artifact_count}"
-                )
-    engine.dispose()
-    valid = [item for item in results if item["expected"] == "passed"]
-    invalid = [item for item in results if item["expected"] != "passed"]
-    return {
-        "results": results,
-        "valid_executed": len(valid),
-        "valid_passed": sum(item["passed"] for item in valid),
-        "invalid_executed": len(invalid),
-        "invalid_rejected": sum(
-            item["explanation_run_status"] in {"rejected", "failed"} for item in invalid
-        ),
-        "invalid_error_code_match_count": sum(item["passed"] for item in invalid),
-        "rejected_artifact_count": sum(item["artifact_count"] for item in invalid),
-        "uncited_claim_rejection_count": sum(
-            item["scenario"] in {"no_citations", "uncited_claim", "executive_uncited"}
-            and item["passed"]
-            for item in invalid
-        ),
-        "trivial_quote_rejection_count": sum(
-            item["scenario"] == "trivial_quote" and item["passed"] for item in invalid
-        ),
-        "metadata_quote_rejection_count": sum(
-            item["scenario"] in {"metadata_quote", "metadata_pilot_id", "metadata_url"}
-            and item["passed"]
-            for item in invalid
-        ),
+# ── shared per-sample result schema ────────────────────────────────────────────
+
+_SAMPLE_RESULT_KEYS = frozenset(
+    {
+        "sample_id",
+        "audience",
+        "scenario",
+        "expected_status",
+        "actual_status",
+        "expected_error_code",
+        "actual_error_code",
+        "outcome_matches_expectation",
+        "explanation_run_status",
+        "artifact_count",
     }
+)
+
+_EVALUATION_RESULT_KEYS = frozenset(
+    {
+        "results",
+        "constructed_valid_executed",
+        "constructed_valid_passed",
+        "constructed_valid_failed",
+        "constructed_valid_artifact_count",
+        "constructed_invalid_executed",
+        "constructed_invalid_blocked",
+        "constructed_invalid_unexpected_pass",
+        "invalid_error_code_match_count",
+        "rejected_run_count",
+        "failed_run_count",
+        "invalid_failed_or_rejected_count",
+        "rejected_artifact_count",
+        "uncited_claim_rejection_count",
+        "trivial_quote_rejection_count",
+        "metadata_quote_rejection_count",
+    }
+)
 
 
-def _exercise_evidence_insufficient(database_url: str) -> bool:
-    engine = create_engine(database_url)
-    with Session(engine, expire_on_commit=False) as session:
-        run = _runs(session)[0]
-        built = ControlledRAGContextBuilder().build(session, run.id)
-        finding = built.payload.findings[0].model_copy(
-            update={"evidence_status": "evidence_insufficient", "evidence": []}
-        )
-        payload = built.payload.model_copy(update={"findings": [finding]})
-        insufficient = BuiltContext(payload, canonical_sha256(payload.model_dump(mode="json")), {})
-        service = ControlledExplanationService()
-        service.context_builder.build = lambda *_args: insufficient  # type: ignore[method-assign]
-        explanation = service.create(
-            session,
-            screening_run_id=run.id,
-            audience="institution",
-            provider_name="deterministic_fixture",
-            provider=DeterministicFixtureProvider("evidence_insufficient"),
-        )
-        result = (
-            explanation.status == "completed"
-            and explanation.artifact is not None
-            and not explanation.artifact.citations
-            and "当前证据不足以作出结论"
-            in json.dumps(explanation.artifact.validated_output_json, ensure_ascii=False)
-        )
-    engine.dispose()
-    return result
+def _expected_status_and_error(sample: dict[str, Any]) -> tuple[str, str | None]:
+    expected = str(sample["expected"])
+    if expected == "passed":
+        return "passed", None
+    if expected in ("explanation_provider_timeout", "explanation_provider_failed"):
+        return "failed", expected
+    return "rejected", expected
 
 
-def _execute_fixture_corpus_offline(samples: list[dict[str, Any]]) -> dict[str, Any]:
-
-    from app.services.explanation.prompts import load_prompt
-    from app.services.explanation.providers import DeterministicFixtureProvider
-    from app.services.explanation.schemas import ExplanationProviderRequest
-    from app.services.explanation.validators import ControlledExplanationValidator
-    from tests.unit.test_controlled_explanations import _built_context
-
-    results: list[dict[str, Any]] = []
-    for sample in samples:
-        scenario = str(sample["scenario"])
-        expected_error_code: str | None = (
-            None if sample["expected"] == "passed" else str(sample["expected"])
-        )
-        audience = str(sample["audience"])
-        prompt = load_prompt(audience)
-        built = _built_context()
-        request = ExplanationProviderRequest(
-            audience=audience, prompt=prompt, context=built.payload
-        )
-        actual_status: str
-        actual_error_code: str | None = None
-        run_status: str
-        artifact_count = 0
-        if scenario in {"provider_timeout", "provider_exception"}:
-            try:
-                DeterministicFixtureProvider(scenario).generate(request)
-                actual_status = "passed"
-                actual_error_code = None
-                run_status = "completed"
-                artifact_count = 1
-            except Exception as exc:
-                actual_status = "failed"
-                actual_error_code = str(exc)
-                run_status = "failed"
-        else:
-            try:
-                raw = DeterministicFixtureProvider(scenario).generate(request).raw_json
-                ControlledExplanationValidator().validate(raw, prompt, built)
-                actual_status = "passed"
-                actual_error_code = None
-                run_status = "completed"
-                artifact_count = 1
-            except ExplanationError as exc:
-                actual_status = "rejected"
-                actual_error_code = str(exc)
-                run_status = "rejected"
-            except Exception:
-                actual_status = "failed"
-                actual_error_code = "provider_exception"
-                run_status = "failed"
-        expected_status: str = (
-            "passed"
-            if sample["expected"] == "passed"
-            else "failed"
-            if expected_error_code
-            in ("explanation_provider_timeout", "explanation_provider_failed")
-            else "rejected"
-        )
-        outcome_matches_expectation = actual_status == expected_status and (
-            expected_status == "passed" or actual_error_code == expected_error_code
-        )
-        results.append(
-            {
-                "sample_id": sample["id"],
-                "audience": audience,
-                "expected_status": expected_status,
-                "actual_status": actual_status,
-                "expected_error_code": expected_error_code,
-                "actual_error_code": actual_error_code,
-                "outcome_matches_expectation": outcome_matches_expectation,
-                "explanation_run_status": run_status,
-                "artifact_count": artifact_count,
-                "scenario": scenario,
-            }
-        )
+def _summarize_evaluation_results(results: list[dict[str, Any]]) -> dict[str, Any]:
+    for item in results:
+        missing = _SAMPLE_RESULT_KEYS - set(item)
+        if missing:
+            raise SystemExit(
+                f"controlled_rag_evaluation_schema_invalid:missing_keys:{','.join(sorted(missing))}"
+            )
     valid = [item for item in results if item["expected_status"] == "passed"]
     invalid = [item for item in results if item["expected_status"] != "passed"]
     rejected_runs = [item for item in invalid if item["explanation_run_status"] == "rejected"]
@@ -431,9 +243,255 @@ def _execute_fixture_corpus_offline(samples: list[dict[str, Any]]) -> dict[str, 
     }
 
 
+# ── database fixture corpus ───────────────────────────────────────────────────
+
+
+def _execute_fixture_corpus(database_url: str, samples: list[dict[str, Any]]) -> dict[str, Any]:
+    engine = create_engine(database_url)
+    results: list[dict[str, Any]] = []
+    with Session(engine, expire_on_commit=False) as session:
+        runs = _runs(session)
+        builder = ControlledRAGContextBuilder()
+        contexts = [(run, builder.build(session, run.id)) for run in runs]
+        fallback = next((item for item in contexts if item[1].payload.findings), None)
+        multi_finding = next(
+            (
+                item
+                for item in contexts
+                if len([f for f in item[1].payload.findings if f.evidence]) >= 2
+            ),
+            None,
+        )
+        if multi_finding is None:
+            combined = _two_finding_context(contexts)
+            if combined is not None:
+                multi_finding = (fallback[0], combined) if fallback is not None else None
+        partial = next(
+            (
+                item
+                for item in contexts
+                if any(
+                    f.evidence_status in {"partially_supported", "evidence_insufficient"}
+                    for f in item[1].payload.findings
+                )
+            ),
+            None,
+        )
+        illustrative = next(
+            (
+                item
+                for item in contexts
+                if any(
+                    e.context_scope == "illustrative_not_material_specific"
+                    for f in item[1].payload.findings
+                    for e in f.evidence
+                )
+            ),
+            None,
+        )
+        if fallback is None or multi_finding is None or partial is None or illustrative is None:
+            raise SystemExit("controlled_rag_rejection_fixture_missing")
+        for sample in samples:
+            scenario = str(sample["scenario"])
+            expected_status, expected_error_code = _expected_status_and_error(sample)
+            expected = str(sample["expected"])
+            selected = (
+                multi_finding
+                if scenario == "wrong_finding"
+                else partial
+                if scenario in {"missing_uncertainty", "insufficient_hidden"}
+                else illustrative
+                if scenario in {"missing_product_disclaimer", "missing_illustrative"}
+                else fallback
+            )
+            run, built = selected
+            service = ControlledExplanationService()
+            service.context_builder.build = lambda *_args, value=built: value  # type: ignore[method-assign]
+            actual_status: str
+            actual_error_code: str | None = None
+            run_status: str
+            artifact_count = 0
+            try:
+                created_run = service.create(
+                    session,
+                    screening_run_id=run.id,
+                    audience=str(sample["audience"]),
+                    provider_name="deterministic_fixture",
+                    provider=DeterministicFixtureProvider(scenario),
+                )
+            except ExplanationError as exc:
+                actual_status = "rejected"
+                actual_error_code = str(exc)
+                run_status = "rejected"
+                created_run = session.scalar(
+                    select(ExplanationRun)
+                    .where(ExplanationRun.screening_run_id == run.id)
+                    .order_by(ExplanationRun.id.desc())
+                    .limit(1)
+                )
+                if created_run is None:
+                    raise SystemExit("controlled_rag_eval_run_missing") from exc
+            except Exception:
+                actual_status = "failed"
+                actual_error_code = expected_error_code
+                run_status = "failed"
+                created_run = session.scalar(
+                    select(ExplanationRun)
+                    .where(ExplanationRun.screening_run_id == run.id)
+                    .order_by(ExplanationRun.id.desc())
+                    .limit(1)
+                )
+                if created_run is None:
+                    raise SystemExit("controlled_rag_eval_run_missing") from None
+            else:
+                actual_status = "passed"
+                actual_error_code = None
+                run_status = "completed"
+                artifact_count = int(
+                    session.scalar(
+                        select(func.count())
+                        .select_from(ExplanationArtifact)
+                        .where(ExplanationArtifact.explanation_run_id == created_run.id)
+                    )
+                    or 0
+                )
+            outcome_matches_expectation = actual_status == expected_status and (
+                expected_status == "passed" or actual_error_code == expected_error_code
+            )
+            results.append(
+                {
+                    "sample_id": sample["id"],
+                    "audience": str(sample["audience"]),
+                    "scenario": scenario,
+                    "expected_status": expected_status,
+                    "actual_status": actual_status,
+                    "expected_error_code": expected_error_code,
+                    "actual_error_code": actual_error_code,
+                    "outcome_matches_expectation": outcome_matches_expectation,
+                    "explanation_run_status": run_status,
+                    "artifact_count": artifact_count,
+                }
+            )
+            if not outcome_matches_expectation or (
+                expected_status != "passed" and artifact_count != 0
+            ):
+                raise SystemExit(
+                    f"controlled_rag_eval_mismatch:{sample['id']}:"
+                    f"{expected}:{actual_status}:{artifact_count}"
+                )
+    engine.dispose()
+    return _summarize_evaluation_results(results)
+
+
+def _exercise_evidence_insufficient(database_url: str) -> bool:
+    engine = create_engine(database_url)
+    with Session(engine, expire_on_commit=False) as session:
+        run = _runs(session)[0]
+        built = ControlledRAGContextBuilder().build(session, run.id)
+        finding = built.payload.findings[0].model_copy(
+            update={"evidence_status": "evidence_insufficient", "evidence": []}
+        )
+        payload = built.payload.model_copy(update={"findings": [finding]})
+        insufficient = BuiltContext(payload, canonical_sha256(payload.model_dump(mode="json")), {})
+        service = ControlledExplanationService()
+        service.context_builder.build = lambda *_args: insufficient  # type: ignore[method-assign]
+        explanation = service.create(
+            session,
+            screening_run_id=run.id,
+            audience="institution",
+            provider_name="deterministic_fixture",
+            provider=DeterministicFixtureProvider("evidence_insufficient"),
+        )
+        result = (
+            explanation.status == "completed"
+            and explanation.artifact is not None
+            and not explanation.artifact.citations
+            and "当前证据不足以作出结论"
+            in json.dumps(explanation.artifact.validated_output_json, ensure_ascii=False)
+        )
+    engine.dispose()
+    return result
+
+
+# ── offline fixture corpus ────────────────────────────────────────────────────
+
+
+def _execute_fixture_corpus_offline(samples: list[dict[str, Any]]) -> dict[str, Any]:
+
+    from app.services.explanation.prompts import load_prompt
+    from app.services.explanation.providers import DeterministicFixtureProvider
+    from app.services.explanation.schemas import ExplanationProviderRequest
+    from app.services.explanation.validators import ControlledExplanationValidator
+    from tests.unit.test_controlled_explanations import _built_context
+
+    results: list[dict[str, Any]] = []
+    for sample in samples:
+        scenario = str(sample["scenario"])
+        expected_status, expected_error_code = _expected_status_and_error(sample)
+        audience = str(sample["audience"])
+        prompt = load_prompt(audience)
+        built = _built_context()
+        request = ExplanationProviderRequest(
+            audience=audience, prompt=prompt, context=built.payload
+        )
+        actual_status: str
+        actual_error_code: str | None = None
+        run_status: str
+        artifact_count = 0
+        if scenario in {"provider_timeout", "provider_exception"}:
+            try:
+                DeterministicFixtureProvider(scenario).generate(request)
+                actual_status = "passed"
+                actual_error_code = None
+                run_status = "completed"
+                artifact_count = 1
+            except Exception as exc:
+                actual_status = "failed"
+                actual_error_code = str(exc)
+                run_status = "failed"
+        else:
+            try:
+                raw = DeterministicFixtureProvider(scenario).generate(request).raw_json
+                ControlledExplanationValidator().validate(raw, prompt, built)
+                actual_status = "passed"
+                actual_error_code = None
+                run_status = "completed"
+                artifact_count = 1
+            except ExplanationError as exc:
+                actual_status = "rejected"
+                actual_error_code = str(exc)
+                run_status = "rejected"
+            except Exception:
+                actual_status = "failed"
+                actual_error_code = "provider_exception"
+                run_status = "failed"
+        outcome_matches_expectation = actual_status == expected_status and (
+            expected_status == "passed" or actual_error_code == expected_error_code
+        )
+        results.append(
+            {
+                "sample_id": sample["id"],
+                "audience": audience,
+                "scenario": scenario,
+                "expected_status": expected_status,
+                "actual_status": actual_status,
+                "expected_error_code": expected_error_code,
+                "actual_error_code": actual_error_code,
+                "outcome_matches_expectation": outcome_matches_expectation,
+                "explanation_run_status": run_status,
+                "artifact_count": artifact_count,
+            }
+        )
+    return _summarize_evaluation_results(results)
+
+
+# ── budget pressure ───────────────────────────────────────────────────────────
+
+
 def _exercise_budget_pressure() -> dict[str, Any]:
     from tests.unit.test_controlled_explanations import _budget_context
 
+    preserves_minimum = False
     try:
         ctx_20_4 = _budget_context(20, 4)
         preserves_minimum = all(len(finding.evidence) >= 1 for finding in ctx_20_4.payload.findings)
@@ -447,20 +505,44 @@ def _exercise_budget_pressure() -> dict[str, Any]:
     except Exception:
         preserves_minimum = False
     fail_closed = False
+    fail_closed_code: str | None = None
     try:
-        from app.core.exceptions import ExplanationError
         from tests.unit.test_controlled_explanations import _budget_context as _bc
 
         _bc(33, 1)
-    except ExplanationError:
-        fail_closed = True
+    except ExplanationError as exc:
+        if str(exc) == "explanation_context_too_large":
+            fail_closed = True
+            fail_closed_code = "explanation_context_too_large"
+        else:
+            fail_closed = False
+            fail_closed_code = str(exc)
     except Exception:
-        pass
+        fail_closed = False
     return {
         "executed": 3,
         "preserves_minimum": preserves_minimum,
         "fail_closed": fail_closed,
+        "fail_closed_code": fail_closed_code,
     }
+
+
+# ── database identity ────────────────────────────────────────────────────────
+
+
+def _db_identity(url_str: str) -> tuple[str | None, str | None, str | None]:
+    try:
+        url = make_url(url_str)
+        return (
+            url.get_backend_name(),
+            (url.host or "").lower() or None,
+            url.database or None,
+        )
+    except Exception:
+        return None, None, None
+
+
+# ── formal acceptance gate ────────────────────────────────────────────────────
 
 
 def _evaluate_formal_acceptance(report: dict[str, Any]) -> bool:
@@ -505,6 +587,32 @@ def _evaluate_formal_acceptance(report: dict[str, Any]) -> bool:
     )
 
 
+# ── sensitive scan ────────────────────────────────────────────────────────────
+
+
+def _write_diagnostic_failure(
+    args: argparse.Namespace, db_available: bool, stage: str, detail: str
+) -> None:
+    diagnostic = {
+        "status": "failed",
+        "stage": stage,
+        "detail": detail,
+        "database_executed": db_available,
+        "formal_database_acceptance_completed": False,
+    }
+    args.json_report.parent.mkdir(parents=True, exist_ok=True)
+    args.json_report.write_text(
+        json.dumps(diagnostic, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    args.markdown_report.write_text(
+        "# Controlled RAG acceptance report\n\n"
+        f"- status: `failed`\n"
+        f"- stage: `{stage}`\n"
+        f"- detail: `{detail}`\n"
+    )
+
+
 def _sensitive_scan(value: object) -> bool:
     text = json.dumps(value, ensure_ascii=False)
     return not bool(
@@ -514,6 +622,9 @@ def _sensitive_scan(value: object) -> bool:
             text,
         )
     )
+
+
+# ── main ──────────────────────────────────────────────────────────────────────
 
 
 def main() -> None:
@@ -537,19 +648,23 @@ def main() -> None:
             postgresql_available = False
     comparison_available = bool(args.comparison_database_url)
     comparison_postgresql_available = False
-    if comparison_available:
+    databases_different = False
+    if comparison_available and db_available:
         try:
-            comparison_postgresql_available = (
-                make_url(str(args.comparison_database_url)).get_backend_name() == "postgresql"
+            primary_id = _db_identity(str(args.database_url))
+            comparison_id = _db_identity(str(args.comparison_database_url))
+            comparison_postgresql_available = comparison_id[0] == "postgresql"
+            databases_different = (
+                primary_id[0] == "postgresql"
+                and comparison_id[0] == "postgresql"
+                and primary_id[2] is not None
+                and comparison_id[2] is not None
+                and primary_id[2] != comparison_id[2]
             )
         except Exception:
             comparison_postgresql_available = False
-    databases_different = (
-        comparison_available
-        and args.comparison_database_url is not None
-        and args.database_url is not None
-        and str(args.comparison_database_url) != str(args.database_url)
-    )
+            databases_different = False
+
     if db_available:
         assert args.database_url is not None
         primary = _execute_database(args.database_url)
@@ -593,6 +708,16 @@ def main() -> None:
         if db_available
         else _execute_fixture_corpus_offline(list(fixture["samples"]))
     )
+    missing_keys = _EVALUATION_RESULT_KEYS - set(evaluation)
+    if missing_keys:
+        _write_diagnostic_failure(
+            args,
+            db_available,
+            "evaluation_contract",
+            f"missing_keys:{','.join(sorted(missing_keys))}",
+        )
+        raise SystemExit("controlled_rag_evaluation_contract_invalid")
+
     institution_prompt = load_prompt("institution")
     consumer_prompt = load_prompt("consumer")
 
@@ -645,7 +770,7 @@ def main() -> None:
         "docker_executed": False,
         "alembic_check_executed": False,
         "formal_database_acceptance_completed": False,
-        "offline_constructed_evaluation_completed": True,
+        "offline_constructed_evaluation_completed": not db_available,
         "screening_sample_count": primary["sample_count"],
         "screening_finding_count": primary["screening_finding_count"],
         "reviewed_evidence_link_count": primary["reviewed_evidence_link_count"],
@@ -716,9 +841,27 @@ def main() -> None:
         "constructed_evaluation_results": evaluation["results"],
     }
     report["sensitive_data_scan"] = _sensitive_scan(report)
-    report["formal_database_acceptance_completed"] = _evaluate_formal_acceptance(report)
+    accepted = _evaluate_formal_acceptance(report)
+    report["formal_database_acceptance_completed"] = accepted
+
+    # write diagnostic report before exiting on failure
+    args.json_report.parent.mkdir(parents=True, exist_ok=True)
+    args.json_report.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    lines = ["# Controlled RAG acceptance report", ""]
+    if not db_available:
+        lines.append("该报告仅证明离线构造响应验证，不代表PostgreSQL正式数据验收完成。")
+        lines.append("")
+        lines.append("formal_database_acceptance_completed: `false`")
+        lines.append("")
+    lines.extend(f"- {key}: `{value}`" for key, value in sorted(report.items()))
+    args.markdown_report.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+
     if db_available:
-        if not report["formal_database_acceptance_completed"]:
+        if not accepted:
             raise SystemExit("controlled_rag_acceptance_failed")
     else:
         offline_gate = all(
@@ -736,20 +879,6 @@ def main() -> None:
         )
         if not offline_gate:
             raise SystemExit("controlled_rag_acceptance_failed")
-    args.json_report.parent.mkdir(parents=True, exist_ok=True)
-    args.json_report.write_text(
-        json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    lines = ["# Controlled RAG acceptance report", ""]
-    if not db_available:
-        lines.append("该报告仅证明离线构造响应验证，不代表PostgreSQL正式数据验收完成。")
-        lines.append("")
-        lines.append("formal_database_acceptance_completed: `false`")
-        lines.append("")
-    lines.extend(f"- {key}: `{value}`" for key, value in sorted(report.items()))
-    args.markdown_report.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(json.dumps(report, ensure_ascii=False, sort_keys=True))
 
 
 if __name__ == "__main__":

@@ -1952,3 +1952,309 @@ def test_formal_acceptance_fails_on_count_drift(key: str, wrong_value: object) -
     assert _evaluate_formal_acceptance(base) is False, (
         f"key {key}={wrong_value} should fail formal acceptance"
     )
+
+
+# ── V5 database evaluation contract tests ─────────────────────────────────────
+
+
+def test_main_with_mock_postgresql_databases_passes_formal_acceptance(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """simulate full PostgreSQL acceptance with mock databases."""
+    from scripts.run_controlled_rag_acceptance import main as accept_main
+
+    json_path = tmp_path / "report.json"
+    md_path = tmp_path / "report.md"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "accept",
+            "--database-url",
+            "postgresql://user:pass@localhost/baoxiao_acceptance_a",
+            "--comparison-database-url",
+            "postgresql://user:pass@localhost/baoxiao_acceptance_b",
+            "--json-report",
+            str(json_path),
+            "--markdown-report",
+            str(md_path),
+        ],
+    )
+    sixty_contexts = {str(i): f"sha{i:064d}" for i in range(60)}
+    primary_mock = {
+        "sample_count": 60,
+        "contexts": sixty_contexts,
+        "artifacts": {str(i): {"institution": "h", "consumer": "h"} for i in range(60)},
+        "deterministic_rerun": True,
+        "historical_prompt_snapshot_stability": True,
+        "historical_context_snapshot_stability": True,
+        "regulatory_case_citation_count": 0,
+        "trusted_knowledge_chunk_count": 73,
+        "screening_finding_count": 33,
+        "reviewed_evidence_link_count": 74,
+    }
+    comparison_mock = {
+        "sample_count": 60,
+        "contexts": sixty_contexts,
+        "artifacts": {str(i): {"institution": "h", "consumer": "h"} for i in range(60)},
+        "deterministic_rerun": True,
+        "historical_prompt_snapshot_stability": True,
+        "historical_context_snapshot_stability": True,
+        "regulatory_case_citation_count": 0,
+        "trusted_knowledge_chunk_count": 73,
+        "screening_finding_count": 33,
+        "reviewed_evidence_link_count": 74,
+    }
+    monkeypatch.setattr(
+        "scripts.run_controlled_rag_acceptance._execute_database",
+        lambda url: primary_mock if "baoxiao_acceptance_a" in str(url) else comparison_mock,
+    )
+    monkeypatch.setattr(
+        "scripts.run_controlled_rag_acceptance._execute_fixture_corpus",
+        lambda *_args, **_kw: _mock_fixture_evaluation(43),
+    )
+    monkeypatch.setattr(
+        "scripts.run_controlled_rag_acceptance._exercise_evidence_insufficient",
+        lambda _url: True,
+    )
+    monkeypatch.setattr(
+        "scripts.run_controlled_rag_acceptance._exercise_budget_pressure",
+        lambda: {"executed": 3, "preserves_minimum": True, "fail_closed": True},
+    )
+
+    accept_main()
+
+    assert json_path.exists()
+    report = json.loads(json_path.read_text(encoding="utf-8"))
+    assert "constructed_valid_executed" in report
+    assert report["database_executed"] is True
+    assert report["primary_postgresql_executed"] is True
+    assert report["comparison_postgresql_executed"] is True
+    assert report["formal_database_acceptance_completed"] is True
+    assert report["total_valid_artifact_count"] == 134
+    assert report["rejected_run_count"] == 41
+    assert report["failed_run_count"] == 2
+    assert report["rejected_artifact_count"] == 0
+
+
+def test_main_fails_when_evaluation_missing_key(tmp_path: Path, monkeypatch: Any) -> None:
+    """evaluation returns dict missing required key → stable error."""
+    from scripts.run_controlled_rag_acceptance import main as accept_main
+
+    json_path = tmp_path / "report.json"
+    md_path = tmp_path / "report.md"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "accept",
+            "--database-url",
+            "postgresql://user:pass@localhost/baoxiao_acceptance_a",
+            "--comparison-database-url",
+            "postgresql://user:pass@localhost/baoxiao_acceptance_b",
+            "--json-report",
+            str(json_path),
+            "--markdown-report",
+            str(md_path),
+        ],
+    )
+    primary_mock = {
+        "sample_count": 60,
+        "contexts": {"k": "h"},
+        "artifacts": {"k": {"institution": "h", "consumer": "h"}},
+        "deterministic_rerun": True,
+        "historical_prompt_snapshot_stability": True,
+        "historical_context_snapshot_stability": True,
+        "regulatory_case_citation_count": 0,
+        "trusted_knowledge_chunk_count": 73,
+        "screening_finding_count": 33,
+        "reviewed_evidence_link_count": 74,
+    }
+    monkeypatch.setattr(
+        "scripts.run_controlled_rag_acceptance._execute_database",
+        lambda url: primary_mock,
+    )
+    monkeypatch.setattr(
+        "scripts.run_controlled_rag_acceptance._execute_fixture_corpus",
+        lambda *_args, **_kw: _mock_fixture_evaluation_missing_key(),
+    )
+    monkeypatch.setattr(
+        "scripts.run_controlled_rag_acceptance._exercise_evidence_insufficient",
+        lambda _url: True,
+    )
+    monkeypatch.setattr(
+        "scripts.run_controlled_rag_acceptance._exercise_budget_pressure",
+        lambda: {"executed": 3, "preserves_minimum": True, "fail_closed": True},
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        accept_main()
+    assert "controlled_rag_evaluation_contract_invalid" in str(exc_info.value)
+    assert json_path.exists()  # diagnostic report written on contract failure
+
+
+def test_budget_fail_closed_only_accepts_context_too_large() -> None:
+    """explanation_context_too_large → fail_closed=true; other code → false."""
+    from scripts.run_controlled_rag_acceptance import _exercise_budget_pressure
+
+    result = _exercise_budget_pressure()
+    assert result["fail_closed"] is True
+    assert result.get("fail_closed_code") == "explanation_context_too_large"
+    assert result["preserves_minimum"] is True
+    assert result["executed"] == 3
+
+
+def test_db_identity_different_by_database_name_not_by_driver() -> None:
+    """same host+db → not different; different db name → different."""
+    from scripts.run_controlled_rag_acceptance import _db_identity
+
+    a = _db_identity("postgresql://user:pass@localhost/baoxiao_a")
+    b = _db_identity("postgresql+psycopg://user:pass@localhost/baoxiao_a")
+    c = _db_identity("postgresql://user:pass@localhost/baoxiao_b")
+
+    assert a[0] == "postgresql"
+    assert a[2] == b[2]  # same database name
+    assert a[2] != c[2]  # different database name
+    assert a == b  # driver difference doesn't change identity
+    assert a != c  # different database name makes identity different
+
+
+def test_formal_gate_failure_writes_report_before_exit(tmp_path: Path, monkeypatch: Any) -> None:
+    """report must be written even when formal gate fails."""
+    from scripts.run_controlled_rag_acceptance import main as accept_main
+
+    json_path = tmp_path / "report.json"
+    md_path = tmp_path / "report.md"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "accept",
+            "--database-url",
+            "postgresql://user:pass@localhost/baoxiao_a",
+            "--comparison-database-url",
+            "postgresql://user:pass@localhost/baoxiao_b",
+            "--json-report",
+            str(json_path),
+            "--markdown-report",
+            str(md_path),
+        ],
+    )
+    primary_mock = {
+        "sample_count": 60,
+        "contexts": {"k": "h"},
+        "artifacts": {"k": {"institution": "h", "consumer": "h"}},
+        "deterministic_rerun": False,  # will fail the gate
+        "historical_prompt_snapshot_stability": False,
+        "historical_context_snapshot_stability": False,
+        "regulatory_case_citation_count": 0,
+        "trusted_knowledge_chunk_count": 73,
+        "screening_finding_count": 33,
+        "reviewed_evidence_link_count": 74,
+    }
+    monkeypatch.setattr(
+        "scripts.run_controlled_rag_acceptance._execute_database",
+        lambda url: primary_mock,
+    )
+    monkeypatch.setattr(
+        "scripts.run_controlled_rag_acceptance._execute_fixture_corpus",
+        lambda *_args, **_kw: _mock_fixture_evaluation(43),
+    )
+    monkeypatch.setattr(
+        "scripts.run_controlled_rag_acceptance._exercise_evidence_insufficient",
+        lambda _url: True,
+    )
+    monkeypatch.setattr(
+        "scripts.run_controlled_rag_acceptance._exercise_budget_pressure",
+        lambda: {"executed": 3, "preserves_minimum": True, "fail_closed": True},
+    )
+
+    with pytest.raises(SystemExit):
+        accept_main()
+    assert json_path.exists()
+    report = json.loads(json_path.read_text(encoding="utf-8"))
+    assert report["formal_database_acceptance_completed"] is False
+
+
+# ── shared mock helpers ───────────────────────────────────────────────────────
+
+
+def _mock_fixture_evaluation(
+    invalid_rejected: int,
+) -> dict[str, Any]:
+    valid_samples = [
+        {
+            "sample_id": f"RAG-{i:03d}",
+            "audience": "institution",
+            "scenario": "valid",
+            "expected_status": "passed",
+            "actual_status": "passed",
+            "expected_error_code": None,
+            "actual_error_code": None,
+            "outcome_matches_expectation": True,
+            "explanation_run_status": "completed",
+            "artifact_count": 1,
+        }
+        for i in range(1, 13)
+    ]
+    rejected_samples = [
+        {
+            "sample_id": f"RAG-{i:03d}",
+            "audience": "institution",
+            "scenario": "unknown_citation",
+            "expected_status": "rejected",
+            "actual_status": "rejected",
+            "expected_error_code": "explanation_unknown_citation_key",
+            "actual_error_code": "explanation_unknown_citation_key",
+            "outcome_matches_expectation": True,
+            "explanation_run_status": "rejected",
+            "artifact_count": 0,
+        }
+        for i in range(13, 13 + invalid_rejected - 2)
+    ]
+    failed_samples = [
+        {
+            "sample_id": "RAG-046",
+            "audience": "consumer",
+            "scenario": "provider_timeout",
+            "expected_status": "failed",
+            "actual_status": "failed",
+            "expected_error_code": "explanation_provider_timeout",
+            "actual_error_code": "explanation_provider_timeout",
+            "outcome_matches_expectation": True,
+            "explanation_run_status": "failed",
+            "artifact_count": 0,
+        },
+        {
+            "sample_id": "RAG-047",
+            "audience": "institution",
+            "scenario": "provider_exception",
+            "expected_status": "failed",
+            "actual_status": "failed",
+            "expected_error_code": "explanation_provider_failed",
+            "actual_error_code": "explanation_provider_failed",
+            "outcome_matches_expectation": True,
+            "explanation_run_status": "failed",
+            "artifact_count": 0,
+        },
+    ]
+    all_results = valid_samples + rejected_samples + failed_samples
+    return {
+        "results": all_results,
+        "constructed_valid_executed": len(valid_samples),
+        "constructed_valid_passed": len(valid_samples),
+        "constructed_valid_failed": 0,
+        "constructed_valid_artifact_count": len(valid_samples),
+        "constructed_invalid_executed": len(all_results) - len(valid_samples),
+        "constructed_invalid_blocked": len(rejected_samples) + len(failed_samples),
+        "constructed_invalid_unexpected_pass": 0,
+        "invalid_error_code_match_count": len(rejected_samples) + len(failed_samples),
+        "rejected_run_count": len(rejected_samples),
+        "failed_run_count": len(failed_samples),
+        "invalid_failed_or_rejected_count": len(rejected_samples) + len(failed_samples),
+        "rejected_artifact_count": 0,
+        "uncited_claim_rejection_count": 3,
+        "trivial_quote_rejection_count": 1,
+        "metadata_quote_rejection_count": 3,
+    }
+
+
+def _mock_fixture_evaluation_missing_key() -> dict[str, Any]:
+    return {"results": []}  # missing required keys
