@@ -36,6 +36,12 @@ from app.services.screening.evidence import (
 )
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "constructed_screening_eval_v1" / "samples.json"
+FORMAL_EVIDENCE_ORACLE = (
+    Path(__file__).parents[1]
+    / "fixtures"
+    / "constructed_screening_eval_v1"
+    / "formal_evidence_expectations_v1.json"
+)
 
 
 def _sample_text(sample: dict[str, object]) -> str:
@@ -444,7 +450,7 @@ def test_evidence_selection_keeps_required_types_deduplicated_and_bounded() -> N
         )
 
     regulation = result("1" * 64, "regulation", 1, 10.0)
-    second_regulation = result("2" * 64, "regulation", 1, 9.0)
+    second_regulation = result("2" * 64, "regulation", 3, 9.0)
     third_same_document = result("3" * 64, "regulation", 1, 8.0)
     product = result("4" * 64, "product_document", 2, 1.0)
 
@@ -478,7 +484,9 @@ def test_evidence_selection_keeps_required_types_deduplicated_and_bounded() -> N
         "product_term_context",
     }
     assert len({value.result.chunk_identity_sha256 for value in selected}) == len(selected)
-    assert sum(value.result.source_document_id == 1 for value in selected) == 2
+    assert len(selected) == 3
+    assert sum(value.result.source_document_id == 1 for value in selected) == 1
+    assert sum(value.support_type == "normative_basis" for value in selected) == 2
 
 
 def test_ruleset_cannot_name_regulatory_case_as_preferred_evidence() -> None:
@@ -486,6 +494,46 @@ def test_ruleset_cannot_name_regulatory_case_as_preferred_evidence() -> None:
     payload["rules"][0]["preferred_record_types"].append("regulatory_case")
     with pytest.raises(ValidationError):
         MarketingRuleSet.model_validate(payload)
+
+
+def test_formal_evidence_oracle_covers_all_rules_and_named_counterexamples() -> None:
+    payload = json.loads(FORMAL_EVIDENCE_ORACLE.read_text(encoding="utf-8"))
+    assert payload["formal_evidence_oracle_version"] == "formal_evidence_expectations_v1"
+    expectations = {
+        (rule["rule_id"], item["support_type"]): item
+        for rule in payload["rules"]
+        for item in rule["expectations"]
+    }
+    expected_keys = {
+        (rule.rule_id, support_type)
+        for rule in load_ruleset().rules
+        for support_type in rule.evidence_requirements
+    }
+    assert set(expectations) == expected_keys
+    assert (
+        "5597f2f9eecccf988d346961600335b92e14272490620cd946af183c3527e04d"
+        in expectations[("improper_comparison_or_ranking", "normative_basis")][
+            "forbidden_chunk_identities"
+        ]
+    )
+    concealment_normative = expectations[
+        ("concealment_or_minimization_of_exclusions", "normative_basis")
+    ]
+    assert (
+        "71374120ef8921bbf809b107edf0c43508c5eed7c1b7474e7193eb90df9cd6b5"
+        in concealment_normative["forbidden_chunk_identities"]
+    )
+    concealment_product = expectations[
+        ("concealment_or_minimization_of_exclusions", "product_term_context")
+    ]
+    assert (
+        "a600ecf3be85b1912a2b65e10419a238094a0a7b773f0b4c3237311d84e50c9e"
+        in concealment_product["forbidden_chunk_identities"]
+    )
+    assert {
+        "9ab7fb9d4cdeaa5854d2ad10e630a38939aeba2a165816ab9526c127eee604fc",
+        "f38161f6d9b11d370cb954e26601e4ad686461e8fdb989d8275010285ae3faf2",
+    }.issubset(set(concealment_product["allowed_chunk_identities"]))
 
 
 def _semantic_result(
@@ -585,6 +633,23 @@ def test_basic_information_cannot_satisfy_normative_basis() -> None:
         ("product_nature_confusion", "不得将保险产品与理财产品混淆", True, 2),
         ("false_promotion_or_prize", "不得以其他方式诱导消费者", False, 0),
         ("false_promotion_or_prize", "不得进行虚假促销诱导订立保险合同", True, 2),
+        ("improper_comparison_or_ranking", "保险产品宣传名称", False, 0),
+        ("improper_comparison_or_ranking", "不得通过不当评比和排序进行宣传", True, 2),
+        ("concealment_or_minimization_of_exclusions", "提供理赔保全服务渠道", False, 0),
+        (
+            "concealment_or_minimization_of_exclusions",
+            "应提示和说明责任免除及理赔条件",
+            True,
+            2,
+        ),
+        ("no_risk_or_no_loss", "提示投保人履行如实告知义务", False, 1),
+        ("no_risk_or_no_loss", "应提示风险和可能损失", True, 2),
+        ("surrender_or_cash_value_misstatement", "可能发生损失", False, 0),
+        ("surrender_or_cash_value_misstatement", "提示退保损失和现金价值", True, 1),
+        ("misleading_interest_or_yield", "说明产品收益情况", False, 1),
+        ("misleading_interest_or_yield", "保单利益具有不确定性", True, 2),
+        ("guaranteed_return_or_principal", "说明产品收益情况", False, 1),
+        ("guaranteed_return_or_principal", "不得承诺保证收益", True, 2),
     ],
 )
 def test_normative_evidence_requires_all_strict_pattern_groups(
@@ -611,6 +676,32 @@ def test_normative_evidence_requires_all_strict_pattern_groups(
         assert decision.semantic_support_score < 1.0
 
 
+@pytest.mark.parametrize(
+    ("quote", "field_name", "expected"),
+    [
+        ("保险责任包括重大疾病保险金", "insurance_responsibility", False),
+        ("责任免除：发生下列情形我们不承担保险责任", "exclusions", True),
+    ],
+)
+def test_exclusion_product_context_requires_actual_exclusion_language(
+    quote: str,
+    field_name: str,
+    expected: bool,
+) -> None:
+    rule = next(
+        value
+        for value in load_ruleset().rules
+        if value.rule_id == "concealment_or_minimization_of_exclusions"
+    )
+    result = _semantic_result(
+        record_type="product_document",
+        chunk_kind="terms_and_risks" if expected else "coverage",
+        evidence_references=[{"field_name": field_name, "quote": quote}],
+    )
+    decision = DeterministicEvidenceSupportEvaluator.evaluate(rule, "product_term_context", result)
+    assert decision.passed is expected
+
+
 def test_missing_required_support_type_yields_partial_status(monkeypatch) -> None:
     rule = next(
         value for value in load_ruleset().rules if value.rule_id == "guaranteed_return_or_principal"
@@ -618,7 +709,7 @@ def test_missing_required_support_type_yields_partial_status(monkeypatch) -> Non
     normative = _semantic_result(
         record_type="regulation",
         chunk_kind="article_text",
-        evidence_references=[{"field_name": "article_text", "quote": "不得误导收益"}],
+        evidence_references=[{"field_name": "article_text", "quote": "保单利益具有不确定性"}],
     )
     unrelated_penalty = _semantic_result(
         record_type="penalty",

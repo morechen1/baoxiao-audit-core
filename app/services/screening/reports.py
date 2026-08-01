@@ -91,13 +91,13 @@ class ScreeningReportService:
             "evidence_summary": {
                 "link_count": sum(len(finding.evidence_links) for finding in findings),
                 "selected_evidence_links": sum(len(finding.evidence_links) for finding in findings),
-                "selected_evidence_links_semantically_valid": sum(
-                    _link_semantically_valid(finding, link)
+                "selected_evidence_links_snapshot_consistent": sum(
+                    _link_snapshot_consistent(finding, link)
                     for finding in findings
                     for link in finding.evidence_links
                 ),
-                "selected_irrelevant_links": sum(
-                    not _link_semantically_valid(finding, link)
+                "selected_evidence_links_snapshot_inconsistent": sum(
+                    not _link_snapshot_consistent(finding, link)
                     for finding in findings
                     for link in finding.evidence_links
                 ),
@@ -241,7 +241,7 @@ def _sorted_evidence_links(finding: RiskFinding) -> list[Any]:
     )
 
 
-def _link_semantically_valid(finding: RiskFinding, link: Any) -> bool:
+def _link_snapshot_consistent(finding: RiskFinding, link: Any) -> bool:
     matchers = finding.rule_snapshot_json.get("evidence_matchers")
     if not isinstance(matchers, dict):
         return False

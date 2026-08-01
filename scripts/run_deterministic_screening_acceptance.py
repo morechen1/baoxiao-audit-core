@@ -26,18 +26,6 @@ from app.services.screening.reports import (
 
 NON_PENALTY_ARCHIVE_SHA256 = "09b7c1c1fa35aeda8eabe87405f897d9f838681135ef98c1d4e979fc6ad51e48"
 PENALTY_ARCHIVE_SHA256 = "4b9dd8e5938d1114d66478e90ef25e9beaff6ab00e60245b926a6234ca76389f"
-FORBIDDEN_NORMATIVE_CHUNKS = {
-    "regulatory_endorsement": {
-        "cb306ddab3d697dbc49df233d9dc568c6934f2555abd0df670f3931da4efe960",
-        "5597f2f9eecccf988d346961600335b92e14272490620cd946af183c3527e04d",
-    },
-    "extra_contractual_benefit": {
-        "c29eb875a6f8862f2b3fb95c89068277b17bf0d38abdd009a474b01d487fc7ff",
-    },
-    "product_nature_confusion": {
-        "61f03550569d7cfd7231622707aba3582175f8853ac3f7862fb0dd499dd88a6f",
-    },
-}
 
 
 def parse_args() -> argparse.Namespace:
@@ -46,6 +34,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--comparison-database-url", required=True)
     parser.add_argument("--data-dir", type=Path, required=True)
     parser.add_argument("--samples", type=Path, required=True)
+    parser.add_argument("--formal-evidence-oracle", type=Path, required=True)
     parser.add_argument("--json-report", type=Path, required=True)
     parser.add_argument("--markdown-report", type=Path, required=True)
     return parser.parse_args()
@@ -57,6 +46,7 @@ def main() -> None:
     settings = Settings(database_url=args.database_url, data_dir=args.data_dir)
     engine = create_engine(args.database_url)
     ruleset = load_ruleset()
+    oracle = _load_formal_evidence_oracle(args.formal_evidence_oracle, ruleset)
     service = DeterministicScreeningService(ruleset, settings)
     with Session(engine, expire_on_commit=False) as session:
         verification = KnowledgeIndexService(settings).verify_chunks(session)
@@ -86,9 +76,13 @@ def main() -> None:
         first_run_ids: dict[str, int] = {}
         canonical_report_hashes: dict[str, dict[str, str]] = {}
         selected_evidence_links = 0
-        selected_evidence_links_semantically_valid = 0
-        selected_irrelevant_links = 0
-        forbidden_normative_links = 0
+        selected_evidence_links_snapshot_consistent = 0
+        selected_evidence_links_snapshot_inconsistent = 0
+        oracle_checked_evidence_links = 0
+        oracle_allowed_links_selected = 0
+        oracle_forbidden_links_selected = 0
+        oracle_unreviewed_links_selected = 0
+        oracle_selection_bounds_pass = True
         matched_pattern_groups_valid = True
         for sample in samples:
             text = _sample_text(sample)
@@ -186,13 +180,6 @@ def main() -> None:
                 and set(actual_product_scopes) == {expected_product_scope}
             )
             first_evidence = [link for row in first_rows for link in row["evidence"]]
-            forbidden_normative_links += sum(
-                link["support_type"] == "normative_basis"
-                and str(link["chunk_identity_sha256"])
-                in FORBIDDEN_NORMATIVE_CHUNKS.get(str(row["rule_id"]), set())
-                for row in first_rows
-                for link in row["evidence"]
-            )
             matched_pattern_groups_valid &= all(
                 _matched_groups_complete(row, link)
                 for row in first_rows
@@ -219,10 +206,18 @@ def main() -> None:
             consumer = service.consumer_notice(session, first.id)
             summary = institution["evidence_summary"]
             selected_evidence_links += int(summary["selected_evidence_links"])
-            selected_evidence_links_semantically_valid += int(
-                summary["selected_evidence_links_semantically_valid"]
+            selected_evidence_links_snapshot_consistent += int(
+                summary["selected_evidence_links_snapshot_consistent"]
             )
-            selected_irrelevant_links += int(summary["selected_irrelevant_links"])
+            selected_evidence_links_snapshot_inconsistent += int(
+                summary["selected_evidence_links_snapshot_inconsistent"]
+            )
+            oracle_result = _check_formal_evidence_oracle(first_rows, oracle)
+            oracle_checked_evidence_links += oracle_result["checked"]
+            oracle_allowed_links_selected += oracle_result["allowed"]
+            oracle_forbidden_links_selected += oracle_result["forbidden"]
+            oracle_unreviewed_links_selected += oracle_result["unreviewed"]
+            oracle_selection_bounds_pass &= bool(oracle_result["selection_bounds_pass"])
             canonical_report_hashes[str(sample["sample_id"])] = {
                 "institution_report": canonical_report_sha256(institution),
                 "consumer_notice": canonical_report_sha256(consumer),
@@ -267,6 +262,7 @@ def main() -> None:
                     "required_support_types_match": required_support_types_match,
                     "product_context_scopes": actual_product_scopes,
                     "product_context_scope_match": product_scope_match,
+                    "formal_evidence_oracle_pass": oracle_result["passed"],
                 }
             )
         historical_snapshot_pass = _historical_snapshot_check(
@@ -295,7 +291,7 @@ def main() -> None:
             canonical_report_hashes,
         )
         report = {
-            "schema_version": "deterministic-screening-acceptance-v3",
+            "schema_version": "deterministic-screening-acceptance-v4",
             "archive_inputs": {
                 "non_penalty_post_review_v2_1_sha256": NON_PENALTY_ARCHIVE_SHA256,
                 "penalty_post_review_v3_3_sha256": PENALTY_ARCHIVE_SHA256,
@@ -330,13 +326,20 @@ def main() -> None:
             "evidence_semantic_evaluation_version": SUPPORT_EVALUATION_VERSION,
             "evidence_links_total": evidence_links_total,
             "evidence_links_passed": evidence_links_passed,
-            "evidence_links_rejected_as_irrelevant": evidence_links_rejected,
+            "evidence_candidates_rejected_by_rule_matcher": evidence_links_rejected,
             "selected_evidence_links": selected_evidence_links,
-            "selected_evidence_links_semantically_valid": (
-                selected_evidence_links_semantically_valid
+            "selected_evidence_links_snapshot_consistent": (
+                selected_evidence_links_snapshot_consistent
             ),
-            "selected_irrelevant_links": selected_irrelevant_links,
-            "forbidden_normative_links_selected": forbidden_normative_links,
+            "selected_evidence_links_snapshot_inconsistent": (
+                selected_evidence_links_snapshot_inconsistent
+            ),
+            "formal_evidence_oracle_version": oracle["version"],
+            "oracle_checked_evidence_links": oracle_checked_evidence_links,
+            "oracle_allowed_links_selected": oracle_allowed_links_selected,
+            "oracle_forbidden_links_selected": oracle_forbidden_links_selected,
+            "oracle_unreviewed_links_selected": oracle_unreviewed_links_selected,
+            "oracle_selection_bounds_pass": oracle_selection_bounds_pass,
             "matched_pattern_groups_validation": matched_pattern_groups_valid,
             "supported_count": supported,
             "partially_supported_count": partial,
@@ -404,8 +407,10 @@ def main() -> None:
         not report["local_context_adversarial_pass"],
         not report["long_segment_boundary_pass"],
         not report["nfkc_combining_cluster_pass"],
-        selected_irrelevant_links != 0,
-        forbidden_normative_links != 0,
+        selected_evidence_links_snapshot_inconsistent != 0,
+        oracle_forbidden_links_selected != 0,
+        oracle_unreviewed_links_selected != 0,
+        not oracle_selection_bounds_pass,
         not matched_pattern_groups_valid,
         not cross_database_report["passed"],
     ]
@@ -424,6 +429,84 @@ def _sample_text(sample: dict[str, Any]) -> str:
         return str(sample["text"])
     builder = sample["text_builder"]
     return str(builder["prefix"]) * int(builder["repeat"]) + str(builder["suffix"])
+
+
+def _load_formal_evidence_oracle(
+    path: Path,
+    ruleset: MarketingRuleSet,
+) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    version = payload.get("formal_evidence_oracle_version")
+    if version != "formal_evidence_expectations_v1":
+        raise SystemExit("formal_evidence_oracle_version_invalid")
+    expectations: dict[tuple[str, str], dict[str, Any]] = {}
+    for rule in payload.get("rules", []):
+        rule_id = str(rule.get("rule_id") or "")
+        for item in rule.get("expectations", []):
+            support_type = str(item.get("support_type") or "")
+            key = (rule_id, support_type)
+            if key in expectations:
+                raise SystemExit("formal_evidence_oracle_duplicate_expectation")
+            allowed = set(item.get("allowed_chunk_identities", []))
+            forbidden = set(item.get("forbidden_chunk_identities", []))
+            if allowed.intersection(forbidden) or not item.get("review_reason"):
+                raise SystemExit("formal_evidence_oracle_invalid_expectation")
+            minimum = int(item.get("minimum_selected", -1))
+            maximum = int(item.get("maximum_selected", -1))
+            if minimum < 0 or maximum < minimum or maximum > 2:
+                raise SystemExit("formal_evidence_oracle_invalid_selection_bounds")
+            expectations[key] = {
+                "allowed": allowed,
+                "forbidden": forbidden,
+                "minimum": minimum,
+                "maximum": maximum,
+            }
+    expected_keys = {
+        (rule.rule_id, support_type)
+        for rule in ruleset.rules
+        for support_type in rule.evidence_requirements
+    }
+    if set(expectations) != expected_keys:
+        raise SystemExit("formal_evidence_oracle_incomplete")
+    return {"version": version, "expectations": expectations}
+
+
+def _check_formal_evidence_oracle(
+    finding_rows: list[dict[str, Any]],
+    oracle: dict[str, Any],
+) -> dict[str, int | bool]:
+    checked = 0
+    allowed_count = 0
+    forbidden_count = 0
+    unreviewed_count = 0
+    bounds_pass = True
+    expectations = oracle["expectations"]
+    for row in finding_rows:
+        by_support: dict[str, list[dict[str, Any]]] = {}
+        for link in row["evidence"]:
+            by_support.setdefault(str(link["support_type"]), []).append(link)
+        required = row["rule_snapshot"]["evidence_requirements"]
+        for support_type in required:
+            expectation = expectations[(row["rule_id"], support_type)]
+            selected = by_support.get(support_type, [])
+            bounds_pass &= expectation["minimum"] <= len(selected) <= expectation["maximum"]
+            for link in selected:
+                checked += 1
+                identity = str(link["chunk_identity_sha256"])
+                if identity in expectation["forbidden"]:
+                    forbidden_count += 1
+                elif identity in expectation["allowed"]:
+                    allowed_count += 1
+                else:
+                    unreviewed_count += 1
+    return {
+        "checked": checked,
+        "allowed": allowed_count,
+        "forbidden": forbidden_count,
+        "unreviewed": unreviewed_count,
+        "selection_bounds_pass": bounds_pass,
+        "passed": bounds_pass and forbidden_count == 0 and unreviewed_count == 0,
+    }
 
 
 def _matched_groups_complete(row: dict[str, Any], link: dict[str, Any]) -> bool:
@@ -575,12 +658,18 @@ def _markdown(report: dict[str, Any]) -> str:
         f"- 证据 supported/partial/insufficient：{evidence_counts}",
         f"- 证据语义评估：`{report['evidence_semantic_evaluation_version']}`",
         f"- 证据链接总数/通过：{report['evidence_links_total']}/{report['evidence_links_passed']}",
-        f"- 被拒绝的不相关候选：{report['evidence_links_rejected_as_irrelevant']}",
-        "- 正式入选/严格语义有效/无关链接："
+        f"- 运行时 matcher 拒绝候选：{report['evidence_candidates_rejected_by_rule_matcher']}",
+        "- 正式入选/snapshot一致/不一致链接："
         f"{report['selected_evidence_links']}/"
-        f"{report['selected_evidence_links_semantically_valid']}/"
-        f"{report['selected_irrelevant_links']}",
-        f"- 禁止法规块误选：{report['forbidden_normative_links_selected']}",
+        f"{report['selected_evidence_links_snapshot_consistent']}/"
+        f"{report['selected_evidence_links_snapshot_inconsistent']}",
+        f"- 正式证据 Oracle：`{report['formal_evidence_oracle_version']}`",
+        "- Oracle 检查/允许/禁止/未审查："
+        f"{report['oracle_checked_evidence_links']}/"
+        f"{report['oracle_allowed_links_selected']}/"
+        f"{report['oracle_forbidden_links_selected']}/"
+        f"{report['oracle_unreviewed_links_selected']}",
+        f"- Oracle 每类选择上下限：{'PASS' if report['oracle_selection_bounds_pass'] else 'FAIL'}",
         "- pattern groups 完整："
         f"{'PASS' if report['matched_pattern_groups_validation'] else 'FAIL'}",
         "- 证据状态符合预期："

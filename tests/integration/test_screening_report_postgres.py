@@ -148,4 +148,6 @@ def test_postgres_reports_are_stable_across_databases_and_primary_keys(
     second_institution, second_consumer = _reports(second_ids, True)
     assert canonical_report_sha256(first_institution) == canonical_report_sha256(second_institution)
     assert canonical_report_sha256(first_consumer) == canonical_report_sha256(second_consumer)
-    assert first_institution["evidence_summary"]["selected_irrelevant_links"] == 0
+    assert (
+        first_institution["evidence_summary"]["selected_evidence_links_snapshot_inconsistent"] == 0
+    )

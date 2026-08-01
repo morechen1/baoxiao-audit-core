@@ -61,6 +61,8 @@ canonical mismatch、伪造/孤儿 chunk、资格漂移、Penalty 身份错误�
   机关、文号、金额或正确 record type 本身不能证明支持；
 - `normative_basis` 只以 `article_text` 字段证据判定，`basic_information` 只能展示来源；
 - `enforcement_example` 重点核验 `illegal_facts` 与 `original_sales_wording`，无关处罚会被排除；
+- 每个 required support type 先选择一条最佳证据，每类最多两条；第二条必须来自不同来源文档，
+  且仍完整通过严格语义组。系统不为凑满五条而追加同源或宽泛证据；
 - 快照保存 chunk 两类哈希、来源 URL、信任状态、locator、字段证据、实际命中子串、命中的
   pattern groups、确定性语义分数与原因、匹配字段、判定版本及上下文范围，不复制原件全文。
 
@@ -80,8 +82,11 @@ canonical mismatch、伪造/孤儿 chunk、资格漂移、Penalty 身份错误�
 规则文件被修改或删除后也不会改变旧报告。证据链接统一按 support type、retrieval rank、score、
 pilot ID 和 chunk identity 排序，不使用数据库主键或 relationship 加载顺序；排除明确的运行/材料
 数据库身份后，相同业务数据在不同 PostgreSQL 数据库中的规范化报告 SHA-256 一致。机构报告
-同时独立重算已选链接的严格语义准入，并展示已选、语义有效和无关链接数量。两类报告均为纯
-读取，不创建记录或改变 finding。
+会使用运行时规则快照重算链接并报告 `snapshot_consistent` / `snapshot_inconsistent`；该指标只说明
+证据快照与当时 matcher 的执行结果一致，不声称是独立的相关性判断。正式离线验收另读取
+`formal_evidence_expectations_v1.json` 人工审定 Oracle，逐规则、support type 检查允许、禁止、
+未审查 chunk 及选择数量上下限；Oracle 不参与运行时筛查。两类报告均为纯读取，不创建记录或
+改变 finding。
 
 API：
 

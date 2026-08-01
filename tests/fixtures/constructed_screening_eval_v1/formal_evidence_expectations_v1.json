@@ -1,0 +1,233 @@
+{
+  "formal_evidence_oracle_version": "formal_evidence_expectations_v1",
+  "rules": [
+    {
+      "rule_id": "absolute_or_superlative_claim",
+      "expectations": [
+        {
+          "support_type": "normative_basis",
+          "allowed_chunk_identities": ["5b8d3e83c85bc648e401f3ff4074557b988fd7f891bc592f0728df4b028bfe05", "00b73f1f2ab26770acbc3d8b6d37e77a7caa872376a04da944b394f5be018e19"],
+          "forbidden_chunk_identities": [],
+          "minimum_selected": 1,
+          "maximum_selected": 2,
+          "review_reason": "两条法规分别直接禁止夸大、不当比较或简单排名。"
+        }
+      ]
+    },
+    {
+      "rule_id": "concealment_or_minimization_of_exclusions",
+      "expectations": [
+        {
+          "support_type": "normative_basis",
+          "allowed_chunk_identities": ["5597f2f9eecccf988d346961600335b92e14272490620cd946af183c3527e04d"],
+          "forbidden_chunk_identities": ["71374120ef8921bbf809b107edf0c43508c5eed7c1b7474e7193eb90df9cd6b5"],
+          "minimum_selected": 1,
+          "maximum_selected": 1,
+          "review_reason": "第十四条同时要求突出说明责任免除与理赔条件；第十二条仅列客户服务渠道。"
+        },
+        {
+          "support_type": "product_term_context",
+          "allowed_chunk_identities": ["9ab7fb9d4cdeaa5854d2ad10e630a38939aeba2a165816ab9526c127eee604fc", "f38161f6d9b11d370cb954e26601e4ad686461e8fdb989d8275010285ae3faf2"],
+          "forbidden_chunk_identities": ["a600ecf3be85b1912a2b65e10419a238094a0a7b773f0b4c3237311d84e50c9e"],
+          "minimum_selected": 1,
+          "maximum_selected": 2,
+          "review_reason": "两个terms_and_risks块均含责任免除；普通coverage块只描述一般保险责任。"
+        }
+      ]
+    },
+    {
+      "rule_id": "extra_contractual_benefit",
+      "expectations": [
+        {
+          "support_type": "normative_basis",
+          "allowed_chunk_identities": [],
+          "forbidden_chunk_identities": ["c29eb875a6f8862f2b3fb95c89068277b17bf0d38abdd009a474b01d487fc7ff"],
+          "minimum_selected": 0,
+          "maximum_selected": 0,
+          "review_reason": "当前三份法规没有合同外返现、返佣或利益输送的直接条款。"
+        },
+        {
+          "support_type": "enforcement_example",
+          "allowed_chunk_identities": ["82f36c09a283400ba3a490d73058176fd81fe78cdc40ddc739acee60df89653a", "0cd778cb69e3d76907634aa028d2cb47ed696f12925debf3f8b170e82a0de8b2"],
+          "forbidden_chunk_identities": [],
+          "minimum_selected": 1,
+          "maximum_selected": 1,
+          "review_reason": "PEN-004两条记录属于同一来源文档，均直接涉及合同外利益，按来源上限只选最佳一条。"
+        }
+      ]
+    },
+    {
+      "rule_id": "false_promotion_or_prize",
+      "expectations": [
+        {
+          "support_type": "normative_basis",
+          "allowed_chunk_identities": ["5b8d3e83c85bc648e401f3ff4074557b988fd7f891bc592f0728df4b028bfe05"],
+          "forbidden_chunk_identities": [],
+          "minimum_selected": 1,
+          "maximum_selected": 1,
+          "review_reason": "第十七条直接禁止虚假或不当保险销售宣传。"
+        },
+        {
+          "support_type": "enforcement_example",
+          "allowed_chunk_identities": ["3f081692c6c3e7674b45192fdf76c9d2602e7e7d202e9c753a38d6ed01ea955c", "adc363ebb3713a5c7952e0f551a9ee510dc1e2114be90ddba531eb0ed9d84645"],
+          "forbidden_chunk_identities": [],
+          "minimum_selected": 1,
+          "maximum_selected": 1,
+          "review_reason": "PEN-010两条记录均包含优惠、中奖销售原话，但来自同一来源，只选最佳一条。"
+        }
+      ]
+    },
+    {
+      "rule_id": "guaranteed_return_or_principal",
+      "expectations": [
+        {
+          "support_type": "normative_basis",
+          "allowed_chunk_identities": ["c29eb875a6f8862f2b3fb95c89068277b17bf0d38abdd009a474b01d487fc7ff", "00b73f1f2ab26770acbc3d8b6d37e77a7caa872376a04da944b394f5be018e19"],
+          "forbidden_chunk_identities": [],
+          "minimum_selected": 1,
+          "maximum_selected": 2,
+          "review_reason": "两条法规直接涉及保单利益不确定性或违规承诺收益。"
+        },
+        {
+          "support_type": "enforcement_example",
+          "allowed_chunk_identities": [],
+          "forbidden_chunk_identities": [],
+          "minimum_selected": 0,
+          "maximum_selected": 0,
+          "review_reason": "当前34条处罚记录没有经人工确认的保证收益直接案例。"
+        }
+      ]
+    },
+    {
+      "rule_id": "improper_comparison_or_ranking",
+      "expectations": [
+        {
+          "support_type": "normative_basis",
+          "allowed_chunk_identities": ["5b8d3e83c85bc648e401f3ff4074557b988fd7f891bc592f0728df4b028bfe05", "00b73f1f2ab26770acbc3d8b6d37e77a7caa872376a04da944b394f5be018e19"],
+          "forbidden_chunk_identities": ["5597f2f9eecccf988d346961600335b92e14272490620cd946af183c3527e04d"],
+          "minimum_selected": 1,
+          "maximum_selected": 2,
+          "review_reason": "第十七条禁止不当评比排序，第十五条禁止片面比较和简单排名；第十四条仅出现宣传名称。"
+        }
+      ]
+    },
+    {
+      "rule_id": "misleading_interest_or_yield",
+      "expectations": [
+        {
+          "support_type": "normative_basis",
+          "allowed_chunk_identities": ["c29eb875a6f8862f2b3fb95c89068277b17bf0d38abdd009a474b01d487fc7ff", "00b73f1f2ab26770acbc3d8b6d37e77a7caa872376a04da944b394f5be018e19"],
+          "forbidden_chunk_identities": [],
+          "minimum_selected": 1,
+          "maximum_selected": 2,
+          "review_reason": "两条法规直接区分不确定保单利益与违规收益承诺。"
+        }
+      ]
+    },
+    {
+      "rule_id": "no_risk_or_no_loss",
+      "expectations": [
+        {
+          "support_type": "normative_basis",
+          "allowed_chunk_identities": ["c29eb875a6f8862f2b3fb95c89068277b17bf0d38abdd009a474b01d487fc7ff", "a23b3c92b1e637ab07bb9917db3725a19bec508b121a85d58e18a82a99445df2"],
+          "forbidden_chunk_identities": ["cb306ddab3d697dbc49df233d9dc568c6934f2555abd0df670f3931da4efe960"],
+          "minimum_selected": 1,
+          "maximum_selected": 2,
+          "review_reason": "允许直接要求风险提示的条款；仅提示如实告知义务的条款不能支持零风险问题。"
+        },
+        {
+          "support_type": "enforcement_example",
+          "allowed_chunk_identities": [],
+          "forbidden_chunk_identities": [],
+          "minimum_selected": 0,
+          "maximum_selected": 0,
+          "review_reason": "当前处罚记录没有经人工确认的零风险或无损失直接案例。"
+        }
+      ]
+    },
+    {
+      "rule_id": "product_nature_confusion",
+      "expectations": [
+        {
+          "support_type": "normative_basis",
+          "allowed_chunk_identities": ["00b73f1f2ab26770acbc3d8b6d37e77a7caa872376a04da944b394f5be018e19"],
+          "forbidden_chunk_identities": ["61f03550569d7cfd7231622707aba3582175f8853ac3f7862fb0dd499dd88a6f", "5b8d3e83c85bc648e401f3ff4074557b988fd7f891bc592f0728df4b028bfe05"],
+          "minimum_selected": 1,
+          "maximum_selected": 1,
+          "review_reason": "第十五条直接禁止与非保险产品混淆；销售回溯及商标混淆条款不支持产品性质问题。"
+        },
+        {
+          "support_type": "enforcement_example",
+          "allowed_chunk_identities": [],
+          "forbidden_chunk_identities": [],
+          "minimum_selected": 0,
+          "maximum_selected": 0,
+          "review_reason": "当前处罚记录没有经人工确认的保险与存款理财混淆直接案例。"
+        }
+      ]
+    },
+    {
+      "rule_id": "regulatory_endorsement",
+      "expectations": [
+        {
+          "support_type": "normative_basis",
+          "allowed_chunk_identities": ["5b8d3e83c85bc648e401f3ff4074557b988fd7f891bc592f0728df4b028bfe05", "00b73f1f2ab26770acbc3d8b6d37e77a7caa872376a04da944b394f5be018e19"],
+          "forbidden_chunk_identities": ["cb306ddab3d697dbc49df233d9dc568c6934f2555abd0df670f3931da4efe960", "5597f2f9eecccf988d346961600335b92e14272490620cd946af183c3527e04d"],
+          "minimum_selected": 1,
+          "maximum_selected": 2,
+          "review_reason": "允许直接禁止监管保证、名义或形象背书的条款，排除通用监管提示或备案展示。"
+        },
+        {
+          "support_type": "enforcement_example",
+          "allowed_chunk_identities": [],
+          "forbidden_chunk_identities": [],
+          "minimum_selected": 0,
+          "maximum_selected": 0,
+          "review_reason": "当前处罚记录没有经人工确认的监管背书直接案例。"
+        }
+      ]
+    },
+    {
+      "rule_id": "surrender_or_cash_value_misstatement",
+      "expectations": [
+        {
+          "support_type": "normative_basis",
+          "allowed_chunk_identities": ["cb306ddab3d697dbc49df233d9dc568c6934f2555abd0df670f3931da4efe960", "5597f2f9eecccf988d346961600335b92e14272490620cd946af183c3527e04d"],
+          "forbidden_chunk_identities": [],
+          "minimum_selected": 1,
+          "maximum_selected": 2,
+          "review_reason": "两条法规均直接要求提示退保或现金价值。"
+        },
+        {
+          "support_type": "product_term_context",
+          "allowed_chunk_identities": ["9ab7fb9d4cdeaa5854d2ad10e630a38939aeba2a165816ab9526c127eee604fc", "f38161f6d9b11d370cb954e26601e4ad686461e8fdb989d8275010285ae3faf2"],
+          "forbidden_chunk_identities": [],
+          "minimum_selected": 1,
+          "maximum_selected": 2,
+          "review_reason": "两个产品条款均直接说明解除合同、现金价值与退保损失。"
+        }
+      ]
+    },
+    {
+      "rule_id": "waiting_or_cooling_period_misstatement",
+      "expectations": [
+        {
+          "support_type": "normative_basis",
+          "allowed_chunk_identities": ["cb306ddab3d697dbc49df233d9dc568c6934f2555abd0df670f3931da4efe960", "5597f2f9eecccf988d346961600335b92e14272490620cd946af183c3527e04d"],
+          "forbidden_chunk_identities": [],
+          "minimum_selected": 1,
+          "maximum_selected": 2,
+          "review_reason": "两条法规直接要求披露等待期、犹豫期或相关退费事项。"
+        },
+        {
+          "support_type": "product_term_context",
+          "allowed_chunk_identities": ["9ab7fb9d4cdeaa5854d2ad10e630a38939aeba2a165816ab9526c127eee604fc", "f38161f6d9b11d370cb954e26601e4ad686461e8fdb989d8275010285ae3faf2"],
+          "forbidden_chunk_identities": [],
+          "minimum_selected": 1,
+          "maximum_selected": 2,
+          "review_reason": "两个产品条款均直接包含犹豫期或等待期。"
+        }
+      ]
+    }
+  ]
+}

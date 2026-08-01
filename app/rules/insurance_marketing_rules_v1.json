@@ -14,7 +14,7 @@
       "positive_patterns": ["什[\\s]*么[\\s]*情[\\s]*况[\\s]*都[\\s]*赔", "没[\\s]*有[\\s]*任[\\s]*何[\\s]*免[\\s]*责", "百[\\s]*分[\\s]*之[\\s]*百[\\s]*理[\\s]*赔", "所[\\s]*有[\\s]*疾[\\s]*病[\\s]*全[\\s]*部[\\s]*保[\\s]*障", "无[\\s]*需[\\s]*健[\\s]*康[\\s]*告[\\s]*知"],
       "exception_patterns": ["并[\\s]*非", "不[\\s]*代[\\s]*表", "说[\\s]*法[\\s]*不[\\s]*准[\\s]*确"], "required_context_patterns": [],
       "retrieval_queries": ["责任免除 健康告知 理赔范围"], "preferred_record_types": ["regulation", "penalty", "product_document"], "evidence_requirements": ["normative_basis", "product_term_context"],
-      "evidence_matchers": {"normative_basis":{"allowed_chunk_kinds":["article_text"],"required_any_patterns":["责任免除|免责|健康告知|保险责任|理赔"],"required_evidence_fields":["article_text"]},"product_term_context":{"allowed_chunk_kinds":["coverage","terms_and_risks"],"required_any_patterns":["责任免除|免责|健康告知|保险责任|保障"],"required_evidence_fields":["insurance_responsibility","exclusions"]}},
+      "evidence_matchers": {"normative_basis":{"allowed_chunk_kinds":["article_text"],"required_any_patterns":["责任免除|免责|免除保险人责任|免除保险公司责任|不承担|健康告知|理赔条件|保障限制"],"required_all_pattern_groups":[["责任免除|免责|免除保险人责任|免除保险公司责任|不承担|健康告知"],["提示|说明|披露|隐瞒|理赔条件|保障限制"]],"required_all_pattern_groups_scope":"local_clause","required_evidence_fields":["article_text"]},"product_term_context":{"allowed_chunk_kinds":["coverage","terms_and_risks"],"required_any_patterns":["责任免除|免责|不承担|除外责任|健康告知"],"required_all_pattern_groups":[["责任免除|免责|不承担|除外责任|健康告知"]],"required_all_pattern_groups_scope":"local_clause","required_evidence_fields":["insurance_responsibility","exclusions"]}},
       "explanation_template": "该表述可能弱化责任免除、健康告知或保障范围限制。", "review_question_template": "是否已准确披露责任免除、健康告知和保障范围？", "institution_remediation_template": "补充责任免除和保障范围说明并交由合规人员复核。", "consumer_notice_template": "投保前应核对责任免除、健康告知和实际保障范围。"
     },
     {
@@ -38,7 +38,7 @@
       "positive_patterns": ["保[\\s]*证[\\s]*收[\\s]*益", "保[\\s]*本[\\s]*保[\\s]*息", "稳[\\s]*赚[\\s]*不[\\s]*赔", "绝[\\s]*对[\\s]*不[\\s]*会[\\s]*亏[\\s]*损", "承[\\s]*诺[\\s]*固[\\s]*定[\\s]*收[\\s]*益"],
       "exception_patterns": ["不[\\s]*保[\\s]*证", "非[\\s]*保[\\s]*证", "保[\\s]*证[\\s]*材[\\s]*料[\\s]*真[\\s]*实[\\s]*性"], "required_context_patterns": [],
       "retrieval_queries": ["保险销售 保证收益 非保证利益"], "preferred_record_types": ["regulation", "penalty"], "evidence_requirements": ["normative_basis", "enforcement_example"],
-      "evidence_matchers": {"normative_basis":{"allowed_chunk_kinds":["article_text"],"required_any_patterns":["保证收益|固定收益|非保证|收益|保险利益"],"required_evidence_fields":["article_text"]},"enforcement_example":{"allowed_chunk_kinds":["penalty_entry"],"required_any_patterns":["保证收益|保本|固定收益|稳赚|收益承诺"],"required_evidence_fields":["illegal_facts","original_sales_wording"]}},
+      "evidence_matchers": {"normative_basis":{"allowed_chunk_kinds":["article_text"],"required_any_patterns":["收益|本金|保险利益|保单利益|保证|固定|承诺|非保证|不确定"],"required_all_pattern_groups":[["收益|本金|保险利益|保单利益"],["保证|固定|承诺|非保证|不确定"]],"required_all_pattern_groups_scope":"local_clause","required_evidence_fields":["article_text"]},"enforcement_example":{"allowed_chunk_kinds":["penalty_entry"],"required_any_patterns":["保证收益|保本|固定收益|稳赚|收益承诺"],"required_evidence_fields":["illegal_facts","original_sales_wording"]}},
       "explanation_template": "该表述可能把非保证利益描述为确定收益，需核对合同和演示依据。", "review_question_template": "是否存在保证性收益或本金承诺，且是否与合同一致？", "institution_remediation_template": "核对是否存在保证性承诺并补充非保证利益说明。", "consumer_notice_template": "这段表述可能把非保证利益描述成确定收益。"
     },
     {
@@ -46,7 +46,7 @@
       "positive_patterns": ["排[\\s]*名[\\s]*第[\\s]*一", "优[\\s]*于[\\s]*全[\\s]*部[\\s]*同[\\s]*类", "同[\\s]*类[\\s]*产[\\s]*品[\\s]*中[\\s]*收[\\s]*益[\\s]*最[\\s]*高", "保[\\s]*费[\\s]*最[\\s]*低"],
       "exception_patterns": ["比[\\s]*较[\\s]*条[\\s]*件", "仅[\\s]*供[\\s]*参[\\s]*考"], "required_context_patterns": [],
       "retrieval_queries": ["保险宣传 比较 排名 条件"], "preferred_record_types": ["regulation", "penalty"], "evidence_requirements": ["normative_basis"],
-      "evidence_matchers": {"normative_basis":{"allowed_chunk_kinds":["article_text"],"required_any_patterns":["比较|排名|宣传|误导|夸大"],"required_evidence_fields":["article_text"]}},
+      "evidence_matchers": {"normative_basis":{"allowed_chunk_kinds":["article_text"],"required_any_patterns":["比较|排名|排序|评比|第一|优于|最高|不得|不当|片面|简单|夸大|误导|缺少条件"],"required_all_pattern_groups":[["比较|排名|排序|评比|第一|优于|最高"],["不得|不当|片面|简单|夸大|误导|缺少条件"]],"required_all_pattern_groups_scope":"local_clause","required_evidence_fields":["article_text"]}},
       "explanation_template": "该比较或排名表述可能缺少范围、条件或数据来源。", "review_question_template": "比较对象、时间范围、口径和数据来源是否完整披露？", "institution_remediation_template": "补充比较条件和可复核来源。", "consumer_notice_template": "产品排名或比较应核对比较条件和数据来源。"
     },
     {
@@ -54,7 +54,7 @@
       "positive_patterns": ["结[\\s]*算[\\s]*利[\\s]*率[\\s]*固[\\s]*定", "永[\\s]*久[\\s]*享[\\s]*受[^。；！？]{0,12}(?:%|％|收[\\s]*益[\\s]*率)", "演[\\s]*示[\\s]*利[\\s]*率[^。；！？]{0,12}保[\\s]*证", "存[\\s]*款[\\s]*利[\\s]*率[^。；！？]{0,12}宣[\\s]*传"],
       "exception_patterns": ["实[\\s]*际[\\s]*结[\\s]*算[\\s]*利[\\s]*率[\\s]*不[\\s]*确[\\s]*定", "仅[\\s]*为[\\s]*演[\\s]*示"], "required_context_patterns": [],
       "retrieval_queries": ["保险 结算利率 演示利率 非保证"], "preferred_record_types": ["regulation", "penalty", "product_document"], "evidence_requirements": ["normative_basis"],
-      "evidence_matchers": {"normative_basis":{"allowed_chunk_kinds":["article_text"],"required_any_patterns":["利率|收益|演示|不确定|非保证"],"required_evidence_fields":["article_text"]}},
+      "evidence_matchers": {"normative_basis":{"allowed_chunk_kinds":["article_text"],"required_any_patterns":["利率|收益|保单利益|固定|保证|非保证|不确定|演示|承诺"],"required_all_pattern_groups":[["利率|收益|保单利益"],["固定|保证|非保证|不确定|演示|承诺"]],"required_all_pattern_groups_scope":"local_clause","required_evidence_fields":["article_text"]}},
       "explanation_template": "利率或收益率表述可能把演示或非保证利益描述为固定结果。", "review_question_template": "该利率是保证、最低保证还是非保证演示，是否清晰披露？", "institution_remediation_template": "明确区分保证利益与非保证演示利益。", "consumer_notice_template": "结算利率或演示利率不一定代表确定收益。"
     },
     {
@@ -62,7 +62,7 @@
       "positive_patterns": ["零[\\s]*风[\\s]*险", "没[\\s]*有[\\s]*任[\\s]*何[\\s]*风[\\s]*险", "对[\\s]*您[\\s]*没[\\s]*有[\\s]*损[\\s]*失", "绝[\\s]*对[\\s]*安[\\s]*全"],
       "exception_patterns": ["不[\\s]*存[\\s]*在[\\s]*零[\\s]*风[\\s]*险", "并[\\s]*非[\\s]*绝[\\s]*对[\\s]*安[\\s]*全"], "required_context_patterns": [],
       "retrieval_queries": ["保险销售 风险提示 损失"], "preferred_record_types": ["regulation", "penalty"], "evidence_requirements": ["normative_basis", "enforcement_example"],
-      "evidence_matchers": {"normative_basis":{"allowed_chunk_kinds":["article_text"],"required_any_patterns":["风险|损失|如实|误导|提示"],"required_evidence_fields":["article_text"]},"enforcement_example":{"allowed_chunk_kinds":["penalty_entry"],"required_any_patterns":["零风险|没有损失|无损失|绝对安全|隐瞒风险"],"required_evidence_fields":["illegal_facts","original_sales_wording"]}},
+      "evidence_matchers": {"normative_basis":{"allowed_chunk_kinds":["article_text"],"required_any_patterns":["风险|损失|不确定性|提示|披露|误导|承诺|告知"],"required_all_pattern_groups":[["风险|损失|不确定性"],["提示|披露|误导|承诺|告知"]],"required_all_pattern_groups_scope":"local_clause","required_evidence_fields":["article_text"]},"enforcement_example":{"allowed_chunk_kinds":["penalty_entry"],"required_any_patterns":["零风险|没有损失|无损失|绝对安全|隐瞒风险"],"required_evidence_fields":["illegal_facts","original_sales_wording"]}},
       "explanation_template": "该表述可能不当弱化保险产品风险或损失可能。", "review_question_template": "是否充分披露退保、收益波动及保障限制等风险？", "institution_remediation_template": "补充真实、完整的风险及可能损失说明。", "consumer_notice_template": "任何保险安排都应结合合同核对风险和可能损失。"
     },
     {
@@ -86,7 +86,7 @@
       "positive_patterns": ["随[\\s]*时[\\s]*退[\\s]*保[\\s]*没[\\s]*有[\\s]*损[\\s]*失", "随[\\s]*时[\\s]*取[\\s]*回[\\s]*全[\\s]*部[\\s]*本[\\s]*金", "退[\\s]*保[\\s]*一[\\s]*定[\\s]*退[\\s]*全[\\s]*款", "现[\\s]*金[\\s]*价[\\s]*值[\\s]*等[\\s]*于[\\s]*已[\\s]*交[\\s]*保[\\s]*费"],
       "exception_patterns": ["可[\\s]*能[\\s]*有[\\s]*损[\\s]*失", "以[\\s]*现[\\s]*金[\\s]*价[\\s]*值[\\s]*为[\\s]*准"], "required_context_patterns": [],
       "retrieval_queries": ["保险 退保损失 现金价值 已交保费"], "preferred_record_types": ["regulation", "penalty", "product_document"], "evidence_requirements": ["normative_basis", "product_term_context"],
-      "evidence_matchers": {"normative_basis":{"allowed_chunk_kinds":["article_text"],"required_any_patterns":["退保|现金价值|解除合同|损失|保险费"],"required_evidence_fields":["article_text"]},"product_term_context":{"allowed_chunk_kinds":["terms_and_risks"],"required_any_patterns":["退保|现金价值|损失"],"required_evidence_fields":["cash_value_description","surrender_risk"]}},
+      "evidence_matchers": {"normative_basis":{"allowed_chunk_kinds":["article_text"],"required_any_patterns":["退保|现金价值|解除合同"],"required_all_pattern_groups":[["退保|现金价值|解除合同"]],"required_all_pattern_groups_scope":"local_clause","required_evidence_fields":["article_text"]},"product_term_context":{"allowed_chunk_kinds":["terms_and_risks"],"required_any_patterns":["退保|现金价值|解除合同"],"required_all_pattern_groups":[["退保|现金价值|解除合同"]],"required_all_pattern_groups_scope":"local_clause","required_evidence_fields":["cash_value_description","surrender_risk"]}},
       "explanation_template": "该表述可能错误描述退保金额、本金返还或现金价值。", "review_question_template": "退保金额是否按合同现金价值计算并充分披露可能损失？", "institution_remediation_template": "核对退保损失披露及现金价值说明。", "consumer_notice_template": "退保金额通常需要结合合同现金价值核对。"
     },
     {

@@ -248,20 +248,36 @@ class FindingEvidenceAssembler:
         selected: list[EvidenceSupportDecision] = []
         seen_chunks: set[str] = set()
         document_counts: defaultdict[int, int] = defaultdict(int)
+        support_document_ids: defaultdict[str, set[int]] = defaultdict(set)
+        support_counts: defaultdict[str, int] = defaultdict(int)
         for required in sorted(required_support_types, key=priorities.__getitem__):
             for candidate in (item for item in ordered if item.support_type == required):
                 count_before = len(selected)
                 FindingEvidenceAssembler._append_if_eligible(
-                    selected, seen_chunks, document_counts, candidate
+                    selected,
+                    seen_chunks,
+                    document_counts,
+                    support_document_ids,
+                    support_counts,
+                    candidate,
                 )
                 if len(selected) > count_before:
                     break
-        for candidate in ordered:
-            FindingEvidenceAssembler._append_if_eligible(
-                selected, seen_chunks, document_counts, candidate
-            )
-            if len(selected) == MAX_EVIDENCE_PER_FINDING:
-                break
+        for required in sorted(required_support_types, key=priorities.__getitem__):
+            if support_counts[required] >= 2:
+                continue
+            for candidate in (item for item in ordered if item.support_type == required):
+                count_before = len(selected)
+                FindingEvidenceAssembler._append_if_eligible(
+                    selected,
+                    seen_chunks,
+                    document_counts,
+                    support_document_ids,
+                    support_counts,
+                    candidate,
+                )
+                if len(selected) > count_before:
+                    break
         return selected
 
     @staticmethod
@@ -269,6 +285,8 @@ class FindingEvidenceAssembler:
         selected: list[EvidenceSupportDecision],
         seen_chunks: set[str],
         document_counts: defaultdict[int, int],
+        support_document_ids: defaultdict[str, set[int]],
+        support_counts: defaultdict[str, int],
         candidate: EvidenceSupportDecision,
     ) -> None:
         if len(selected) >= MAX_EVIDENCE_PER_FINDING:
@@ -278,11 +296,18 @@ class FindingEvidenceAssembler:
             return
         identity = result.chunk_identity_sha256
         document_id = result.source_document_id
-        if identity in seen_chunks or document_counts[document_id] >= MAX_EVIDENCE_PER_DOCUMENT:
+        if (
+            identity in seen_chunks
+            or document_counts[document_id] >= MAX_EVIDENCE_PER_DOCUMENT
+            or support_counts[candidate.support_type] >= 2
+            or document_id in support_document_ids[candidate.support_type]
+        ):
             return
         selected.append(candidate)
         seen_chunks.add(identity)
         document_counts[document_id] += 1
+        support_document_ids[candidate.support_type].add(document_id)
+        support_counts[candidate.support_type] += 1
 
     @staticmethod
     def _to_link(
