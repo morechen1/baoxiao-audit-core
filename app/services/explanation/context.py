@@ -15,6 +15,7 @@ from app.services.explanation.schemas import (
     ControlledEvidence,
     ControlledFinding,
     ControlledRAGContext,
+    VisibleSegmentV1,
 )
 from app.services.review_payload import canonical_portable_source_url
 from app.services.screening.evidence import FindingEvidenceAssembler
@@ -104,11 +105,13 @@ class AllowedEvidenceQuoteBuilderV1:
             if key in seen:
                 continue
             seen.add(key)
+            original_length = len(quote)
             window = _evidence_window(
                 quote,
                 tuple(str(value) for value in link.actual_matched_substrings),
                 MAX_QUOTE_LENGTH,
             )
+            was_truncated = len(window) < original_length
             segments.append(
                 AllowedEvidenceSegment(
                     field_name=field_name,
@@ -116,6 +119,8 @@ class AllowedEvidenceQuoteBuilderV1:
                     evidence_snapshot={
                         key: value for key, value in reference.items() if key != "quote"
                     },
+                    original_quote_length=original_length,
+                    truncated=was_truncated,
                 )
             )
         segments.sort(
@@ -178,7 +183,9 @@ class ControlledRAGContextBuilder:
                 evidence_rows.append(evidence)
                 bindings[citation_key] = binding
                 citation_ordinal += 1
-            if len(links) > MAX_EVIDENCE_PER_FINDING:
+            if len(links) > MAX_EVIDENCE_PER_FINDING or any(
+                item.truncated for item in evidence_rows
+            ):
                 truncated = True
             controlled_findings.append(
                 ControlledFinding(
@@ -277,6 +284,15 @@ class ControlledRAGContextBuilder:
             raise ExplanationError("explanation_citation_snapshot_mismatch")
         segments = self.allowed_quotes.build(link)
         primary = segments[0]
+        visible = [
+            VisibleSegmentV1(
+                field_name=item.field_name,
+                quote=item.quote,
+                truncated=item.truncated,
+                original_quote_length=item.original_quote_length,
+            )
+            for item in segments
+        ]
         evidence = ControlledEvidence(
             citation_key=citation_key,
             support_type=link.support_type,
@@ -292,10 +308,8 @@ class ControlledRAGContextBuilder:
             chunk_identity_sha256=link.chunk_identity_sha256,
             chunk_content_sha256=link.chunk_content_sha256,
             evidence_field_name=primary.field_name,
-            truncated=any(
-                len(str(item.evidence_snapshot.get("quote") or "")) > len(item.quote)
-                for item in segments
-            ),
+            visible_segments=visible,
+            truncated=any(item.truncated for item in segments),
         )
         return evidence, EvidenceBinding(
             finding_key=finding_key,
@@ -342,11 +356,21 @@ class ControlledRAGContextBuilder:
                         for item in binding.allowed_quote_segments
                     )
                     primary = shortened[0].quote
+                    updated_visible = [
+                        VisibleSegmentV1(
+                            field_name=seg.field_name,
+                            quote=seg.quote,
+                            truncated=True,
+                            original_quote_length=seg.original_quote_length,
+                        )
+                        for seg in shortened
+                    ]
                     finding.evidence[index] = evidence.model_copy(
                         update={
                             "quote": primary,
                             "evidence_field_name": shortened[0].field_name,
                             "truncated": True,
+                            "visible_segments": updated_visible,
                         }
                     )
                     kept[evidence.citation_key] = replace(

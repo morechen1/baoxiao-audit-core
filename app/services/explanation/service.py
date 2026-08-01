@@ -108,8 +108,6 @@ class ControlledExplanationService:
         try:
             resolved = [item.model_dump(mode="json") for item in validated.resolved_citations]
             stored_output = deepcopy(validated.output)
-            if prompt.audience == "consumer":
-                stored_output["evidence_links"] = resolved
             artifact_payload = {
                 "output_schema_version": prompt.output_schema_version,
                 "prompt_sha256": run.prompt_sha256,

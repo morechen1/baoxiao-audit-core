@@ -34,6 +34,15 @@ class AllowedEvidenceSegment(StrictModel):
     field_name: str = Field(min_length=1, max_length=80)
     quote: str = Field(min_length=1, max_length=600)
     evidence_snapshot: dict[str, Any]
+    original_quote_length: int = Field(ge=1)
+    truncated: bool = False
+
+
+class VisibleSegmentV1(StrictModel):
+    field_name: str = Field(min_length=1, max_length=80)
+    quote: str = Field(min_length=1, max_length=600)
+    truncated: bool = False
+    original_quote_length: int = Field(ge=1)
 
 
 class ControlledEvidence(StrictModel):
@@ -51,6 +60,7 @@ class ControlledEvidence(StrictModel):
     chunk_identity_sha256: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
     chunk_content_sha256: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
     evidence_field_name: str = Field(min_length=1, max_length=80)
+    visible_segments: list[VisibleSegmentV1] = Field(min_length=1, max_length=8)
     truncated: bool = False
 
 

@@ -29,6 +29,21 @@ UNCERTAINTY_EXPRESSIONS = (
     "可能存在风险信号",
     "现有证据显示",
 )
+PARTIAL_CERTAINTY_PATTERNS = (
+    r"已经得到确定证明",
+    r"证据充分证明",
+    r"已经确认",
+    r"(?<!不)可以确认",
+    r"(?<!不)可以认定",
+    r"事实明确",
+    r"确定存在",
+    r"已被证实",
+    r"无疑[^地]",
+    r"已经查明",
+    r"结论明确",
+    r"必然",
+    r"一定构成",
+)
 LEGAL_CONCLUSION_PATTERNS = (
     r"已违法",
     r"(?<!不)构成违法",
@@ -274,6 +289,8 @@ class ControlledExplanationValidator:
         if not claim.citations:
             raise ExplanationError("explanation_unsupported_claim")
         citations = self.citations.validate(built, scope, list(claim.citations))
+        self._check_partial_certainty(claim, scope, context_by_key)
+        self._check_cross_finding_citation_coverage(scope, citations)
         cited_text = "\n".join(item.cited_quote for item in citations)
         deterministic_text = "\n".join(
             value
@@ -285,8 +302,11 @@ class ControlledExplanationValidator:
             )
         )
         for token in NUMBER_TOKEN_PATTERN.findall(claim.text):
-            if token not in cited_text and token not in deterministic_text:
-                raise ExplanationError("explanation_unsupported_claim")
+            if token in cited_text or token in deterministic_text:
+                continue
+            if re.match(r"^[FE][0-9]{3}$", token):
+                continue
+            raise ExplanationError("explanation_unsupported_claim")
         for item in citations:
             previous = validated_by_key.get(item.citation_key)
             if previous is not None and previous != item:
@@ -300,6 +320,33 @@ class ControlledExplanationValidator:
             finding = context_by_key[key]
             result.update({finding.deterministic_explanation, finding.review_question})
         return result
+
+    @staticmethod
+    def _check_partial_certainty(
+        claim: GroundedClaimV1,
+        scope: set[str],
+        context_by_key: dict[str, Any],
+    ) -> None:
+        has_partial = any(
+            context_by_key[key].evidence_status == "partially_supported" for key in scope
+        )
+        if not has_partial or claim.claim_type == "deterministic_template":
+            return
+        for pattern in PARTIAL_CERTAINTY_PATTERNS:
+            if re.search(pattern, claim.text):
+                raise ExplanationError("explanation_missing_uncertainty")
+
+    @staticmethod
+    def _check_cross_finding_citation_coverage(
+        scope: set[str],
+        citations: list[ValidatedCitation],
+    ) -> None:
+        covered: set[str] = set()
+        for citation in citations:
+            if citation.finding_key in scope:
+                covered.add(citation.finding_key)
+        if covered != scope:
+            raise ExplanationError("explanation_citation_wrong_finding")
 
     @staticmethod
     def _row_claims(row: Any) -> Iterable[tuple[GroundedClaimV1, set[str]]]:

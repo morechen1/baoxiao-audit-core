@@ -51,6 +51,7 @@ from app.services.explanation.schemas import (
     ExplanationProviderRequest,
     InstitutionExplanationV1,
     PromptDefinition,
+    VisibleSegmentV1,
 )
 from app.services.explanation.service import ControlledExplanationService
 from app.services.explanation.validators import (
@@ -74,6 +75,14 @@ def _built_context(id_offset: int = 0) -> BuiltContext:
             "field_name": "article_text",
             "mode": "verbatim",
         },
+        original_quote_length=23,
+        truncated=False,
+    )
+    visible_one = VisibleSegmentV1(
+        field_name="article_text",
+        quote="不得利用监管机构名义对保险产品作引人误解的宣传",
+        truncated=False,
+        original_quote_length=23,
     )
     evidence_one = ControlledEvidence(
         citation_key="E001",
@@ -90,6 +99,7 @@ def _built_context(id_offset: int = 0) -> BuiltContext:
         chunk_identity_sha256="a" * 64,
         chunk_content_sha256="b" * 64,
         evidence_field_name="article_text",
+        visible_segments=[visible_one],
     )
     segment_two = AllowedEvidenceSegment(
         field_name="exclusions",
@@ -98,6 +108,14 @@ def _built_context(id_offset: int = 0) -> BuiltContext:
             "field_name": "exclusions",
             "mode": "verbatim",
         },
+        original_quote_length=17,
+        truncated=False,
+    )
+    visible_two = VisibleSegmentV1(
+        field_name="exclusions",
+        quote="本合同责任免除事项以正式合同约定为准",
+        truncated=False,
+        original_quote_length=17,
     )
     evidence_two = ControlledEvidence(
         citation_key="E002",
@@ -114,6 +132,7 @@ def _built_context(id_offset: int = 0) -> BuiltContext:
         chunk_identity_sha256="c" * 64,
         chunk_content_sha256="d" * 64,
         evidence_field_name="exclusions",
+        visible_segments=[visible_two],
     )
     payload = ControlledRAGContext(
         context_schema_version="controlled_rag_context_v1",
@@ -546,6 +565,7 @@ def _budget_context(
             key = f"E{ordinal:03d}"
             quote = f"规范证据{finding_index}-{evidence_index}。" + "严" * 580
             evidence_field = "exclusions" if illustrative else "article_text"
+            original_len = 590
             segment = AllowedEvidenceSegment(
                 field_name=evidence_field,
                 quote=quote,
@@ -555,6 +575,14 @@ def _budget_context(
                     "start_offset": finding_index * 1000 + evidence_index * 600,
                     "end_offset": finding_index * 1000 + evidence_index * 600 + len(quote),
                 },
+                original_quote_length=original_len,
+                truncated=False,
+            )
+            visible = VisibleSegmentV1(
+                field_name=evidence_field,
+                quote=quote,
+                truncated=False,
+                original_quote_length=original_len,
             )
             evidence = ControlledEvidence(
                 citation_key=key,
@@ -573,6 +601,7 @@ def _budget_context(
                 chunk_identity_sha256=f"{ordinal:064x}",
                 chunk_content_sha256=f"{ordinal + 1000:064x}",
                 evidence_field_name=evidence_field,
+                visible_segments=[visible],
             )
             evidence_rows.append(evidence)
             bindings[key] = EvidenceBinding(
@@ -704,7 +733,11 @@ def test_consumer_artifact_and_citations_resolve_server_side_source_catalog(
     artifact = service.artifact(session, run.id)
     resolved = artifact["resolved_citations"]
     assert resolved[0]["source_url"] == "https://example.test/regulation"
-    assert artifact["validated_output"]["evidence_links"] == resolved
+    validated_links = artifact["validated_output"]["evidence_links"]
+    assert len(validated_links) == 1
+    assert validated_links[0]["citation_key"] == "E001"
+    assert validated_links[0]["cited_quote"]
+    assert "source_url" not in validated_links[0]
     catalog = service.citations(session, run.id)
     assert catalog[0]["source_locator"] == {"article_number": "第十七条"}
     assert catalog[0]["evidence_field_name"] == "article_text"
@@ -840,3 +873,556 @@ def test_explanation_cli_lists_versioned_prompt_hashes() -> None:
     payload = json.loads(result.stdout)
     assert {item["audience"] for item in payload} == {"institution", "consumer"}
     assert all(len(item["prompt_sha256"]) == 64 for item in payload)
+
+
+# ── Problem A: hidden segment cannot be cited ──────────────────────────────────
+
+
+def test_hidden_segment_not_in_context_cannot_be_cited() -> None:
+    """segment B in binding but only segment A visible to model → reject."""
+    seg_a = AllowedEvidenceSegment(
+        field_name="article_text",
+        quote="不得利用监管机构名义作引人误解的宣传",
+        evidence_snapshot={"field_name": "article_text", "mode": "verbatim"},
+        original_quote_length=18,
+        truncated=False,
+    )
+    seg_b = AllowedEvidenceSegment(
+        field_name="illegal_facts",
+        quote="处以罚款50万元并责令改正",
+        evidence_snapshot={"field_name": "illegal_facts", "mode": "verbatim"},
+        original_quote_length=13,
+        truncated=False,
+    )
+    visible_a = VisibleSegmentV1(
+        field_name="article_text",
+        quote="不得利用监管机构名义作引人误解的宣传",
+        truncated=False,
+        original_quote_length=18,
+    )
+    evidence = ControlledEvidence(
+        citation_key="E001",
+        support_type="normative_basis",
+        source_title="保险销售行为管理办法",
+        source_url="https://example.test/regulation",
+        pilot_id="REG-001",
+        record_type="regulation",
+        chunk_kind="article_text",
+        quote=seg_a.quote,
+        source_locator={"article_number": "第十七条"},
+        evidence_references=[seg_a.evidence_snapshot, seg_b.evidence_snapshot],
+        context_scope="not_applicable",
+        chunk_identity_sha256="a" * 64,
+        chunk_content_sha256="b" * 64,
+        evidence_field_name="article_text",
+        visible_segments=[visible_a],
+    )
+    """only visible_a is visible; seg_b is NOT exposed to the model."""
+    context = ControlledRAGContext(
+        context_schema_version="controlled_rag_context_v1",
+        screening_run_payload_sha256="e" * 64,
+        trusted_index_payload_hash="f" * 64,
+        material={"title": "T", "material_type": "advertisement", "input_sha256": "1" * 64},
+        findings=[
+            ControlledFinding(
+                finding_key="F001",
+                rule_id="regulatory_endorsement",
+                category="监管背书",
+                severity="high",
+                signal_strength="strong",
+                matched_text="监管推荐",
+                raw_start_offset=0,
+                raw_end_offset=4,
+                deterministic_explanation="explanation",
+                review_question="review?",
+                evidence_status="partially_supported",
+                evidence=[evidence],
+            )
+        ],
+    )
+    binding = EvidenceBinding(
+        finding_key="F001",
+        finding_id=1,
+        link_id=1,
+        citation_key="E001",
+        quote=seg_a.quote,
+        chunk_identity_sha256="a" * 64,
+        chunk_content_sha256="b" * 64,
+        source_url="https://example.test/regulation",
+        source_locator={"article_number": "第十七条"},
+        support_type="normative_basis",
+        source_title="保险销售行为管理办法",
+        pilot_id="REG-001",
+        record_type="regulation",
+        chunk_kind="article_text",
+        context_scope="not_applicable",
+        allowed_quote_segments=(seg_a,),
+        semantic_anchors=("监管机构",),
+    )
+    built = BuiltContext(
+        context, canonical_sha256(context.model_dump(mode="json")), {"E001": binding}
+    )
+    prompt = load_prompt("institution")
+    provider = DeterministicFixtureProvider()
+    response = provider.generate(
+        ExplanationProviderRequest(audience="institution", prompt=prompt, context=context)
+    )
+    output = json.loads(response.raw_json)
+    output["finding_explanations"][0]["explanation"]["citations"][0]["cited_quote"] = "罚款50万元"
+    output["finding_explanations"][0]["evidence_assessment"]["citations"][0]["cited_quote"] = (
+        "罚款50万元"
+    )
+    with pytest.raises(ExplanationError, match="explanation_citation_snapshot_mismatch"):
+        ControlledExplanationValidator().validate(
+            json.dumps(output, ensure_ascii=False), prompt, built
+        )
+
+
+def test_hidden_segment_rejection_is_robust_against_coincidental_match() -> None:
+    """segment B has a common phrase contained in segment A → still rejected because B is hidden."""
+    seg_a = AllowedEvidenceSegment(
+        field_name="article_text",
+        quote="营销宣传不得含有误导性表述违规信息",
+        evidence_snapshot={"field_name": "article_text", "mode": "verbatim"},
+        original_quote_length=17,
+        truncated=False,
+    )
+    seg_b = AllowedEvidenceSegment(
+        field_name="illegal_facts",
+        quote="违规信息已被监管部门记录",
+        evidence_snapshot={"field_name": "illegal_facts", "mode": "verbatim"},
+        original_quote_length=12,
+        truncated=False,
+    )
+    visible_a = VisibleSegmentV1(
+        field_name="article_text",
+        quote="营销宣传不得含有误导性表述违规信息",
+        truncated=False,
+        original_quote_length=17,
+    )
+    evidence = ControlledEvidence(
+        citation_key="E001",
+        support_type="normative_basis",
+        source_title="测试法规",
+        source_url="https://example.test/regulation",
+        pilot_id="REG-001",
+        record_type="regulation",
+        chunk_kind="article_text",
+        quote=seg_a.quote,
+        source_locator={"article_number": "第一条"},
+        evidence_references=[seg_a.evidence_snapshot, seg_b.evidence_snapshot],
+        context_scope="not_applicable",
+        chunk_identity_sha256="a" * 64,
+        chunk_content_sha256="b" * 64,
+        evidence_field_name="article_text",
+        visible_segments=[visible_a],
+    )
+    context = ControlledRAGContext(
+        context_schema_version="controlled_rag_context_v1",
+        screening_run_payload_sha256="e" * 64,
+        trusted_index_payload_hash="f" * 64,
+        material={"title": "T", "material_type": "advertisement", "input_sha256": "1" * 64},
+        findings=[
+            ControlledFinding(
+                finding_key="F001",
+                rule_id="regulatory_endorsement",
+                category="监管背书",
+                severity="high",
+                signal_strength="strong",
+                matched_text="违规信息",
+                raw_start_offset=0,
+                raw_end_offset=4,
+                deterministic_explanation="explanation",
+                review_question="review?",
+                evidence_status="partially_supported",
+                evidence=[evidence],
+            )
+        ],
+    )
+    binding = EvidenceBinding(
+        finding_key="F001",
+        finding_id=1,
+        link_id=1,
+        citation_key="E001",
+        quote=seg_a.quote,
+        chunk_identity_sha256="a" * 64,
+        chunk_content_sha256="b" * 64,
+        source_url="https://example.test/regulation",
+        source_locator={"article_number": "第一条"},
+        support_type="normative_basis",
+        source_title="测试法规",
+        pilot_id="REG-001",
+        record_type="regulation",
+        chunk_kind="article_text",
+        context_scope="not_applicable",
+        allowed_quote_segments=(seg_a,),
+        semantic_anchors=("误导性表述",),
+    )
+    built = BuiltContext(
+        context, canonical_sha256(context.model_dump(mode="json")), {"E001": binding}
+    )
+    prompt = load_prompt("institution")
+    provider = DeterministicFixtureProvider()
+    response = provider.generate(
+        ExplanationProviderRequest(audience="institution", prompt=prompt, context=context)
+    )
+    output = json.loads(response.raw_json)
+    output["finding_explanations"][0]["explanation"]["citations"][0]["cited_quote"] = (
+        "违规信息已被监管部门记录"
+    )
+    output["finding_explanations"][0]["evidence_assessment"]["citations"][0]["cited_quote"] = (
+        "违规信息已被监管部门记录"
+    )
+    """违规信息  appears in seg_a but the full cited_quote is from seg_b (hidden)."""
+    with pytest.raises(ExplanationError, match="explanation_citation_snapshot_mismatch"):
+        ControlledExplanationValidator().validate(
+            json.dumps(output, ensure_ascii=False), prompt, built
+        )
+
+
+def test_visible_multi_segment_all_can_be_cited() -> None:
+    """both segments visible → both can be cited."""
+    seg_a = AllowedEvidenceSegment(
+        field_name="article_text",
+        quote="不得利用监管机构名义作引人误解的宣传",
+        evidence_snapshot={"field_name": "article_text", "mode": "verbatim"},
+        original_quote_length=18,
+        truncated=False,
+    )
+    seg_b = AllowedEvidenceSegment(
+        field_name="illegal_facts",
+        quote="处以罚款50万元并责令改正",
+        evidence_snapshot={"field_name": "illegal_facts", "mode": "verbatim"},
+        original_quote_length=13,
+        truncated=False,
+    )
+    visible_a = VisibleSegmentV1(
+        field_name="article_text", quote=seg_a.quote, truncated=False, original_quote_length=18
+    )
+    visible_b = VisibleSegmentV1(
+        field_name="illegal_facts", quote=seg_b.quote, truncated=False, original_quote_length=13
+    )
+    evidence = ControlledEvidence(
+        citation_key="E001",
+        support_type="normative_basis",
+        source_title="保险销售行为管理办法",
+        source_url="https://example.test/regulation",
+        pilot_id="REG-001",
+        record_type="regulation",
+        chunk_kind="article_text",
+        quote=seg_a.quote,
+        source_locator={"article_number": "第十七条"},
+        evidence_references=[seg_a.evidence_snapshot, seg_b.evidence_snapshot],
+        context_scope="not_applicable",
+        chunk_identity_sha256="a" * 64,
+        chunk_content_sha256="b" * 64,
+        evidence_field_name="article_text",
+        visible_segments=[visible_a, visible_b],
+    )
+    context = ControlledRAGContext(
+        context_schema_version="controlled_rag_context_v1",
+        screening_run_payload_sha256="e" * 64,
+        trusted_index_payload_hash="f" * 64,
+        material={"title": "T", "material_type": "advertisement", "input_sha256": "1" * 64},
+        findings=[
+            ControlledFinding(
+                finding_key="F001",
+                rule_id="regulatory_endorsement",
+                category="监管背书",
+                severity="high",
+                signal_strength="strong",
+                matched_text="监管推荐",
+                raw_start_offset=0,
+                raw_end_offset=4,
+                deterministic_explanation="explanation",
+                review_question="review?",
+                evidence_status="partially_supported",
+                evidence=[evidence],
+            )
+        ],
+    )
+    binding = EvidenceBinding(
+        finding_key="F001",
+        finding_id=1,
+        link_id=1,
+        citation_key="E001",
+        quote=seg_a.quote,
+        chunk_identity_sha256="a" * 64,
+        chunk_content_sha256="b" * 64,
+        source_url="https://example.test/regulation",
+        source_locator={"article_number": "第十七条"},
+        support_type="normative_basis",
+        source_title="保险销售行为管理办法",
+        pilot_id="REG-001",
+        record_type="regulation",
+        chunk_kind="article_text",
+        context_scope="not_applicable",
+        allowed_quote_segments=(seg_a, seg_b),
+        semantic_anchors=("监管机构",),
+    )
+    built = BuiltContext(
+        context, canonical_sha256(context.model_dump(mode="json")), {"E001": binding}
+    )
+    prompt = load_prompt("institution")
+    provider = DeterministicFixtureProvider()
+    response = provider.generate(
+        ExplanationProviderRequest(audience="institution", prompt=prompt, context=context)
+    )
+    output = json.loads(response.raw_json)
+    output["finding_explanations"][0]["explanation"]["citations"][0]["cited_quote"] = "罚款50万元"
+    output["finding_explanations"][0]["evidence_assessment"]["citations"][0]["cited_quote"] = (
+        "罚款50万元"
+    )
+    validated = ControlledExplanationValidator().validate(
+        json.dumps(output, ensure_ascii=False), prompt, built
+    )
+    assert validated.output["schema_version"] == "institution_explanation_v1"
+
+
+# ── Problem B: Consumer artifact schema compliance ────────────────────────────
+
+
+def test_consumer_artifact_validated_output_json_conforms_to_output_schema() -> None:
+    prompt = load_prompt("consumer")
+    built = _built_context()
+    response = DeterministicFixtureProvider().generate(
+        ExplanationProviderRequest(audience="consumer", prompt=prompt, context=built.payload)
+    )
+    raw = json.loads(response.raw_json)
+    validated = ControlledExplanationValidator().validate(
+        json.dumps(raw, ensure_ascii=False), prompt, built
+    )
+    stored_output = validated.output
+    output_schema_version = prompt.output_schema_version
+    stored_output["schema_version"] = output_schema_version
+    from app.services.explanation.schemas import ConsumerExplanationV1
+
+    ConsumerExplanationV1.model_validate(stored_output)
+
+
+def test_consumer_artifact_evidence_links_are_output_citations_not_resolved() -> None:
+    prompt = load_prompt("consumer")
+    built = _built_context()
+    response = DeterministicFixtureProvider().generate(
+        ExplanationProviderRequest(audience="consumer", prompt=prompt, context=built.payload)
+    )
+    raw = json.loads(response.raw_json)
+    validated = ControlledExplanationValidator().validate(
+        json.dumps(raw, ensure_ascii=False), prompt, built
+    )
+    stored = validated.output
+    for link in stored.get("evidence_links", []):
+        assert set(link.keys()) == {"citation_key", "cited_quote"}, (
+            f"unexpected keys: {link.keys()}"
+        )
+    resolved = validated.resolved_citations
+    assert len(resolved) >= 1
+    assert "source_url" in resolved[0].model_dump(mode="json")
+
+
+# ── Problem C: truncation recording ───────────────────────────────────────────
+
+
+def test_600_char_initial_truncation_is_recorded() -> None:
+    """evidence over 600 chars → segment truncated=true, original length recorded."""
+    long_quote = "规" * 846
+    evidence_field_name = "article_text"
+    seg = AllowedEvidenceSegment(
+        field_name=evidence_field_name,
+        quote=long_quote[:600],
+        evidence_snapshot={"field_name": evidence_field_name, "mode": "verbatim"},
+        original_quote_length=846,
+        truncated=True,
+    )
+    visible = VisibleSegmentV1(
+        field_name=evidence_field_name,
+        quote=long_quote[:600],
+        truncated=True,
+        original_quote_length=846,
+    )
+    evidence = ControlledEvidence(
+        citation_key="E001",
+        support_type="normative_basis",
+        source_title="测试法规",
+        source_url="https://example.test/regulation",
+        pilot_id="REG-001",
+        record_type="regulation",
+        chunk_kind="article_text",
+        quote=long_quote[:600],
+        source_locator={"article_number": "第一条"},
+        evidence_references=[seg.evidence_snapshot],
+        context_scope="not_applicable",
+        chunk_identity_sha256="a" * 64,
+        chunk_content_sha256="b" * 64,
+        evidence_field_name=evidence_field_name,
+        visible_segments=[visible],
+        truncated=True,
+    )
+    assert evidence.truncated is True
+    assert evidence.visible_segments[0].truncated is True
+    assert evidence.visible_segments[0].original_quote_length == 846
+    assert len(evidence.quote) == 600
+    context = ControlledRAGContext(
+        context_schema_version="controlled_rag_context_v1",
+        screening_run_payload_sha256="e" * 64,
+        trusted_index_payload_hash="f" * 64,
+        material={"title": "T", "material_type": "advertisement", "input_sha256": "1" * 64},
+        findings=[
+            ControlledFinding(
+                finding_key="F001",
+                rule_id="regulatory_endorsement",
+                category="监管背书",
+                severity="high",
+                signal_strength="strong",
+                matched_text="风险",
+                raw_start_offset=0,
+                raw_end_offset=2,
+                deterministic_explanation="explanation",
+                review_question="review?",
+                evidence_status="partially_supported",
+                evidence=[evidence],
+            )
+        ],
+        truncated=True,
+    )
+    assert context.truncated is True
+
+
+def test_budget_secondary_truncation_preserves_truncated_flag() -> None:
+    """budget shortening keeps truncated=True on segments and context."""
+    result = _budget_context(20, 4)
+    ctx = result
+    assert ctx.payload.truncated is True
+    for finding in ctx.payload.findings:
+        for evidence in finding.evidence:
+            assert evidence.truncated is True
+            for seg in evidence.visible_segments:
+                assert seg.truncated is True
+
+
+def test_same_input_produces_stable_context_sha_after_truncation() -> None:
+    first = _budget_context(20, 1)
+    second = _budget_context(20, 1)
+    assert first.payload_sha256 == second.payload_sha256
+
+
+# ── Problem D: partially_supported certainty detection ───────────────────────
+
+
+@pytest.mark.parametrize(
+    "bad_text",
+    [
+        "该风险已经得到确定证明。",
+        "证据充分证明该行为违规。",
+        "已经确认该条款有问题。",
+        "可以确认存在误导。",
+        "可以认定构成违规。",
+        "事实明确，无需进一步调查。",
+        "确定存在销售误导行为。",
+        "该行为已被证实。",
+        "这无疑是违法的。",
+        "已经查明全部事实。",
+        "结论明确：存在违规。",
+        "该行为必然存在问题。",
+        "一定构成违规。",
+    ],
+)
+def test_partially_supported_rejects_deterministic_certainty(bad_text: str) -> None:
+    payload, prompt, built = _valid_payload("institution")
+    payload["finding_explanations"][0]["evidence_assessment"]["text"] = bad_text
+    with pytest.raises(ExplanationError, match="explanation_missing_uncertainty"):
+        ControlledExplanationValidator().validate(
+            json.dumps(payload, ensure_ascii=False), prompt, built
+        )
+
+
+@pytest.mark.parametrize(
+    "cautious_text",
+    [
+        "可能存在风险信号。",
+        "当前证据仅能提供部分支持。",
+        "仍需结合原始营销材料和合同进一步核验。",
+        "当前证据不足以作出确定结论。",
+        "需要进一步核验该表述。",
+    ],
+)
+def test_partially_supported_accepts_cautious_language(cautious_text: str) -> None:
+    payload, prompt, built = _valid_payload("institution")
+    payload["finding_explanations"][0]["evidence_assessment"]["text"] = cautious_text
+    validated = ControlledExplanationValidator().validate(
+        json.dumps(payload, ensure_ascii=False), prompt, built
+    )
+    assert validated.output["schema_version"] == "institution_explanation_v1"
+
+
+# ── Problem E: cross-finding per-finding citation binding ────────────────────
+
+
+def test_cross_finding_claim_missing_one_finding_citation_rejected() -> None:
+    prompt = load_prompt("institution")
+    built = _built_context()
+    response = DeterministicFixtureProvider().generate(
+        ExplanationProviderRequest(audience="institution", prompt=prompt, context=built.payload)
+    )
+    output = json.loads(response.raw_json)
+    output["cross_finding_observations"] = [
+        {
+            "claim_type": "cautious_cross_finding_observation",
+            "text": "F001与F002均需要进一步核验。",
+            "finding_keys": ["F001", "F002"],
+            "citations": [{"citation_key": "E002", "cited_quote": built.bindings["E002"].quote}],
+        }
+    ]
+    with pytest.raises(ExplanationError, match="explanation_citation_wrong_finding"):
+        ControlledExplanationValidator().validate(
+            json.dumps(output, ensure_ascii=False), prompt, built
+        )
+
+
+def test_cross_finding_claim_per_finding_evidence_passes() -> None:
+    prompt = load_prompt("institution")
+    built = _built_context()
+    response = DeterministicFixtureProvider().generate(
+        ExplanationProviderRequest(audience="institution", prompt=prompt, context=built.payload)
+    )
+    output = json.loads(response.raw_json)
+    output["cross_finding_observations"] = [
+        {
+            "claim_type": "cautious_cross_finding_observation",
+            "text": "F001与F002均需要进一步核验。",
+            "finding_keys": ["F001", "F002"],
+            "citations": [
+                {"citation_key": "E001", "cited_quote": built.bindings["E001"].quote},
+                {"citation_key": "E002", "cited_quote": built.bindings["E002"].quote},
+            ],
+        }
+    ]
+    validated = ControlledExplanationValidator().validate(
+        json.dumps(output, ensure_ascii=False), prompt, built
+    )
+    assert validated.output["schema_version"] == "institution_explanation_v1"
+
+
+def test_evidence_insufficient_finding_cannot_borrow_other_finding_citations(
+    session: Any, monkeypatch: Any
+) -> None:
+    """evidence_insufficient finding using another finding's citation → rejected."""
+    screening_id, built = _persist_screening_graph(session)
+    service = ControlledExplanationService()
+    monkeypatch.setattr(service.context_builder, "build", lambda *_args: built)
+    response = DeterministicFixtureProvider().generate(
+        ExplanationProviderRequest(
+            audience="institution", prompt=load_prompt("institution"), context=built.payload
+        )
+    )
+    output = json.loads(response.raw_json)
+    output["finding_explanations"][0]["finding_key"] = "F002"
+    output["finding_explanations"][0]["explanation"]["finding_keys"] = ["F002"]
+    output["finding_explanations"][0]["why_it_matters"]["finding_keys"] = ["F002"]
+    output["finding_explanations"][0]["evidence_assessment"]["finding_keys"] = ["F002"]
+    for action in output["finding_explanations"][0]["review_actions"]:
+        action["finding_keys"] = ["F002"]
+    with pytest.raises(ExplanationError, match="explanation_unknown_finding_key"):
+        ControlledExplanationValidator().validate(
+            json.dumps(output, ensure_ascii=False), load_prompt("institution"), built
+        )
