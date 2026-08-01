@@ -462,6 +462,34 @@ def _exercise_budget_pressure() -> dict[str, Any]:
     }
 
 
+def _evaluate_formal_acceptance(report: dict[str, Any]) -> bool:
+    return bool(
+        report["database_executed"]
+        and report["primary_postgresql_executed"]
+        and report["comparison_postgresql_executed"]
+        and report["formal_context_count"] == 60
+        and report["cross_database_context_sha_stability"] is True
+        and report["cross_database_artifact_sha_stability"] is True
+        and report["regulatory_case_citation_count"] == 0
+        and report["historical_prompt_snapshot_stability"] is True
+        and report["historical_context_snapshot_stability"] is True
+        and report["deterministic_rerun"] is True
+        and report["sensitive_data_scan"] is True
+        and report["constructed_valid_executed"] == 12
+        and report["constructed_valid_passed"] == 12
+        and report["constructed_valid_failed"] == 0
+        and report["constructed_invalid_executed"] == 43
+        and report["constructed_invalid_blocked"] == 43
+        and report["constructed_invalid_unexpected_pass"] == 0
+        and report["invalid_error_code_match_count"] == 43
+        and report["rejected_artifact_count"] == 0
+        and report["evidence_insufficient_context_pass"] is True
+        and report["context_budget_pressure_executed"] is True
+        and report["context_budget_preserves_minimum_evidence"] is True
+        and report["context_too_large_fail_closed"] is True
+    )
+
+
 def _sensitive_scan(value: object) -> bool:
     text = json.dumps(value, ensure_ascii=False)
     return not bool(
@@ -492,17 +520,31 @@ def main() -> None:
         )
     )
     comparison_available = bool(args.comparison_database_url)
+    comparison_postgresql_available = bool(
+        args.comparison_database_url
+        and (
+            "postgresql" in str(args.comparison_database_url).lower()
+            or "postgres" in str(args.comparison_database_url).lower()
+        )
+    )
+    databases_different = comparison_available and args.comparison_database_url != args.database_url
     if db_available:
         assert args.database_url is not None
         primary = _execute_database(args.database_url)
         comparison = (
-            _execute_database(args.comparison_database_url) if comparison_available else primary
+            _execute_database(args.comparison_database_url)
+            if comparison_available and databases_different
+            else primary
         )
         context_stable = (
-            primary["contexts"] == comparison["contexts"] if comparison_available else None
+            primary["contexts"] == comparison["contexts"]
+            if comparison_available and databases_different
+            else None
         )
         artifact_stable = (
-            primary["artifacts"] == comparison["artifacts"] if comparison_available else None
+            primary["artifacts"] == comparison["artifacts"]
+            if comparison_available and databases_different
+            else None
         )
         evidence_insufficient_pass = _exercise_evidence_insufficient(args.database_url)
     else:
@@ -542,9 +584,7 @@ def main() -> None:
         context_budget_pressure_executed = budget_exercise.get("executed", 0) >= 3
         context_budget_preserves_minimum_evidence = budget_exercise.get("preserves_minimum", False)
         context_too_large_fail_closed = budget_exercise.get("fail_closed", False)
-        valid_artifact_count_db = primary["sample_count"] * 2 + (
-            1 if primary["deterministic_rerun"] else 0
-        )
+        valid_artifact_count_db = primary["sample_count"] * 2
         deterministic_rerun_artifact_count = 1 if primary["deterministic_rerun"] else 0
     else:
         context_budget_pressure_executed = False
@@ -554,11 +594,15 @@ def main() -> None:
 
     formal_institution_count = primary["sample_count"] if db_available else 0
     formal_consumer_count = primary["sample_count"] if db_available else 0
+    formal_valid_artifact_count = valid_artifact_count_db
 
     constructed_valid_artifacts = evaluation["constructed_valid_artifact_count"]
     evidence_insufficient_artifacts = 1 if evidence_insufficient_pass else 0
     total_valid_artifact_count = (
-        valid_artifact_count_db + constructed_valid_artifacts + evidence_insufficient_artifacts
+        formal_valid_artifact_count
+        + deterministic_rerun_artifact_count
+        + constructed_valid_artifacts
+        + evidence_insufficient_artifacts
     )
 
     report = {
@@ -572,18 +616,13 @@ def main() -> None:
         "context_schema_version": "controlled_rag_context_v1",
         "provider_version": "controlled_fixture_provider_v2",
         "database_executed": db_available,
-        "postgresql_executed": db_available and postgresql_available,
-        "comparison_database_executed": db_available and comparison_available,
+        "primary_postgresql_executed": db_available and postgresql_available,
+        "comparison_postgresql_executed": (
+            db_available and comparison_postgresql_available and databases_different
+        ),
         "docker_executed": False,
         "alembic_check_executed": False,
-        "formal_database_acceptance_completed": (
-            db_available
-            and postgresql_available
-            and comparison_available
-            and bool(context_stable)
-            and bool(artifact_stable)
-            and bool(evidence_insufficient_pass)
-        ),
+        "formal_database_acceptance_completed": False,
         "offline_constructed_evaluation_completed": True,
         "screening_sample_count": primary["sample_count"],
         "screening_finding_count": primary["screening_finding_count"],
@@ -592,7 +631,7 @@ def main() -> None:
         "formal_context_count": len(primary["contexts"]),
         "formal_institution_artifact_count": formal_institution_count,
         "formal_consumer_artifact_count": formal_consumer_count,
-        "formal_valid_artifact_count": valid_artifact_count_db,
+        "formal_valid_artifact_count": formal_valid_artifact_count,
         "deterministic_rerun_artifact_count": deterministic_rerun_artifact_count,
         "regulatory_case_citation_count": primary["regulatory_case_citation_count"],
         "cross_database_context_sha_stability": context_stable,
@@ -629,6 +668,7 @@ def main() -> None:
         "total_valid_artifact_count": total_valid_artifact_count,
         "artifact_count_formula": (
             "formal_valid_artifact_count"
+            " + deterministic_rerun_artifact_count"
             " + constructed_valid_artifact_count"
             " + evidence_insufficient_valid_artifact_count"
             " = total_valid_artifact_count"
@@ -654,40 +694,9 @@ def main() -> None:
         "constructed_evaluation_results": evaluation["results"],
     }
     report["sensitive_data_scan"] = _sensitive_scan(report)
+    report["formal_database_acceptance_completed"] = _evaluate_formal_acceptance(report)
     if db_available:
-        constructed_valid = all(
-            [
-                report["constructed_valid_executed"] == 12,
-                report["constructed_valid_passed"] == 12,
-                report["constructed_valid_failed"] == 0,
-            ]
-        )
-        constructed_invalid = all(
-            [
-                report["constructed_invalid_executed"] == 43,
-                report["constructed_invalid_blocked"] == 43,
-                report["constructed_invalid_unexpected_pass"] == 0,
-                report["invalid_error_code_match_count"] == 43,
-                report["rejected_artifact_count"] == 0,
-            ]
-        )
-        if not all(
-            [
-                report["formal_context_count"] == 60,
-                context_stable,
-                artifact_stable,
-                report["regulatory_case_citation_count"] == 0,
-                report["historical_prompt_snapshot_stability"],
-                report["historical_context_snapshot_stability"],
-                report["deterministic_rerun"],
-                report["sensitive_data_scan"],
-                constructed_valid,
-                constructed_invalid,
-                evidence_insufficient_pass,
-                report["context_budget_pressure_executed"],
-                report["context_too_large_fail_closed"],
-            ]
-        ):
+        if not report["formal_database_acceptance_completed"]:
             raise SystemExit("controlled_rag_acceptance_failed")
     else:
         offline_gate = all(

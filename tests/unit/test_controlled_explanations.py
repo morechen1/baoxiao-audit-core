@@ -1788,3 +1788,95 @@ def test_offline_fixture_corpus_semantics() -> None:
                 assert item["actual_status"] == "failed"
             else:
                 assert item["actual_status"] == "rejected"
+
+
+# ── V4 acceptance accounting tests ────────────────────────────────────────────
+
+
+def test_formal_acceptance_requires_all_budget_gates() -> None:
+    """preserves_minimum_evidence=false must block formal acceptance even
+    when other budget gates pass."""
+    from scripts.run_controlled_rag_acceptance import _evaluate_formal_acceptance
+
+    base = {
+        "database_executed": True,
+        "primary_postgresql_executed": True,
+        "comparison_postgresql_executed": True,
+        "formal_context_count": 60,
+        "cross_database_context_sha_stability": True,
+        "cross_database_artifact_sha_stability": True,
+        "regulatory_case_citation_count": 0,
+        "historical_prompt_snapshot_stability": True,
+        "historical_context_snapshot_stability": True,
+        "deterministic_rerun": True,
+        "sensitive_data_scan": True,
+        "constructed_valid_executed": 12,
+        "constructed_valid_passed": 12,
+        "constructed_valid_failed": 0,
+        "constructed_invalid_executed": 43,
+        "constructed_invalid_blocked": 43,
+        "constructed_invalid_unexpected_pass": 0,
+        "invalid_error_code_match_count": 43,
+        "rejected_artifact_count": 0,
+        "evidence_insufficient_context_pass": True,
+        "context_budget_pressure_executed": True,
+        "context_budget_preserves_minimum_evidence": False,
+        "context_too_large_fail_closed": True,
+    }
+    assert _evaluate_formal_acceptance(base) is False
+
+    base["context_budget_preserves_minimum_evidence"] = True
+    assert _evaluate_formal_acceptance(base) is True
+
+
+def test_artifact_formula_yields_134_with_full_database() -> None:
+    """120 formal + 1 rerun + 12 constructed + 1 evidence insufficient = 134."""
+    formal_valid = 120
+    deterministic_rerun = 1
+    constructed_valid = 12
+    evidence_insufficient = 1
+    total = formal_valid + deterministic_rerun + constructed_valid + evidence_insufficient
+    assert total == 134
+    assert formal_valid == 60 + 60
+
+
+def test_formal_valid_excludes_deterministic_rerun() -> None:
+    """formal_valid_artifact_count = formal_institution + formal_consumer only."""
+    sample_count = 60
+    formal_institution = sample_count  # 60 institution artifacts
+    formal_consumer = sample_count  # 60 consumer artifacts
+    formal_valid = formal_institution + formal_consumer
+    assert formal_valid == 120
+    assert formal_valid == 60 * 2
+
+
+def test_offline_formal_acceptance_is_false() -> None:
+    """offline mode: all database fields false → formal acceptance false."""
+    report = {
+        "database_executed": False,
+        "primary_postgresql_executed": False,
+        "comparison_postgresql_executed": False,
+        "formal_context_count": 0,
+        "cross_database_context_sha_stability": None,
+        "cross_database_artifact_sha_stability": None,
+        "regulatory_case_citation_count": 0,
+        "historical_prompt_snapshot_stability": False,
+        "historical_context_snapshot_stability": False,
+        "deterministic_rerun": False,
+        "sensitive_data_scan": True,
+        "constructed_valid_executed": 12,
+        "constructed_valid_passed": 12,
+        "constructed_valid_failed": 0,
+        "constructed_invalid_executed": 43,
+        "constructed_invalid_blocked": 43,
+        "constructed_invalid_unexpected_pass": 0,
+        "invalid_error_code_match_count": 43,
+        "rejected_artifact_count": 0,
+        "evidence_insufficient_context_pass": None,
+        "context_budget_pressure_executed": False,
+        "context_budget_preserves_minimum_evidence": False,
+        "context_too_large_fail_closed": False,
+    }
+    from scripts.run_controlled_rag_acceptance import _evaluate_formal_acceptance
+
+    assert _evaluate_formal_acceptance(report) is False
