@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.exceptions import ScreeningError
 from app.models import MarketingMaterial, RiskFinding, ScreeningRun
 from app.models.enums import FindingEvidenceStatus
-from app.services.screening.rules import MarketingRuleSet
 
 INSTITUTION_REPORT_VERSION = "institution_compliance_report_v1"
 CONSUMER_NOTICE_VERSION = "consumer_protection_notice_v1"
@@ -17,13 +16,13 @@ DISCLAIMER = (
     "本结果仅为确定性风险筛查与证据辅助，不构成违法认定或最终法律意见，"
     "需由合规人员结合完整材料复核。"
 )
+ILLUSTRATIVE_PRODUCT_CONTEXT_NOTICE = (
+    "该条款仅用于展示同类保险合同中可能存在的等待期、现金价值、退保损失或"
+    "责任免除结构，不代表输入材料对应的具体产品条款。"
+)
 
 
 class ScreeningReportService:
-    def __init__(self, ruleset: MarketingRuleSet) -> None:
-        self.ruleset = ruleset
-        self.rules = {rule.rule_id: rule for rule in ruleset.rules}
-
     def run_detail(self, session: Session, run_id: int) -> dict[str, Any]:
         run, material, findings = self._load(session, run_id)
         return {
@@ -32,10 +31,12 @@ class ScreeningReportService:
             "status": run.status,
             "ruleset_version": run.ruleset_version,
             "ruleset_sha256": run.ruleset_sha256,
+            "ruleset_snapshot_sha256": run.ruleset_snapshot_sha256,
             "trusted_index_payload_hash": run.trusted_index_payload_hash,
             "finding_count": run.finding_count,
             "insufficient_evidence_count": run.insufficient_evidence_count,
             "run_payload_sha256": run.run_payload_sha256,
+            "evidence_evaluation_summary": run.evidence_evaluation_summary_json,
             "findings": [self._finding_row(finding) for finding in findings],
         }
 
@@ -54,9 +55,7 @@ class ScreeningReportService:
                     len(material.raw_text), finding.raw_end_offset + 40
                 )
             ]
-            row["remediation_template"] = self.rules[
-                finding.rule_id
-            ].institution_remediation_template
+            row["remediation_template"] = finding.remediation_template
             rows.append(row)
         return {
             "report_version": INSTITUTION_REPORT_VERSION,
@@ -85,6 +84,11 @@ class ScreeningReportService:
                     }
                 ),
             },
+            "product_context_notice": (
+                ILLUSTRATIVE_PRODUCT_CONTEXT_NOTICE
+                if _has_illustrative_product_context(findings)
+                else None
+            ),
             "manual_review_required": bool(findings),
             "disclaimer": DISCLAIMER,
         }
@@ -104,17 +108,21 @@ class ScreeningReportService:
                             "source_url": source_url,
                             "title": link.source_document_snapshot_json["title"],
                             "support_type": link.support_type,
+                            "context_scope": link.context_scope,
                             "chunk_identity_sha256": link.chunk_identity_sha256,
                         }
                     )
         return {
             "notice_version": CONSUMER_NOTICE_VERSION,
             "material_title": material.title,
-            "risk_prompts": sorted(
-                {self.rules[finding.rule_id].consumer_notice_template for finding in findings}
-            ),
+            "risk_prompts": sorted({finding.consumer_notice_template for finding in findings}),
             "questions_to_ask": sorted({finding.review_question for finding in findings}),
             "evidence_links": evidence_links,
+            "product_context_notice": (
+                ILLUSTRATIVE_PRODUCT_CONTEXT_NOTICE
+                if _has_illustrative_product_context(findings)
+                else None
+            ),
             "disclaimer": DISCLAIMER,
         }
 
@@ -123,6 +131,8 @@ class ScreeningReportService:
         return {
             "finding_sha256": finding.finding_sha256,
             "rule_id": finding.rule_id,
+            "rule_version": finding.rule_version,
+            "rule_snapshot_sha256": finding.rule_snapshot_sha256,
             "category": finding.category,
             "severity": finding.severity,
             "signal_strength": finding.signal_strength,
@@ -131,6 +141,7 @@ class ScreeningReportService:
             "raw_end_offset": finding.raw_end_offset,
             "explanation": finding.explanation,
             "review_question": finding.review_question,
+            "rule_snapshot": finding.rule_snapshot_json,
             "evidence_status": finding.evidence_status,
             "evidence": [
                 {
@@ -142,6 +153,12 @@ class ScreeningReportService:
                     "source": link.source_document_snapshot_json,
                     "source_locator": link.source_locator_snapshot_json,
                     "evidence_references": link.evidence_references_snapshot_json,
+                    "support_evaluation_version": link.support_evaluation_version,
+                    "support_evaluation_passed": link.support_evaluation_passed,
+                    "matched_support_patterns": link.matched_support_patterns,
+                    "matched_evidence_fields": link.matched_evidence_fields,
+                    "support_reason": link.support_reason,
+                    "context_scope": link.context_scope,
                 }
                 for link in sorted(
                     finding.evidence_links,
@@ -171,3 +188,11 @@ class ScreeningReportService:
             ),
         )
         return run, run.material, findings
+
+
+def _has_illustrative_product_context(findings: list[RiskFinding]) -> bool:
+    return any(
+        link.context_scope == "illustrative_not_material_specific"
+        for finding in findings
+        for link in finding.evidence_links
+    )

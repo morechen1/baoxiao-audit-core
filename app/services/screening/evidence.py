@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections import defaultdict
 from dataclasses import dataclass
+from typing import cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -19,10 +21,11 @@ from app.services.knowledge import (
     TrustedKnowledgeSearchService,
 )
 from app.services.knowledge.chunks import RANKING_VERSION
-from app.services.screening.rules import MarketingRiskRule
+from app.services.screening.rules import MarketingRiskRule, SupportType
 
 MAX_EVIDENCE_PER_FINDING = 5
 MAX_EVIDENCE_PER_DOCUMENT = 2
+SUPPORT_EVALUATION_VERSION = "deterministic_evidence_support_v1"
 
 
 @dataclass(frozen=True)
@@ -30,6 +33,93 @@ class TrustedIndexSnapshot:
     payload_hash: str
     active_chunks: int
     chunks_by_record_type: dict[str, int]
+
+
+@dataclass(frozen=True)
+class EvidenceSupportDecision:
+    support_type: str
+    result: SearchResult
+    passed: bool
+    matched_support_patterns: tuple[str, ...]
+    matched_evidence_fields: tuple[str, ...]
+    support_reason: str
+    context_scope: str
+
+
+@dataclass(frozen=True)
+class EvidenceAssemblyResult:
+    links: tuple[FindingEvidenceLink, ...]
+    candidates_total: int
+    candidates_passed: int
+    candidates_rejected: int
+
+
+class DeterministicEvidenceSupportEvaluator:
+    version = SUPPORT_EVALUATION_VERSION
+
+    @staticmethod
+    def evaluate(
+        rule: MarketingRiskRule,
+        support_type: str,
+        result: SearchResult,
+    ) -> EvidenceSupportDecision:
+        matcher = rule.evidence_matchers[cast(SupportType, support_type)]
+        context_scope = (
+            "illustrative_not_material_specific"
+            if support_type == FindingSupportType.PRODUCT_TERM_CONTEXT.value
+            else "not_applicable"
+        )
+        if result.chunk_kind not in matcher.allowed_chunk_kinds:
+            return EvidenceSupportDecision(
+                support_type,
+                result,
+                False,
+                (),
+                (),
+                "chunk_kind_not_allowed",
+                context_scope,
+            )
+        references = [
+            item
+            for item in result.evidence_references
+            if str(item.get("field_name") or "") in matcher.required_evidence_fields
+        ]
+        fields = tuple(sorted({str(item["field_name"]) for item in references}))
+        if not fields:
+            return EvidenceSupportDecision(
+                support_type,
+                result,
+                False,
+                (),
+                (),
+                "required_evidence_field_missing",
+                context_scope,
+            )
+        evidence_text = "\n".join(str(item.get("quote") or "") for item in references)
+        matched = tuple(
+            pattern
+            for pattern in matcher.required_any_patterns
+            if re.search(pattern, evidence_text)
+        )
+        if not matched:
+            return EvidenceSupportDecision(
+                support_type,
+                result,
+                False,
+                (),
+                fields,
+                "semantic_pattern_not_matched",
+                context_scope,
+            )
+        return EvidenceSupportDecision(
+            support_type,
+            result,
+            True,
+            matched,
+            fields,
+            "semantic_evidence_match",
+            context_scope,
+        )
 
 
 class FindingEvidenceAssembler:
@@ -59,23 +149,33 @@ class FindingEvidenceAssembler:
         session: Session,
         finding: RiskFinding,
         rule: MarketingRiskRule,
-    ) -> list[FindingEvidenceLink]:
+    ) -> EvidenceAssemblyResult:
         try:
             candidates = self._search_candidates(session, rule)
-            selected = self._select(candidates, rule.evidence_requirements)
-            links = [self._to_link(session, finding, *item) for item in selected]
+            decisions = [
+                DeterministicEvidenceSupportEvaluator.evaluate(rule, *candidate)
+                for candidate in candidates
+            ]
+            passed = [decision for decision in decisions if decision.passed]
+            selected = self._select(passed, rule.evidence_requirements)
+            links = [self._to_link(session, finding, item) for item in selected]
         except (TrustGateError, ScreeningError):
             raise
         except Exception as exc:
             raise ScreeningError("screening_evidence_retrieval_failed") from exc
-        support_types = {link.support_type for link in links}
+        support_types = {link.support_type for link in links if link.support_evaluation_passed}
         if set(rule.evidence_requirements).issubset(support_types):
             finding.evidence_status = FindingEvidenceStatus.SUPPORTED.value
         elif links:
             finding.evidence_status = FindingEvidenceStatus.PARTIALLY_SUPPORTED.value
         else:
             finding.evidence_status = FindingEvidenceStatus.EVIDENCE_INSUFFICIENT.value
-        return links
+        return EvidenceAssemblyResult(
+            links=tuple(links),
+            candidates_total=len(decisions),
+            candidates_passed=len(passed),
+            candidates_rejected=len(decisions) - len(passed),
+        )
 
     @staticmethod
     def _search_candidates(
@@ -91,10 +191,7 @@ class FindingEvidenceAssembler:
         }
         for record_type in rule.preferred_record_types:
             support_type = type_to_support[record_type]
-            if (
-                support_type == FindingSupportType.PRODUCT_TERM_CONTEXT.value
-                and support_type not in (rule.evidence_requirements)
-            ):
+            if support_type not in rule.evidence_requirements:
                 continue
             results = service.search(
                 session,
@@ -105,9 +202,9 @@ class FindingEvidenceAssembler:
 
     @staticmethod
     def _select(
-        candidates: list[tuple[str, SearchResult]],
+        candidates: list[EvidenceSupportDecision],
         required_support_types: tuple[str, ...],
-    ) -> list[tuple[str, SearchResult]]:
+    ) -> list[EvidenceSupportDecision]:
         priorities = {
             FindingSupportType.NORMATIVE_BASIS.value: 0,
             FindingSupportType.ENFORCEMENT_EXAMPLE.value: 1,
@@ -116,27 +213,27 @@ class FindingEvidenceAssembler:
         ordered = sorted(
             candidates,
             key=lambda item: (
-                priorities[item[0]],
-                -item[1].score,
-                item[1].evidence_quality or "Z",
-                item[1].pilot_id or "",
-                item[1].chunk_identity_sha256,
+                priorities[item.support_type],
+                -item.result.score,
+                item.result.evidence_quality or "Z",
+                item.result.pilot_id or "",
+                item.result.chunk_identity_sha256,
             ),
         )
-        selected: list[tuple[str, SearchResult]] = []
+        selected: list[EvidenceSupportDecision] = []
         seen_chunks: set[str] = set()
         document_counts: defaultdict[int, int] = defaultdict(int)
         for required in sorted(required_support_types, key=priorities.__getitem__):
-            for candidate in (item for item in ordered if item[0] == required):
+            for candidate in (item for item in ordered if item.support_type == required):
                 count_before = len(selected)
                 FindingEvidenceAssembler._append_if_eligible(
                     selected, seen_chunks, document_counts, candidate
                 )
                 if len(selected) > count_before:
                     break
-        for support_type, result in ordered:
+        for candidate in ordered:
             FindingEvidenceAssembler._append_if_eligible(
-                selected, seen_chunks, document_counts, (support_type, result)
+                selected, seen_chunks, document_counts, candidate
             )
             if len(selected) == MAX_EVIDENCE_PER_FINDING:
                 break
@@ -144,21 +241,21 @@ class FindingEvidenceAssembler:
 
     @staticmethod
     def _append_if_eligible(
-        selected: list[tuple[str, SearchResult]],
+        selected: list[EvidenceSupportDecision],
         seen_chunks: set[str],
         document_counts: defaultdict[int, int],
-        candidate: tuple[str, SearchResult],
+        candidate: EvidenceSupportDecision,
     ) -> None:
         if len(selected) >= MAX_EVIDENCE_PER_FINDING:
             return
-        support_type, result = candidate
+        result = candidate.result
         if not result.source_locator or not result.evidence_references:
             return
         identity = result.chunk_identity_sha256
         document_id = result.source_document_id
         if identity in seen_chunks or document_counts[document_id] >= MAX_EVIDENCE_PER_DOCUMENT:
             return
-        selected.append((support_type, result))
+        selected.append(candidate)
         seen_chunks.add(identity)
         document_counts[document_id] += 1
 
@@ -166,9 +263,9 @@ class FindingEvidenceAssembler:
     def _to_link(
         session: Session,
         finding: RiskFinding,
-        support_type: str,
-        result: SearchResult,
+        decision: EvidenceSupportDecision,
     ) -> FindingEvidenceLink:
+        result = decision.result
         chunk = session.scalar(
             select(KnowledgeChunk).where(
                 KnowledgeChunk.chunk_identity_sha256 == result.chunk_identity_sha256
@@ -179,7 +276,7 @@ class FindingEvidenceAssembler:
         return FindingEvidenceLink(
             finding_id=finding.id,
             knowledge_chunk_id=chunk.id,
-            support_type=support_type,
+            support_type=decision.support_type,
             retrieval_rank=result.rank,
             retrieval_score=result.score,
             chunk_identity_sha256=result.chunk_identity_sha256,
@@ -195,6 +292,12 @@ class FindingEvidenceAssembler:
             },
             source_locator_snapshot_json=result.source_locator,
             evidence_references_snapshot_json=result.evidence_references,
+            support_evaluation_version=SUPPORT_EVALUATION_VERSION,
+            support_evaluation_passed=decision.passed,
+            matched_support_patterns=list(decision.matched_support_patterns),
+            matched_evidence_fields=list(decision.matched_evidence_fields),
+            support_reason=decision.support_reason,
+            context_scope=decision.context_scope,
         )
 
 

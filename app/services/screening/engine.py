@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 
 from app.core.exceptions import ScreeningError
-from app.services.screening.normalization import normalize_marketing_text
+from app.services.screening.normalization import NormalizedText, normalize_marketing_text
 from app.services.screening.rules import MarketingRiskRule, MarketingRuleSet
 from app.services.screening.segmenter import SegmentCandidate
 
@@ -40,15 +40,25 @@ class DeterministicComplianceRuleEngine:
         material_sha256: str,
         segments: list[SegmentCandidate],
     ) -> list[FindingCandidate]:
-        findings: list[FindingCandidate] = []
+        findings_by_identity: dict[tuple[str, int, int, str], FindingCandidate] = {}
         try:
             for rule in self.ruleset.rules:
                 for segment in segments:
-                    findings.extend(self._match_segment(raw_text, material_sha256, segment, rule))
+                    for candidate in self._match_segment(raw_text, material_sha256, segment, rule):
+                        identity = (
+                            candidate.rule_id,
+                            candidate.raw_start_offset,
+                            candidate.raw_end_offset,
+                            candidate.normalized_match,
+                        )
+                        previous = findings_by_identity.get(identity)
+                        if previous is None or candidate.segment_ordinal < previous.segment_ordinal:
+                            findings_by_identity[identity] = candidate
         except ScreeningError:
             raise
         except Exception as exc:
             raise ScreeningError("screening_rule_execution_failed") from exc
+        findings = list(findings_by_identity.values())
         findings.sort(
             key=lambda value: (
                 value.raw_start_offset,
@@ -67,15 +77,18 @@ class DeterministicComplianceRuleEngine:
         rule: MarketingRiskRule,
     ) -> list[FindingCandidate]:
         normalized = normalize_marketing_text(segment.text)
-        if rule.required_context_patterns and not any(
-            re.search(pattern, normalized.text) for pattern in rule.required_context_patterns
-        ):
-            return []
         spans = [
             (match.start(), match.end())
             for pattern in rule.positive_patterns
             for match in re.finditer(pattern, normalized.text)
-            if not self._excepted(normalized.text, match.start(), match.end(), rule)
+            if self._required_context_present(normalized.text, match.start(), match.end(), rule)
+            and not self._excepted(
+                segment.text,
+                normalized,
+                match.start(),
+                match.end(),
+                rule,
+            )
         ]
         merged = _merge_overlaps(spans)
         output: list[FindingCandidate] = []
@@ -92,12 +105,9 @@ class DeterministicComplianceRuleEngine:
             payload = {
                 "material_sha256": material_sha256,
                 "ruleset_sha256": self.ruleset.sha256,
-                "segment_ordinal": segment.ordinal,
-                "segment_sha256": segment.segment_sha256,
                 "rule_id": rule.rule_id,
                 "raw_start_offset": raw_start,
                 "raw_end_offset": raw_end,
-                "matched_text": matched_text,
                 "normalized_match": normalized.text[normalized_start:normalized_end],
             }
             digest = hashlib.sha256(
@@ -130,13 +140,50 @@ class DeterministicComplianceRuleEngine:
 
     @staticmethod
     def _excepted(
+        raw_text: str,
+        normalized: NormalizedText,
+        start: int,
+        end: int,
+        rule: MarketingRiskRule,
+    ) -> bool:
+        raw_start, raw_end = normalized.raw_span(start, end)
+        clause_start, clause_end = _local_clause_span(raw_text, raw_start, raw_end, rule)
+        clause_raw = raw_text[clause_start:clause_end]
+        clause = normalize_marketing_text(clause_raw).text
+        relative_start = len(normalize_marketing_text(raw_text[clause_start:raw_start]).text)
+        relative_end = relative_start + len(
+            normalize_marketing_text(raw_text[raw_start:raw_end]).text
+        )
+        return any(
+            _pattern_is_local(pattern, clause, relative_start, relative_end, 40)
+            for pattern in rule.exception_patterns
+        )
+
+    @staticmethod
+    def _required_context_present(
         text: str,
         start: int,
         end: int,
         rule: MarketingRiskRule,
     ) -> bool:
-        context = text[max(0, start - 40) : min(len(text), end + 40)]
-        return any(re.search(pattern, context) for pattern in rule.exception_patterns)
+        if not rule.required_context_patterns:
+            return True
+        for pattern in rule.required_context_patterns:
+            for value in re.finditer(pattern, text):
+                if value.end() < start:
+                    distance = start - value.end()
+                    between = text[value.end() : start]
+                elif value.start() > end:
+                    distance = value.start() - end
+                    between = text[end : value.start()]
+                else:
+                    distance = 0
+                    between = ""
+                if distance <= rule.context_max_distance and not any(
+                    boundary in between for boundary in rule.adversative_boundaries
+                ):
+                    return True
+        return False
 
 
 def _merge_overlaps(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
@@ -147,3 +194,44 @@ def _merge_overlaps(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
         else:
             merged.append((start, end))
     return merged
+
+
+def _local_clause_span(
+    text: str,
+    start: int,
+    end: int,
+    rule: MarketingRiskRule,
+) -> tuple[int, int]:
+    markers = [
+        r"[。！？；\n\r，,、：:]",
+        *map(re.escape, sorted(rule.adversative_boundaries, key=len, reverse=True)),
+    ]
+    boundaries = list(re.finditer("|".join(markers), text))
+    left = 0
+    right = len(text)
+    for boundary in boundaries:
+        if boundary.end() <= start:
+            left = boundary.end()
+        elif boundary.start() >= end:
+            right = boundary.start()
+            break
+    return left, right
+
+
+def _pattern_is_local(
+    pattern: str,
+    clause: str,
+    match_start: int,
+    match_end: int,
+    max_distance: int,
+) -> bool:
+    for value in re.finditer(pattern, clause):
+        if value.end() < match_start:
+            distance = match_start - value.end()
+        elif value.start() > match_end:
+            distance = value.start() - match_end
+        else:
+            distance = 0
+        if distance <= max_distance:
+            return True
+    return False

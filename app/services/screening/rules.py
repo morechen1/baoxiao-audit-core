@@ -11,6 +11,26 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.core.exceptions import ScreeningError
 
+SupportType = Literal["normative_basis", "enforcement_example", "product_term_context"]
+
+
+class EvidenceMatcher(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    allowed_chunk_kinds: tuple[str, ...] = Field(min_length=1)
+    required_any_patterns: tuple[str, ...] = Field(min_length=1)
+    required_evidence_fields: tuple[str, ...] = Field(min_length=1)
+
+    @field_validator("required_any_patterns")
+    @classmethod
+    def patterns_compile(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        try:
+            for value in values:
+                re.compile(value)
+        except re.error as exc:
+            raise ValueError("invalid evidence matcher regex") from exc
+        return values
+
 
 class MarketingRiskRule(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -23,11 +43,21 @@ class MarketingRiskRule(BaseModel):
     positive_patterns: tuple[str, ...] = Field(min_length=1)
     exception_patterns: tuple[str, ...] = ()
     required_context_patterns: tuple[str, ...] = ()
+    context_scope: Literal["local_clause"] = "local_clause"
+    context_max_distance: int = Field(default=80, ge=0, le=240)
+    exception_scope: Literal["local_clause"] = "local_clause"
+    adversative_boundaries: tuple[str, ...] = (
+        "但",
+        "但是",
+        "然而",
+        "另一个",
+        "另有",
+        "同时",
+    )
     retrieval_queries: tuple[str, ...] = Field(min_length=1)
     preferred_record_types: tuple[Literal["regulation", "penalty", "product_document"], ...]
-    evidence_requirements: tuple[
-        Literal["normative_basis", "enforcement_example", "product_term_context"], ...
-    ]
+    evidence_requirements: tuple[SupportType, ...]
+    evidence_matchers: dict[SupportType, EvidenceMatcher]
     explanation_template: str = Field(min_length=1)
     review_question_template: str = Field(min_length=1)
     institution_remediation_template: str = Field(min_length=1)
@@ -42,6 +72,12 @@ class MarketingRiskRule(BaseModel):
         except re.error as exc:
             raise ValueError("invalid regex") from exc
         return values
+
+    @model_validator(mode="after")
+    def evidence_matchers_cover_requirements(self) -> MarketingRiskRule:
+        if set(self.evidence_matchers) != set(self.evidence_requirements):
+            raise ValueError("evidence matchers must exactly cover requirements")
+        return self
 
 
 class MarketingRuleSet(BaseModel):

@@ -16,7 +16,11 @@ from app.models.enums import (
     ScreeningStatus,
 )
 from app.services.screening.engine import DeterministicComplianceRuleEngine
-from app.services.screening.evidence import RETRIEVAL_VERSION, FindingEvidenceAssembler
+from app.services.screening.evidence import (
+    RETRIEVAL_VERSION,
+    SUPPORT_EVALUATION_VERSION,
+    FindingEvidenceAssembler,
+)
 from app.services.screening.normalization import NORMALIZATION_VERSION, normalize_marketing_text
 from app.services.screening.reports import ScreeningReportService
 from app.services.screening.rules import MarketingRuleSet, load_ruleset
@@ -35,7 +39,7 @@ class DeterministicScreeningService:
         self.ruleset = ruleset or load_ruleset()
         self.rule_by_id = {rule.rule_id: rule for rule in self.ruleset.rules}
         self.evidence = FindingEvidenceAssembler(settings)
-        self.reports = ScreeningReportService(self.ruleset)
+        self.reports = ScreeningReportService()
 
     def run(
         self,
@@ -109,76 +113,161 @@ class DeterministicScreeningService:
                 material_id=material.id,
                 ruleset_version=self.ruleset.ruleset_version,
                 ruleset_sha256=self.ruleset.sha256,
+                ruleset_snapshot_json=self.ruleset.model_dump(mode="json"),
+                ruleset_snapshot_sha256=self.ruleset.sha256,
                 retrieval_version=RETRIEVAL_VERSION,
                 trusted_index_payload_hash=index_snapshot.payload_hash,
                 status=ScreeningStatus.RUNNING.value,
+                evidence_evaluation_summary_json={
+                    "version": SUPPORT_EVALUATION_VERSION,
+                    "candidates_total": 0,
+                    "candidates_passed": 0,
+                    "candidates_rejected": 0,
+                    "links_persisted": 0,
+                },
             )
             session.add(run)
             session.flush()
-            finding_candidates = DeterministicComplianceRuleEngine(self.ruleset).run(
-                raw_text=raw_text,
-                material_sha256=input_sha,
-                segments=candidates,
-            )
-            segment_by_ordinal = {segment.ordinal: segment for segment in segments}
-            findings: list[RiskFinding] = []
-            evidence_identities: dict[str, list[str]] = {}
-            for candidate in finding_candidates:
-                finding = RiskFinding(
-                    screening_run_id=run.id,
-                    segment_id=segment_by_ordinal[candidate.segment_ordinal].id,
-                    rule_id=candidate.rule_id,
-                    category=candidate.category,
-                    severity=candidate.severity,
-                    signal_strength=candidate.signal_strength,
-                    matched_text=candidate.matched_text,
-                    raw_start_offset=candidate.raw_start_offset,
-                    raw_end_offset=candidate.raw_end_offset,
-                    normalized_match=candidate.normalized_match,
-                    explanation=candidate.explanation,
-                    review_question=candidate.review_question,
-                    evidence_status=FindingEvidenceStatus.EVIDENCE_INSUFFICIENT.value,
-                    finding_sha256=candidate.finding_sha256,
-                )
-                session.add(finding)
-                session.flush()
-                links = self.evidence.assemble(session, finding, self.rule_by_id[candidate.rule_id])
-                session.add_all(links)
-                evidence_identities[finding.finding_sha256] = sorted(
-                    link.chunk_identity_sha256 for link in links
-                )
-                findings.append(finding)
-            session.flush()
-            run.finding_count = len(findings)
-            run.insufficient_evidence_count = sum(
-                finding.evidence_status == FindingEvidenceStatus.EVIDENCE_INSUFFICIENT.value
-                for finding in findings
-            )
-            run.run_payload_sha256 = _sha(
-                {
-                    "material_sha256": input_sha,
-                    "ruleset_sha256": self.ruleset.sha256,
-                    "trusted_index_payload_hash": index_snapshot.payload_hash,
-                    "findings": [
-                        {
-                            "finding_sha256": finding.finding_sha256,
-                            "evidence_status": finding.evidence_status,
-                            "evidence": evidence_identities[finding.finding_sha256],
-                        }
-                        for finding in findings
-                    ],
-                }
-            )
-            run.status = ScreeningStatus.COMPLETED.value
-            run.completed_at = datetime.now(UTC)
-            session.commit()
-            return run
         except ScreeningError:
             session.rollback()
             raise
         except Exception as exc:
             session.rollback()
             raise ScreeningError("screening_persistence_failed") from exc
+
+        try:
+            with session.begin_nested():
+                finding_candidates = DeterministicComplianceRuleEngine(self.ruleset).run(
+                    raw_text=raw_text,
+                    material_sha256=input_sha,
+                    segments=candidates,
+                )
+                segment_by_ordinal = {segment.ordinal: segment for segment in segments}
+                findings: list[RiskFinding] = []
+                evidence_snapshots: dict[str, list[dict[str, object]]] = {}
+                candidates_total = 0
+                candidates_passed = 0
+                candidates_rejected = 0
+                links_persisted = 0
+                for candidate in finding_candidates:
+                    rule = self.rule_by_id[candidate.rule_id]
+                    rule_snapshot = rule.model_dump(mode="json")
+                    finding = RiskFinding(
+                        screening_run_id=run.id,
+                        segment_id=segment_by_ordinal[candidate.segment_ordinal].id,
+                        rule_id=candidate.rule_id,
+                        rule_version=rule.version,
+                        category=candidate.category,
+                        severity=candidate.severity,
+                        signal_strength=candidate.signal_strength,
+                        matched_text=candidate.matched_text,
+                        raw_start_offset=candidate.raw_start_offset,
+                        raw_end_offset=candidate.raw_end_offset,
+                        normalized_match=candidate.normalized_match,
+                        explanation=candidate.explanation,
+                        review_question=candidate.review_question,
+                        remediation_template=candidate.remediation,
+                        consumer_notice_template=candidate.consumer_notice,
+                        rule_snapshot_json=rule_snapshot,
+                        rule_snapshot_sha256=_sha(rule_snapshot),
+                        evidence_status=FindingEvidenceStatus.EVIDENCE_INSUFFICIENT.value,
+                        finding_sha256=candidate.finding_sha256,
+                    )
+                    session.add(finding)
+                    session.flush()
+                    assembly = self.evidence.assemble(session, finding, rule)
+                    session.add_all(assembly.links)
+                    candidates_total += assembly.candidates_total
+                    candidates_passed += assembly.candidates_passed
+                    candidates_rejected += assembly.candidates_rejected
+                    links_persisted += len(assembly.links)
+                    evidence_snapshots[finding.finding_sha256] = sorted(
+                        (
+                            {
+                                "chunk_identity_sha256": link.chunk_identity_sha256,
+                                "support_type": link.support_type,
+                                "support_evaluation_version": link.support_evaluation_version,
+                                "support_evaluation_passed": link.support_evaluation_passed,
+                                "matched_support_patterns": link.matched_support_patterns,
+                                "matched_evidence_fields": link.matched_evidence_fields,
+                                "support_reason": link.support_reason,
+                                "context_scope": link.context_scope,
+                            }
+                            for link in assembly.links
+                        ),
+                        key=lambda value: (
+                            str(value["support_type"]),
+                            str(value["chunk_identity_sha256"]),
+                        ),
+                    )
+                    findings.append(finding)
+                session.flush()
+                run.finding_count = len(findings)
+                run.insufficient_evidence_count = sum(
+                    finding.evidence_status == FindingEvidenceStatus.EVIDENCE_INSUFFICIENT.value
+                    for finding in findings
+                )
+                evaluation_summary = {
+                    "version": SUPPORT_EVALUATION_VERSION,
+                    "candidates_total": candidates_total,
+                    "candidates_passed": candidates_passed,
+                    "candidates_rejected": candidates_rejected,
+                    "links_persisted": links_persisted,
+                }
+                run.evidence_evaluation_summary_json = evaluation_summary
+                run.run_payload_sha256 = _sha(
+                    {
+                        "material_sha256": input_sha,
+                        "ruleset_sha256": self.ruleset.sha256,
+                        "ruleset_snapshot_sha256": run.ruleset_snapshot_sha256,
+                        "trusted_index_payload_hash": index_snapshot.payload_hash,
+                        "evidence_evaluation_summary": evaluation_summary,
+                        "findings": [
+                            {
+                                "finding_sha256": finding.finding_sha256,
+                                "rule_snapshot_sha256": finding.rule_snapshot_sha256,
+                                "evidence_status": finding.evidence_status,
+                                "evidence": evidence_snapshots[finding.finding_sha256],
+                            }
+                            for finding in findings
+                        ],
+                    }
+                )
+                run.status = ScreeningStatus.COMPLETED.value
+                run.completed_at = datetime.now(UTC)
+            session.commit()
+            return run
+        except Exception as exc:
+            error = (
+                exc
+                if isinstance(exc, ScreeningError)
+                else ScreeningError("screening_persistence_failed")
+            )
+            run.status = ScreeningStatus.FAILED.value
+            run.error_code = str(error)
+            run.completed_at = datetime.now(UTC)
+            run.finding_count = 0
+            run.insufficient_evidence_count = 0
+            run.evidence_evaluation_summary_json = {
+                "version": SUPPORT_EVALUATION_VERSION,
+                "candidates_total": 0,
+                "candidates_passed": 0,
+                "candidates_rejected": 0,
+                "links_persisted": 0,
+            }
+            run.run_payload_sha256 = _sha(
+                {
+                    "material_sha256": input_sha,
+                    "ruleset_sha256": self.ruleset.sha256,
+                    "trusted_index_payload_hash": index_snapshot.payload_hash,
+                    "status": ScreeningStatus.FAILED.value,
+                    "error_code": run.error_code,
+                }
+            )
+            session.commit()
+            if error is exc:
+                raise
+            raise error from exc
 
     def show(self, session: Session, run_id: int) -> dict[str, object]:
         return self.reports.run_detail(session, run_id)

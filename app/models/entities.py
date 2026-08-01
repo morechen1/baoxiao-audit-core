@@ -379,6 +379,10 @@ class ScreeningRun(Base):
             "run_payload_sha256 IS NULL OR length(run_payload_sha256) = 64",
             name="ck_screening_runs_payload_sha",
         ),
+        CheckConstraint(
+            "length(ruleset_snapshot_sha256) = 64",
+            name="ck_screening_runs_ruleset_snapshot_sha",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -387,6 +391,8 @@ class ScreeningRun(Base):
     )
     ruleset_version: Mapped[str] = mapped_column(String(80))
     ruleset_sha256: Mapped[str] = mapped_column(String(64))
+    ruleset_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    ruleset_snapshot_sha256: Mapped[str] = mapped_column(String(64))
     retrieval_version: Mapped[str] = mapped_column(String(80))
     trusted_index_payload_hash: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(20), default="running", index=True)
@@ -396,6 +402,7 @@ class ScreeningRun(Base):
     insufficient_evidence_count: Mapped[int] = mapped_column(Integer, default=0)
     run_payload_sha256: Mapped[str | None] = mapped_column(String(64))
     error_code: Mapped[str | None] = mapped_column(String(120))
+    evidence_evaluation_summary_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
     material: Mapped[MarketingMaterial] = relationship(back_populates="screening_runs")
     findings: Mapped[list[RiskFinding]] = relationship(
@@ -413,6 +420,9 @@ class RiskFinding(Base):
         CheckConstraint("raw_start_offset >= 0", name="ck_risk_findings_start"),
         CheckConstraint("raw_end_offset > raw_start_offset", name="ck_risk_findings_end"),
         CheckConstraint("length(finding_sha256) = 64", name="ck_risk_findings_sha"),
+        CheckConstraint(
+            "length(rule_snapshot_sha256) = 64", name="ck_risk_findings_rule_snapshot_sha"
+        ),
         UniqueConstraint("screening_run_id", "finding_sha256", name="uq_risk_findings_run_sha"),
     )
 
@@ -424,6 +434,7 @@ class RiskFinding(Base):
         ForeignKey("material_segments.id", ondelete="RESTRICT"), index=True
     )
     rule_id: Mapped[str] = mapped_column(String(120), index=True)
+    rule_version: Mapped[str] = mapped_column(String(40))
     category: Mapped[str] = mapped_column(String(120))
     severity: Mapped[str] = mapped_column(String(20))
     signal_strength: Mapped[str] = mapped_column(String(20))
@@ -433,6 +444,10 @@ class RiskFinding(Base):
     normalized_match: Mapped[str] = mapped_column(Text)
     explanation: Mapped[str] = mapped_column(Text)
     review_question: Mapped[str] = mapped_column(Text)
+    remediation_template: Mapped[str] = mapped_column(Text)
+    consumer_notice_template: Mapped[str] = mapped_column(Text)
+    rule_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    rule_snapshot_sha256: Mapped[str] = mapped_column(String(64))
     evidence_status: Mapped[str] = mapped_column(String(40))
     finding_sha256: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -479,6 +494,12 @@ class FindingEvidenceLink(Base):
     source_document_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSON)
     source_locator_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSON)
     evidence_references_snapshot_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
+    support_evaluation_version: Mapped[str] = mapped_column(String(80))
+    support_evaluation_passed: Mapped[bool] = mapped_column(Boolean)
+    matched_support_patterns: Mapped[list[str]] = mapped_column(JSON)
+    matched_evidence_fields: Mapped[list[str]] = mapped_column(JSON)
+    support_reason: Mapped[str] = mapped_column(String(120))
+    context_scope: Mapped[str] = mapped_column(String(80))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     finding: Mapped[RiskFinding] = relationship(back_populates="evidence_links")

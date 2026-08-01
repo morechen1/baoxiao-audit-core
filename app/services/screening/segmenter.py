@@ -7,8 +7,9 @@ from dataclasses import dataclass
 
 from app.services.screening.normalization import normalize_marketing_text
 
-SEGMENTER_VERSION = "marketing_segmenter_v1"
+SEGMENTER_VERSION = "marketing_segmenter_v2"
 MAX_SEGMENT_LENGTH = 1200
+SEGMENT_OVERLAP = 96
 
 
 @dataclass(frozen=True)
@@ -32,7 +33,8 @@ def segment_marketing_text(raw_text: str, input_sha256: str) -> list[SegmentCand
         while end - start > MAX_SEGMENT_LENGTH:
             cut = _safe_cut(raw_text, start, min(start + MAX_SEGMENT_LENGTH, end))
             spans.append(_trim_span(raw_text, start, cut))
-            start, _ = _trim_span(raw_text, cut, end)
+            next_start = max(start + 1, cut - SEGMENT_OVERLAP)
+            start, _ = _trim_span(raw_text, next_start, end)
         if end > start:
             spans.append((start, end))
     spans = _attach_short_titles(raw_text, spans)
