@@ -163,6 +163,9 @@ class SourceDocument(TimestampMixin, Base):
     occurrences: Mapped[list[DocumentOccurrence]] = relationship(
         back_populates="document", cascade="all, delete-orphan"
     )
+    knowledge_chunks: Mapped[list[KnowledgeChunk]] = relationship(
+        back_populates="source_document", cascade="all, delete-orphan"
+    )
 
 
 class DocumentChunk(Base):
@@ -182,6 +185,114 @@ class DocumentChunk(Base):
     embedding: Mapped[list[float] | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     document: Mapped[SourceDocument] = relationship(back_populates="chunks")
+
+
+class KnowledgeChunk(Base):
+    __tablename__ = "knowledge_chunks"
+    __table_args__ = (
+        UniqueConstraint(
+            "chunk_identity_sha256",
+            name="uq_knowledge_chunks_identity_sha256",
+        ),
+        CheckConstraint("chunk_ordinal >= 0", name="ck_knowledge_chunks_ordinal"),
+        CheckConstraint(
+            "length(source_payload_hash) = 64",
+            name="ck_knowledge_chunks_source_payload_hash",
+        ),
+        CheckConstraint(
+            "length(chunk_content_sha256) = 64",
+            name="ck_knowledge_chunks_content_sha256",
+        ),
+        CheckConstraint(
+            "length(chunk_identity_sha256) = 64",
+            name="ck_knowledge_chunks_identity_sha256",
+        ),
+        CheckConstraint(
+            "evidence_quality IS NULL OR evidence_quality IN ('A', 'B', 'C', 'D')",
+            name="ck_knowledge_chunks_evidence_quality",
+        ),
+        Index(
+            "ix_knowledge_chunks_trust_state",
+            "authenticity_status",
+            "review_status",
+        ),
+        Index(
+            "ix_knowledge_chunks_record_locator",
+            "structured_record_id",
+            "portable_record_key",
+        ),
+        Index(
+            "ix_knowledge_chunks_lexical_tokens_fts",
+            sql_text("to_tsvector('simple', lexical_tokens)"),
+            postgresql_using="gin",
+        ).ddl_if(dialect="postgresql"),
+        Index(
+            "ix_knowledge_chunks_normalized_text_trgm",
+            "normalized_text",
+            postgresql_using="gin",
+            postgresql_ops={"normalized_text": "gin_trgm_ops"},
+        ).ddl_if(dialect="postgresql"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_document_id: Mapped[int] = mapped_column(
+        ForeignKey("source_documents.id", ondelete="CASCADE"), index=True
+    )
+    record_type: Mapped[str] = mapped_column(String(50), index=True)
+    structured_record_id: Mapped[int] = mapped_column(Integer, index=True)
+    pilot_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    portable_record_key: Mapped[str | None] = mapped_column(String(64), index=True)
+    chunk_kind: Mapped[str] = mapped_column(String(80))
+    chunk_ordinal: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(Text)
+    text: Mapped[str] = mapped_column(Text)
+    normalized_text: Mapped[str] = mapped_column(Text)
+    lexical_tokens: Mapped[str] = mapped_column(Text)
+    authority: Mapped[str | None] = mapped_column(String(500), index=True)
+    relevant_date: Mapped[date | None] = mapped_column(Date, index=True)
+    source_url: Mapped[str] = mapped_column(String(4096))
+    source_locator_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    evidence_reference_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    evidence_quality: Mapped[str | None] = mapped_column(String(1), index=True)
+    authenticity_status: Mapped[str] = mapped_column(String(50))
+    review_status: Mapped[str] = mapped_column(String(50))
+    source_payload_hash: Mapped[str] = mapped_column(String(64))
+    chunk_content_sha256: Mapped[str] = mapped_column(String(64))
+    chunk_identity_sha256: Mapped[str] = mapped_column(String(64))
+    tokenizer_version: Mapped[str] = mapped_column(String(80))
+    chunker_version: Mapped[str] = mapped_column(String(80))
+    ranking_version: Mapped[str] = mapped_column(String(80))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    source_document: Mapped[SourceDocument] = relationship(back_populates="knowledge_chunks")
+
+
+class KnowledgeIndexRun(Base):
+    __tablename__ = "knowledge_index_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('running', 'completed', 'failed')",
+            name="ck_knowledge_index_runs_status",
+        ),
+        CheckConstraint(
+            "payload_hash IS NULL OR length(payload_hash) = 64",
+            name="ck_knowledge_index_runs_payload_hash",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[str] = mapped_column(String(64), unique=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(20), default="running")
+    index_version: Mapped[str] = mapped_column(String(80))
+    source_document_count: Mapped[int] = mapped_column(Integer, default=0)
+    record_count: Mapped[int] = mapped_column(Integer, default=0)
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    error_code: Mapped[str | None] = mapped_column(String(120))
+    payload_hash: Mapped[str | None] = mapped_column(String(64))
 
 
 class Regulation(Base):
