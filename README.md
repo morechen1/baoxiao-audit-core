@@ -20,12 +20,14 @@ FastAPI 和 Typer CLI 共用 service/repository 层。PostgreSQL 保存来源、
 证据、审核预留/决定和状态历史；`data/raw` 保存按 SHA-256
 命名的原件，`data/parsed_artifacts` 保存按内容哈希命名的不可变解析 JSON。索引服务
 并为经审核、经公开来源验证且已准入的法规、产品和处罚记录物化可验证知识块。
-当前提供 PostgreSQL 中文确定性词法检索，不做 RAG、向量生成或自动法律结论。
-在该可信检索底座上还提供版本化、确定性的纯文本营销风险信号筛查及机构/消费者证据报告。
+当前提供 PostgreSQL 中文确定性词法检索，不使用向量检索或自动法律结论。
+在该可信检索底座上提供版本化、确定性的纯文本营销风险信号筛查及机构/消费者证据报告，
+并提供只解释既有 finding 和已选证据的受控 RAG 编排层；当前外部模型默认禁用。
 
 详细设计见 [架构](docs/architecture.md)、[数据模型](docs/data-model.md) 和
 [可信知识检索基础层](docs/trusted-retrieval-foundation.md)。
 [确定性营销合规风险筛查](docs/deterministic-compliance-screening.md)。
+[受控 RAG 解释编排与引用验证层](docs/controlled-rag-explanation-layer.md)。
 
 ## 快速启动
 
@@ -99,6 +101,12 @@ python -m app.cli.main knowledge stats
 python -m app.cli.main screening run --title "测试营销话术" \
   --material-type sales_script --text-file material.txt
 python -m app.cli.main screening rules
+python -m app.cli.main explanation create --screening-run-id 1 \
+  --audience institution --provider deterministic_fixture
+python -m app.cli.main explanation show 1
+python -m app.cli.main explanation artifact 1
+python -m app.cli.main explanation citations 1
+python -m app.cli.main explanation prompts
 python -m app.cli.main repair-status-consistency --dry-run
 python -m app.cli.main resubmit-for-review --record-type product_document \
   --record-id 123 --reason "已补充可核验官方来源"

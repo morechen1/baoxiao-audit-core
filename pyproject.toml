@@ -44,6 +44,7 @@ packages = ["app"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "app/rules/insurance_marketing_rules_v1.json" = "app/rules/insurance_marketing_rules_v1.json"
+"app/prompts/controlled_rag_prompts_v1.yaml" = "app/prompts/controlled_rag_prompts_v1.yaml"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

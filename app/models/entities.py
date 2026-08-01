@@ -25,6 +25,9 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from app.models.enums import (
     AUTHENTICITY_TYPE_VALUES,
     DOCUMENT_DATA_TYPE_VALUES,
+    EXPLANATION_AUDIENCE_VALUES,
+    EXPLANATION_RUN_STATUS_VALUES,
+    EXPLANATION_VALIDATION_STATUS_VALUES,
     FINDING_EVIDENCE_STATUS_VALUES,
     FINDING_SUPPORT_TYPE_VALUES,
     HUMAN_REVIEW_STATUS_VALUES,
@@ -408,6 +411,9 @@ class ScreeningRun(Base):
     findings: Mapped[list[RiskFinding]] = relationship(
         back_populates="screening_run", cascade="all, delete-orphan"
     )
+    explanation_runs: Mapped[list[ExplanationRun]] = relationship(
+        back_populates="screening_run", cascade="all, delete-orphan"
+    )
 
 
 class RiskFinding(Base):
@@ -507,6 +513,145 @@ class FindingEvidenceLink(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     finding: Mapped[RiskFinding] = relationship(back_populates="evidence_links")
+    explanation_citations: Mapped[list[ExplanationCitation]] = relationship(
+        back_populates="finding_evidence_link"
+    )
+
+
+class ExplanationRun(Base):
+    __tablename__ = "explanation_runs"
+    __table_args__ = (
+        CheckConstraint(
+            f"audience IN ({sql_values(EXPLANATION_AUDIENCE_VALUES)})",
+            name="ck_explanation_runs_audience",
+        ),
+        CheckConstraint(
+            f"status IN ({sql_values(EXPLANATION_RUN_STATUS_VALUES)})",
+            name="ck_explanation_runs_status",
+        ),
+        CheckConstraint(
+            f"validation_status IN ({sql_values(EXPLANATION_VALIDATION_STATUS_VALUES)})",
+            name="ck_explanation_runs_validation_status",
+        ),
+        CheckConstraint("length(prompt_sha256) = 64", name="ck_explanation_runs_prompt_sha"),
+        CheckConstraint(
+            "length(context_payload_sha256) = 64",
+            name="ck_explanation_runs_context_sha",
+        ),
+        CheckConstraint(
+            "length(provider_configuration_sha256) = 64",
+            name="ck_explanation_runs_provider_config_sha",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    screening_run_id: Mapped[int] = mapped_column(
+        ForeignKey("screening_runs.id", ondelete="CASCADE"), index=True
+    )
+    audience: Mapped[str] = mapped_column(String(20), index=True)
+    prompt_version: Mapped[str] = mapped_column(String(80))
+    prompt_sha256: Mapped[str] = mapped_column(String(64))
+    prompt_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    context_schema_version: Mapped[str] = mapped_column(String(80))
+    context_payload_sha256: Mapped[str] = mapped_column(String(64))
+    context_payload_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    provider_name: Mapped[str] = mapped_column(String(80))
+    provider_model: Mapped[str] = mapped_column(String(120))
+    provider_configuration_sha256: Mapped[str] = mapped_column(String(64))
+    provider_configuration_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(20), index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    validation_status: Mapped[str] = mapped_column(String(50))
+    error_code: Mapped[str | None] = mapped_column(String(120))
+    retry_of_id: Mapped[int | None] = mapped_column(
+        ForeignKey("explanation_runs.id", ondelete="RESTRICT"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    screening_run: Mapped[ScreeningRun] = relationship(back_populates="explanation_runs")
+    artifact: Mapped[ExplanationArtifact | None] = relationship(
+        back_populates="explanation_run", cascade="all, delete-orphan", uselist=False
+    )
+
+
+class ExplanationArtifact(Base):
+    __tablename__ = "explanation_artifacts"
+    __table_args__ = (
+        UniqueConstraint("explanation_run_id", name="uq_explanation_artifacts_run"),
+        CheckConstraint(
+            "length(raw_provider_response_sha256) = 64",
+            name="ck_explanation_artifacts_raw_response_sha",
+        ),
+        CheckConstraint(
+            "length(artifact_sha256) = 64", name="ck_explanation_artifacts_artifact_sha"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    explanation_run_id: Mapped[int] = mapped_column(
+        ForeignKey("explanation_runs.id", ondelete="CASCADE"), index=True
+    )
+    output_schema_version: Mapped[str] = mapped_column(String(80))
+    raw_provider_response_sha256: Mapped[str] = mapped_column(String(64))
+    validated_output_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    artifact_sha256: Mapped[str] = mapped_column(String(64), index=True)
+    disclaimer: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    explanation_run: Mapped[ExplanationRun] = relationship(back_populates="artifact")
+    citations: Mapped[list[ExplanationCitation]] = relationship(
+        back_populates="explanation_artifact", cascade="all, delete-orphan"
+    )
+
+
+class ExplanationCitation(Base):
+    __tablename__ = "explanation_citations"
+    __table_args__ = (
+        UniqueConstraint(
+            "explanation_artifact_id", "citation_key", name="uq_explanation_citations_key"
+        ),
+        CheckConstraint(
+            "length(chunk_identity_sha256) = 64",
+            name="ck_explanation_citations_identity_sha",
+        ),
+        CheckConstraint(
+            "length(chunk_content_sha256) = 64",
+            name="ck_explanation_citations_content_sha",
+        ),
+        CheckConstraint(
+            "quote_start_offset IS NULL OR quote_start_offset >= 0",
+            name="ck_explanation_citations_quote_start",
+        ),
+        CheckConstraint(
+            "quote_end_offset IS NULL OR quote_end_offset > quote_start_offset",
+            name="ck_explanation_citations_quote_end",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    explanation_artifact_id: Mapped[int] = mapped_column(
+        ForeignKey("explanation_artifacts.id", ondelete="CASCADE"), index=True
+    )
+    citation_key: Mapped[str] = mapped_column(String(20))
+    finding_id: Mapped[int] = mapped_column(
+        ForeignKey("risk_findings.id", ondelete="RESTRICT"), index=True
+    )
+    finding_evidence_link_id: Mapped[int] = mapped_column(
+        ForeignKey("finding_evidence_links.id", ondelete="RESTRICT"), index=True
+    )
+    chunk_identity_sha256: Mapped[str] = mapped_column(String(64))
+    chunk_content_sha256: Mapped[str] = mapped_column(String(64))
+    cited_quote: Mapped[str] = mapped_column(Text)
+    quote_start_offset: Mapped[int | None] = mapped_column(Integer)
+    quote_end_offset: Mapped[int | None] = mapped_column(Integer)
+    validation_status: Mapped[str] = mapped_column(String(40))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    explanation_artifact: Mapped[ExplanationArtifact] = relationship(back_populates="citations")
+    finding_evidence_link: Mapped[FindingEvidenceLink] = relationship(
+        back_populates="explanation_citations"
+    )
 
 
 class Regulation(Base):

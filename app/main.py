@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.api.routes import (
+    explanations_router,
     health_router,
     knowledge_router,
     screenings_router,
@@ -19,6 +20,7 @@ app = FastAPI(
     description="保险营销合规审查的可信数据采集、解析、校验、人工审核与索引状态 API。",
 )
 app.include_router(health_router)
+app.include_router(explanations_router)
 app.include_router(sources_router)
 app.include_router(workflow_router)
 app.include_router(knowledge_router)
