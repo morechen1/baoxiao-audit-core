@@ -1793,40 +1793,64 @@ def test_offline_fixture_corpus_semantics() -> None:
 # ── V4 acceptance accounting tests ────────────────────────────────────────────
 
 
+_ACCEPTANCE_TRUE_BASE: dict[str, object] = {
+    "database_executed": True,
+    "primary_postgresql_executed": True,
+    "comparison_postgresql_executed": True,
+    "formal_context_count": 60,
+    "cross_database_context_sha_stability": True,
+    "cross_database_artifact_sha_stability": True,
+    "screening_sample_count": 60,
+    "screening_finding_count": 33,
+    "reviewed_evidence_link_count": 74,
+    "trusted_knowledge_chunk_count": 73,
+    "regulatory_case_citation_count": 0,
+    "historical_prompt_snapshot_stability": True,
+    "historical_context_snapshot_stability": True,
+    "deterministic_rerun": True,
+    "sensitive_data_scan": True,
+    "formal_institution_artifact_count": 60,
+    "formal_consumer_artifact_count": 60,
+    "formal_valid_artifact_count": 120,
+    "deterministic_rerun_artifact_count": 1,
+    "constructed_valid_artifact_count": 12,
+    "evidence_insufficient_valid_artifact_count": 1,
+    "total_valid_artifact_count": 134,
+    "constructed_valid_executed": 12,
+    "constructed_valid_passed": 12,
+    "constructed_valid_failed": 0,
+    "constructed_invalid_executed": 43,
+    "constructed_invalid_blocked": 43,
+    "constructed_invalid_unexpected_pass": 0,
+    "invalid_error_code_match_count": 43,
+    "rejected_run_count": 41,
+    "failed_run_count": 2,
+    "invalid_failed_or_rejected_count": 43,
+    "rejected_artifact_count": 0,
+    "evidence_insufficient_context_pass": True,
+    "context_budget_pressure_executed": True,
+    "context_budget_preserves_minimum_evidence": True,
+    "context_too_large_fail_closed": True,
+}
+
+
 def test_formal_acceptance_requires_all_budget_gates() -> None:
     """preserves_minimum_evidence=false must block formal acceptance even
     when other budget gates pass."""
     from scripts.run_controlled_rag_acceptance import _evaluate_formal_acceptance
 
-    base = {
-        "database_executed": True,
-        "primary_postgresql_executed": True,
-        "comparison_postgresql_executed": True,
-        "formal_context_count": 60,
-        "cross_database_context_sha_stability": True,
-        "cross_database_artifact_sha_stability": True,
-        "regulatory_case_citation_count": 0,
-        "historical_prompt_snapshot_stability": True,
-        "historical_context_snapshot_stability": True,
-        "deterministic_rerun": True,
-        "sensitive_data_scan": True,
-        "constructed_valid_executed": 12,
-        "constructed_valid_passed": 12,
-        "constructed_valid_failed": 0,
-        "constructed_invalid_executed": 43,
-        "constructed_invalid_blocked": 43,
-        "constructed_invalid_unexpected_pass": 0,
-        "invalid_error_code_match_count": 43,
-        "rejected_artifact_count": 0,
-        "evidence_insufficient_context_pass": True,
-        "context_budget_pressure_executed": True,
-        "context_budget_preserves_minimum_evidence": False,
-        "context_too_large_fail_closed": True,
-    }
+    base = dict(_ACCEPTANCE_TRUE_BASE)
+    base["context_budget_preserves_minimum_evidence"] = False
     assert _evaluate_formal_acceptance(base) is False
 
     base["context_budget_preserves_minimum_evidence"] = True
     assert _evaluate_formal_acceptance(base) is True
+
+
+def test_formal_acceptance_passes_with_all_true() -> None:
+    from scripts.run_controlled_rag_acceptance import _evaluate_formal_acceptance
+
+    assert _evaluate_formal_acceptance(dict(_ACCEPTANCE_TRUE_BASE)) is True
 
 
 def test_artifact_formula_yields_134_with_full_database() -> None:
@@ -1852,31 +1876,79 @@ def test_formal_valid_excludes_deterministic_rerun() -> None:
 
 def test_offline_formal_acceptance_is_false() -> None:
     """offline mode: all database fields false → formal acceptance false."""
-    report = {
-        "database_executed": False,
-        "primary_postgresql_executed": False,
-        "comparison_postgresql_executed": False,
-        "formal_context_count": 0,
-        "cross_database_context_sha_stability": None,
-        "cross_database_artifact_sha_stability": None,
-        "regulatory_case_citation_count": 0,
-        "historical_prompt_snapshot_stability": False,
-        "historical_context_snapshot_stability": False,
-        "deterministic_rerun": False,
-        "sensitive_data_scan": True,
-        "constructed_valid_executed": 12,
-        "constructed_valid_passed": 12,
-        "constructed_valid_failed": 0,
-        "constructed_invalid_executed": 43,
-        "constructed_invalid_blocked": 43,
-        "constructed_invalid_unexpected_pass": 0,
-        "invalid_error_code_match_count": 43,
-        "rejected_artifact_count": 0,
-        "evidence_insufficient_context_pass": None,
-        "context_budget_pressure_executed": False,
-        "context_budget_preserves_minimum_evidence": False,
-        "context_too_large_fail_closed": False,
-    }
     from scripts.run_controlled_rag_acceptance import _evaluate_formal_acceptance
 
-    assert _evaluate_formal_acceptance(report) is False
+    assert (
+        _evaluate_formal_acceptance(
+            {
+                "database_executed": False,
+                "primary_postgresql_executed": False,
+                "comparison_postgresql_executed": False,
+                "formal_context_count": 0,
+                "cross_database_context_sha_stability": None,
+                "cross_database_artifact_sha_stability": None,
+                "screening_sample_count": 0,
+                "screening_finding_count": 0,
+                "reviewed_evidence_link_count": 0,
+                "trusted_knowledge_chunk_count": 0,
+                "regulatory_case_citation_count": 0,
+                "historical_prompt_snapshot_stability": False,
+                "historical_context_snapshot_stability": False,
+                "deterministic_rerun": False,
+                "sensitive_data_scan": True,
+                "formal_institution_artifact_count": 0,
+                "formal_consumer_artifact_count": 0,
+                "formal_valid_artifact_count": 0,
+                "deterministic_rerun_artifact_count": 0,
+                "constructed_valid_artifact_count": 12,
+                "evidence_insufficient_valid_artifact_count": 0,
+                "total_valid_artifact_count": 12,
+                "constructed_valid_executed": 12,
+                "constructed_valid_passed": 12,
+                "constructed_valid_failed": 0,
+                "constructed_invalid_executed": 43,
+                "constructed_invalid_blocked": 43,
+                "constructed_invalid_unexpected_pass": 0,
+                "invalid_error_code_match_count": 43,
+                "rejected_run_count": 41,
+                "failed_run_count": 2,
+                "invalid_failed_or_rejected_count": 43,
+                "rejected_artifact_count": 0,
+                "evidence_insufficient_context_pass": None,
+                "context_budget_pressure_executed": False,
+                "context_budget_preserves_minimum_evidence": False,
+                "context_too_large_fail_closed": False,
+            }
+        )
+        is False
+    )
+
+
+@pytest.mark.parametrize(
+    "key,wrong_value",
+    [
+        ("screening_sample_count", 59),
+        ("screening_finding_count", 32),
+        ("reviewed_evidence_link_count", 73),
+        ("trusted_knowledge_chunk_count", 72),
+        ("formal_institution_artifact_count", 59),
+        ("formal_consumer_artifact_count", 59),
+        ("formal_valid_artifact_count", 119),
+        ("deterministic_rerun_artifact_count", 0),
+        ("constructed_valid_artifact_count", 11),
+        ("evidence_insufficient_valid_artifact_count", 0),
+        ("total_valid_artifact_count", 133),
+        ("rejected_run_count", 40),
+        ("failed_run_count", 1),
+        ("invalid_failed_or_rejected_count", 42),
+    ],
+)
+def test_formal_acceptance_fails_on_count_drift(key: str, wrong_value: object) -> None:
+    """each formal count invariant checked by _evaluate_formal_acceptance."""
+    from scripts.run_controlled_rag_acceptance import _evaluate_formal_acceptance
+
+    base = dict(_ACCEPTANCE_TRUE_BASE)
+    base[key] = wrong_value
+    assert _evaluate_formal_acceptance(base) is False, (
+        f"key {key}={wrong_value} should fail formal acceptance"
+    )

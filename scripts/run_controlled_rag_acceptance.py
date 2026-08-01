@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import create_engine, func, select
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -470,11 +471,22 @@ def _evaluate_formal_acceptance(report: dict[str, Any]) -> bool:
         and report["formal_context_count"] == 60
         and report["cross_database_context_sha_stability"] is True
         and report["cross_database_artifact_sha_stability"] is True
+        and report["screening_sample_count"] == 60
+        and report["screening_finding_count"] == 33
+        and report["reviewed_evidence_link_count"] == 74
+        and report["trusted_knowledge_chunk_count"] == 73
         and report["regulatory_case_citation_count"] == 0
         and report["historical_prompt_snapshot_stability"] is True
         and report["historical_context_snapshot_stability"] is True
         and report["deterministic_rerun"] is True
         and report["sensitive_data_scan"] is True
+        and report["formal_institution_artifact_count"] == 60
+        and report["formal_consumer_artifact_count"] == 60
+        and report["formal_valid_artifact_count"] == 120
+        and report["deterministic_rerun_artifact_count"] == 1
+        and report["constructed_valid_artifact_count"] == 12
+        and report["evidence_insufficient_valid_artifact_count"] == 1
+        and report["total_valid_artifact_count"] == 134
         and report["constructed_valid_executed"] == 12
         and report["constructed_valid_passed"] == 12
         and report["constructed_valid_failed"] == 0
@@ -482,6 +494,9 @@ def _evaluate_formal_acceptance(report: dict[str, Any]) -> bool:
         and report["constructed_invalid_blocked"] == 43
         and report["constructed_invalid_unexpected_pass"] == 0
         and report["invalid_error_code_match_count"] == 43
+        and report["rejected_run_count"] == 41
+        and report["failed_run_count"] == 2
+        and report["invalid_failed_or_rejected_count"] == 43
         and report["rejected_artifact_count"] == 0
         and report["evidence_insufficient_context_pass"] is True
         and report["context_budget_pressure_executed"] is True
@@ -512,22 +527,29 @@ def main() -> None:
     os.environ["DATA_DIR"] = str(args.data_dir.resolve())
     get_settings.cache_clear()
     db_available = bool(args.database_url)
-    postgresql_available = bool(
-        args.database_url
-        and (
-            "postgresql" in str(args.database_url).lower()
-            or "postgres" in str(args.database_url).lower()
-        )
-    )
+    postgresql_available = False
+    if db_available:
+        try:
+            postgresql_available = (
+                make_url(str(args.database_url)).get_backend_name() == "postgresql"
+            )
+        except Exception:
+            postgresql_available = False
     comparison_available = bool(args.comparison_database_url)
-    comparison_postgresql_available = bool(
-        args.comparison_database_url
-        and (
-            "postgresql" in str(args.comparison_database_url).lower()
-            or "postgres" in str(args.comparison_database_url).lower()
-        )
+    comparison_postgresql_available = False
+    if comparison_available:
+        try:
+            comparison_postgresql_available = (
+                make_url(str(args.comparison_database_url)).get_backend_name() == "postgresql"
+            )
+        except Exception:
+            comparison_postgresql_available = False
+    databases_different = (
+        comparison_available
+        and args.comparison_database_url is not None
+        and args.database_url is not None
+        and str(args.comparison_database_url) != str(args.database_url)
     )
-    databases_different = comparison_available and args.comparison_database_url != args.database_url
     if db_available:
         assert args.database_url is not None
         primary = _execute_database(args.database_url)
