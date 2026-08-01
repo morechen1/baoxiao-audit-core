@@ -35,9 +35,7 @@ class EvidenceMatcher(BaseModel):
 
     @field_validator("required_all_pattern_groups")
     @classmethod
-    def groups_compile(
-        cls, values: tuple[tuple[str, ...], ...]
-    ) -> tuple[tuple[str, ...], ...]:
+    def groups_compile(cls, values: tuple[tuple[str, ...], ...]) -> tuple[tuple[str, ...], ...]:
         try:
             for group in values:
                 if not group:
