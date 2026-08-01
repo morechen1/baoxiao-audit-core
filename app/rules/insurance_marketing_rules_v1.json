@@ -1,0 +1,89 @@
+{
+  "ruleset_version": "insurance_marketing_rules_v1",
+  "rules": [
+    {
+      "rule_id": "absolute_or_superlative_claim", "version": "1", "category": "absolute_claim", "severity": "medium", "signal_strength": "medium",
+      "positive_patterns": ["全[\\s]*网[\\s]*第[\\s]*一", "收[\\s]*益[\\s]*最[\\s]*高", "最[\\s]*安[\\s]*全", "最[\\s]*划[\\s]*算", "唯[\\s]*一[\\s]*最[\\s]*佳"],
+      "exception_patterns": ["引[\\s]*用", "法[\\s]*规[\\s]*原[\\s]*文"], "required_context_patterns": [],
+      "retrieval_queries": ["保险销售 夸大宣传 最高 最佳"], "preferred_record_types": ["regulation", "penalty"], "evidence_requirements": ["normative_basis"],
+      "explanation_template": "该表述包含绝对化或最高级风险信号，实际含义与证明材料需要人工核验。", "review_question_template": "该最高级表述是否有客观、完整且可复核的比较依据？", "institution_remediation_template": "核对最高级表述的依据、范围和比较条件。", "consumer_notice_template": "绝对化或最高级宣传需要结合可验证依据核对。"
+    },
+    {
+      "rule_id": "concealment_or_minimization_of_exclusions", "version": "1", "category": "coverage_exclusion", "severity": "high", "signal_strength": "strong",
+      "positive_patterns": ["什[\\s]*么[\\s]*情[\\s]*况[\\s]*都[\\s]*赔", "没[\\s]*有[\\s]*任[\\s]*何[\\s]*免[\\s]*责", "百[\\s]*分[\\s]*之[\\s]*百[\\s]*理[\\s]*赔", "所[\\s]*有[\\s]*疾[\\s]*病[\\s]*全[\\s]*部[\\s]*保[\\s]*障", "无[\\s]*需[\\s]*健[\\s]*康[\\s]*告[\\s]*知"],
+      "exception_patterns": ["并[\\s]*非", "不[\\s]*代[\\s]*表"], "required_context_patterns": [],
+      "retrieval_queries": ["责任免除 健康告知 理赔范围"], "preferred_record_types": ["regulation", "penalty", "product_document"], "evidence_requirements": ["normative_basis", "product_term_context"],
+      "explanation_template": "该表述可能弱化责任免除、健康告知或保障范围限制。", "review_question_template": "是否已准确披露责任免除、健康告知和保障范围？", "institution_remediation_template": "补充责任免除和保障范围说明并交由合规人员复核。", "consumer_notice_template": "投保前应核对责任免除、健康告知和实际保障范围。"
+    },
+    {
+      "rule_id": "extra_contractual_benefit", "version": "1", "category": "extra_contractual_benefit", "severity": "high", "signal_strength": "strong",
+      "positive_patterns": ["返[\\s]*现", "返[\\s]*点", "赠[\\s]*送[\\s]*合[\\s]*同[\\s]*外[\\s]*利[\\s]*益", "私[\\s]*下[\\s]*补[\\s]*贴", "购[\\s]*买[\\s]*保[\\s]*险[\\s]*赠[\\s]*送[\\s]*现[\\s]*金"],
+      "exception_patterns": ["不[\\s]*得", "禁[\\s]*止"], "required_context_patterns": [],
+      "retrieval_queries": ["保险销售 合同外利益 返佣 返现"], "preferred_record_types": ["regulation", "penalty"], "evidence_requirements": ["normative_basis", "enforcement_example"],
+      "explanation_template": "该表述包含合同外利益风险信号，需要核验利益来源及合同依据。", "review_question_template": "所述利益是否写入保险合同并符合销售管理要求？", "institution_remediation_template": "核对并删除无法证明的合同外利益承诺。", "consumer_notice_template": "合同外返现或补贴承诺需要谨慎核对。"
+    },
+    {
+      "rule_id": "false_promotion_or_prize", "version": "1", "category": "promotion_prize", "severity": "medium", "signal_strength": "medium",
+      "positive_patterns": ["中[\\s]*奖", "限[\\s]*时[\\s]*优[\\s]*惠", "免[\\s]*费[\\s]*领[\\s]*取", "红[\\s]*包"],
+      "exception_patterns": ["不[\\s]*含[\\s]*投[\\s]*保", "非[\\s]*保[\\s]*险"], "required_context_patterns": ["保[\\s]*险|投[\\s]*保|保[\\s]*单|购[\\s]*买|签[\\s]*约"],
+      "retrieval_queries": ["保险销售 优惠 中奖 奖品诱导"], "preferred_record_types": ["regulation", "penalty"], "evidence_requirements": ["normative_basis", "enforcement_example"],
+      "explanation_template": "促销或奖品表述与投保语境同时出现，可能形成不当诱导风险。", "review_question_template": "促销条件、奖品真实性及与投保行为的关系是否充分披露？", "institution_remediation_template": "核对促销真实性、适用条件及投保关联。", "consumer_notice_template": "投保相关优惠或中奖宣传应先核对真实条件。"
+    },
+    {
+      "rule_id": "guaranteed_return_or_principal", "version": "1", "category": "guaranteed_return", "severity": "high", "signal_strength": "strong",
+      "positive_patterns": ["保[\\s]*证[\\s]*收[\\s]*益", "保[\\s]*本[\\s]*保[\\s]*息", "稳[\\s]*赚[\\s]*不[\\s]*赔", "绝[\\s]*对[\\s]*不[\\s]*会[\\s]*亏[\\s]*损", "承[\\s]*诺[\\s]*固[\\s]*定[\\s]*收[\\s]*益"],
+      "exception_patterns": ["不[\\s]*保[\\s]*证", "非[\\s]*保[\\s]*证", "保[\\s]*证[\\s]*材[\\s]*料[\\s]*真[\\s]*实[\\s]*性"], "required_context_patterns": [],
+      "retrieval_queries": ["保险销售 保证收益 非保证利益"], "preferred_record_types": ["regulation", "penalty"], "evidence_requirements": ["normative_basis", "enforcement_example"],
+      "explanation_template": "该表述可能把非保证利益描述为确定收益，需核对合同和演示依据。", "review_question_template": "是否存在保证性收益或本金承诺，且是否与合同一致？", "institution_remediation_template": "核对是否存在保证性承诺并补充非保证利益说明。", "consumer_notice_template": "这段表述可能把非保证利益描述成确定收益。"
+    },
+    {
+      "rule_id": "improper_comparison_or_ranking", "version": "1", "category": "comparison_ranking", "severity": "medium", "signal_strength": "medium",
+      "positive_patterns": ["排[\\s]*名[\\s]*第[\\s]*一", "优[\\s]*于[\\s]*全[\\s]*部[\\s]*同[\\s]*类", "同[\\s]*类[\\s]*产[\\s]*品[\\s]*中[\\s]*收[\\s]*益[\\s]*最[\\s]*高", "保[\\s]*费[\\s]*最[\\s]*低"],
+      "exception_patterns": ["比[\\s]*较[\\s]*条[\\s]*件", "仅[\\s]*供[\\s]*参[\\s]*考"], "required_context_patterns": [],
+      "retrieval_queries": ["保险宣传 比较 排名 条件"], "preferred_record_types": ["regulation", "penalty"], "evidence_requirements": ["normative_basis"],
+      "explanation_template": "该比较或排名表述可能缺少范围、条件或数据来源。", "review_question_template": "比较对象、时间范围、口径和数据来源是否完整披露？", "institution_remediation_template": "补充比较条件和可复核来源。", "consumer_notice_template": "产品排名或比较应核对比较条件和数据来源。"
+    },
+    {
+      "rule_id": "misleading_interest_or_yield", "version": "1", "category": "interest_yield", "severity": "high", "signal_strength": "strong",
+      "positive_patterns": ["结[\\s]*算[\\s]*利[\\s]*率[\\s]*固[\\s]*定", "永[\\s]*久[\\s]*享[\\s]*受[^。；！？]{0,12}(?:%|％|收[\\s]*益[\\s]*率)", "演[\\s]*示[\\s]*利[\\s]*率[^。；！？]{0,12}保[\\s]*证", "存[\\s]*款[\\s]*利[\\s]*率[^。；！？]{0,12}宣[\\s]*传"],
+      "exception_patterns": ["实[\\s]*际[\\s]*结[\\s]*算[\\s]*利[\\s]*率[\\s]*不[\\s]*确[\\s]*定", "仅[\\s]*为[\\s]*演[\\s]*示"], "required_context_patterns": [],
+      "retrieval_queries": ["保险 结算利率 演示利率 非保证"], "preferred_record_types": ["regulation", "penalty", "product_document"], "evidence_requirements": ["normative_basis"],
+      "explanation_template": "利率或收益率表述可能把演示或非保证利益描述为固定结果。", "review_question_template": "该利率是保证、最低保证还是非保证演示，是否清晰披露？", "institution_remediation_template": "明确区分保证利益与非保证演示利益。", "consumer_notice_template": "结算利率或演示利率不一定代表确定收益。"
+    },
+    {
+      "rule_id": "no_risk_or_no_loss", "version": "1", "category": "no_risk", "severity": "high", "signal_strength": "strong",
+      "positive_patterns": ["零[\\s]*风[\\s]*险", "没[\\s]*有[\\s]*任[\\s]*何[\\s]*风[\\s]*险", "对[\\s]*您[\\s]*没[\\s]*有[\\s]*损[\\s]*失", "绝[\\s]*对[\\s]*安[\\s]*全"],
+      "exception_patterns": ["不[\\s]*存[\\s]*在[\\s]*零[\\s]*风[\\s]*险", "并[\\s]*非[\\s]*绝[\\s]*对[\\s]*安[\\s]*全"], "required_context_patterns": [],
+      "retrieval_queries": ["保险销售 风险提示 损失"], "preferred_record_types": ["regulation", "penalty"], "evidence_requirements": ["normative_basis", "enforcement_example"],
+      "explanation_template": "该表述可能不当弱化保险产品风险或损失可能。", "review_question_template": "是否充分披露退保、收益波动及保障限制等风险？", "institution_remediation_template": "补充真实、完整的风险及可能损失说明。", "consumer_notice_template": "任何保险安排都应结合合同核对风险和可能损失。"
+    },
+    {
+      "rule_id": "product_nature_confusion", "version": "1", "category": "product_nature", "severity": "high", "signal_strength": "strong",
+      "positive_patterns": ["保[\\s]*险[\\s]*就[\\s]*是[\\s]*存[\\s]*款", "银[\\s]*行[\\s]*理[\\s]*财", "和[\\s]*定[\\s]*期[\\s]*存[\\s]*款[\\s]*完[\\s]*全[\\s]*一[\\s]*样", "随[\\s]*存[\\s]*随[\\s]*取", "不[\\s]*是[\\s]*保[\\s]*险[\\s]*只[\\s]*是[\\s]*储[\\s]*蓄"],
+      "exception_patterns": ["不[\\s]*同[\\s]*于[\\s]*银[\\s]*行[\\s]*理[\\s]*财", "不[\\s]*是[\\s]*存[\\s]*款"], "required_context_patterns": [],
+      "retrieval_queries": ["保险产品性质 存款 理财 混淆"], "preferred_record_types": ["regulation", "penalty", "product_document"], "evidence_requirements": ["normative_basis", "enforcement_example"],
+      "explanation_template": "该表述可能混淆保险与存款、理财或储蓄的产品性质。", "review_question_template": "是否清楚说明这是保险产品及其保障、期限和费用特征？", "institution_remediation_template": "明确保险产品性质，删除与存款或理财等同的表述。", "consumer_notice_template": "保险并不等同于银行存款或普通理财。"
+    },
+    {
+      "rule_id": "regulatory_endorsement", "version": "1", "category": "regulatory_endorsement", "severity": "high", "signal_strength": "strong",
+      "positive_patterns": ["监[\\s]*管[\\s]*推[\\s]*荐", "银[\\s]*保[\\s]*监[\\s]*会[\\s]*指[\\s]*定", "国[\\s]*家[\\s]*认[\\s]*证[\\s]*收[\\s]*益", "备[\\s]*案[^。；！？]{0,10}监[\\s]*管[\\s]*保[\\s]*证", "监[\\s]*管[\\s]*部[\\s]*门[^。；！？]{0,8}担[\\s]*保"],
+      "exception_patterns": ["备[\\s]*案[\\s]*不[\\s]*等[\\s]*于", "监[\\s]*管[\\s]*部[\\s]*门[\\s]*不[\\s]*担[\\s]*保"], "required_context_patterns": [],
+      "retrieval_queries": ["保险销售 监管背书 备案 担保"], "preferred_record_types": ["regulation", "penalty"], "evidence_requirements": ["normative_basis", "enforcement_example"],
+      "explanation_template": "该表述可能使消费者误认为监管机构推荐产品或担保收益。", "review_question_template": "是否存在可核验的监管文件，且表述是否误导为监管担保？", "institution_remediation_template": "删除无法证明的监管背书表述。", "consumer_notice_template": "监管备案通常不等于监管机构对收益或安全性作担保。"
+    },
+    {
+      "rule_id": "surrender_or_cash_value_misstatement", "version": "1", "category": "surrender_cash_value", "severity": "high", "signal_strength": "strong",
+      "positive_patterns": ["随[\\s]*时[\\s]*退[\\s]*保[\\s]*没[\\s]*有[\\s]*损[\\s]*失", "随[\\s]*时[\\s]*取[\\s]*回[\\s]*全[\\s]*部[\\s]*本[\\s]*金", "退[\\s]*保[\\s]*一[\\s]*定[\\s]*退[\\s]*全[\\s]*款", "现[\\s]*金[\\s]*价[\\s]*值[\\s]*等[\\s]*于[\\s]*已[\\s]*交[\\s]*保[\\s]*费"],
+      "exception_patterns": ["可[\\s]*能[\\s]*有[\\s]*损[\\s]*失", "以[\\s]*现[\\s]*金[\\s]*价[\\s]*值[\\s]*为[\\s]*准"], "required_context_patterns": [],
+      "retrieval_queries": ["保险 退保损失 现金价值 已交保费"], "preferred_record_types": ["regulation", "penalty", "product_document"], "evidence_requirements": ["normative_basis", "product_term_context"],
+      "explanation_template": "该表述可能错误描述退保金额、本金返还或现金价值。", "review_question_template": "退保金额是否按合同现金价值计算并充分披露可能损失？", "institution_remediation_template": "核对退保损失披露及现金价值说明。", "consumer_notice_template": "退保金额通常需要结合合同现金价值核对。"
+    },
+    {
+      "rule_id": "waiting_or_cooling_period_misstatement", "version": "1", "category": "waiting_cooling_period", "severity": "high", "signal_strength": "strong",
+      "positive_patterns": ["没[\\s]*有[\\s]*等[\\s]*待[\\s]*期", "犹[\\s]*豫[\\s]*期[\\s]*后[^。；！？]{0,8}全[\\s]*额[\\s]*退[\\s]*费", "生[\\s]*效[\\s]*当[\\s]*天[\\s]*所[\\s]*有[\\s]*疾[\\s]*病[\\s]*都[\\s]*赔", "随[\\s]*时[\\s]*无[\\s]*条[\\s]*件[\\s]*撤[\\s]*销[\\s]*合[\\s]*同"],
+      "exception_patterns": ["以[\\s]*合[\\s]*同[\\s]*约[\\s]*定[\\s]*为[\\s]*准"], "required_context_patterns": [],
+      "retrieval_queries": ["保险 等待期 犹豫期 退费"], "preferred_record_types": ["regulation", "penalty", "product_document"], "evidence_requirements": ["normative_basis", "product_term_context"],
+      "explanation_template": "该表述可能错误描述等待期、犹豫期或合同撤销条件。", "review_question_template": "等待期、犹豫期和退费条件是否与正式条款一致？", "institution_remediation_template": "按正式条款准确披露等待期和犹豫期。", "consumer_notice_template": "投保前应核对等待期、犹豫期及退费条件。"
+    }
+  ]
+}

@@ -25,11 +25,15 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from app.models.enums import (
     AUTHENTICITY_TYPE_VALUES,
     DOCUMENT_DATA_TYPE_VALUES,
+    FINDING_EVIDENCE_STATUS_VALUES,
+    FINDING_SUPPORT_TYPE_VALUES,
     HUMAN_REVIEW_STATUS_VALUES,
     KNOWLEDGE_INDEX_STATUS_VALUES,
+    MARKETING_MATERIAL_TYPE_VALUES,
     REGULATORY_CASE_CATEGORY_VALUES,
     REGULATORY_CASE_USAGE_VALUES,
     REVIEW_STATUS_VALUES,
+    SCREENING_STATUS_VALUES,
     AuthenticityType,
     DatasetSplit,
     KnowledgeIndexStatus,
@@ -300,6 +304,184 @@ class KnowledgeIndexRun(Base):
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
     error_code: Mapped[str | None] = mapped_column(String(120))
     payload_hash: Mapped[str | None] = mapped_column(String(64))
+
+
+class MarketingMaterial(Base):
+    __tablename__ = "marketing_materials"
+    __table_args__ = (
+        UniqueConstraint("input_sha256", name="uq_marketing_materials_input_sha256"),
+        CheckConstraint(
+            f"material_type IN ({sql_values(MARKETING_MATERIAL_TYPE_VALUES)})",
+            name="ck_marketing_materials_type",
+        ),
+        CheckConstraint("length(input_sha256) = 64", name="ck_marketing_materials_input_sha"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    external_reference: Mapped[str | None] = mapped_column(String(255))
+    title: Mapped[str] = mapped_column(String(300))
+    material_type: Mapped[str] = mapped_column(String(50), index=True)
+    raw_text: Mapped[str] = mapped_column(Text)
+    normalized_text: Mapped[str] = mapped_column(Text)
+    normalization_version: Mapped[str] = mapped_column(String(80))
+    input_sha256: Mapped[str] = mapped_column(String(64), index=True)
+    source_label: Mapped[str] = mapped_column(String(255))
+    is_constructed_evaluation: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    segments: Mapped[list[MaterialSegment]] = relationship(
+        back_populates="material", cascade="all, delete-orphan"
+    )
+    screening_runs: Mapped[list[ScreeningRun]] = relationship(
+        back_populates="material", cascade="all, delete-orphan"
+    )
+
+
+class MaterialSegment(Base):
+    __tablename__ = "material_segments"
+    __table_args__ = (
+        UniqueConstraint("material_id", "ordinal", name="uq_material_segments_ordinal"),
+        CheckConstraint("ordinal >= 0", name="ck_material_segments_ordinal"),
+        CheckConstraint("raw_start_offset >= 0", name="ck_material_segments_start"),
+        CheckConstraint("raw_end_offset > raw_start_offset", name="ck_material_segments_end"),
+        CheckConstraint("length(segment_sha256) = 64", name="ck_material_segments_sha"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    material_id: Mapped[int] = mapped_column(
+        ForeignKey("marketing_materials.id", ondelete="CASCADE"), index=True
+    )
+    ordinal: Mapped[int] = mapped_column(Integer)
+    text: Mapped[str] = mapped_column(Text)
+    normalized_text: Mapped[str] = mapped_column(Text)
+    raw_start_offset: Mapped[int] = mapped_column(Integer)
+    raw_end_offset: Mapped[int] = mapped_column(Integer)
+    segment_sha256: Mapped[str] = mapped_column(String(64), unique=True)
+    segmenter_version: Mapped[str] = mapped_column(String(80))
+
+    material: Mapped[MarketingMaterial] = relationship(back_populates="segments")
+    findings: Mapped[list[RiskFinding]] = relationship(back_populates="segment")
+
+
+class ScreeningRun(Base):
+    __tablename__ = "screening_runs"
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN ({sql_values(SCREENING_STATUS_VALUES)})",
+            name="ck_screening_runs_status",
+        ),
+        CheckConstraint("length(ruleset_sha256) = 64", name="ck_screening_runs_ruleset_sha"),
+        CheckConstraint(
+            "length(trusted_index_payload_hash) = 64",
+            name="ck_screening_runs_index_hash",
+        ),
+        CheckConstraint(
+            "run_payload_sha256 IS NULL OR length(run_payload_sha256) = 64",
+            name="ck_screening_runs_payload_sha",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    material_id: Mapped[int] = mapped_column(
+        ForeignKey("marketing_materials.id", ondelete="CASCADE"), index=True
+    )
+    ruleset_version: Mapped[str] = mapped_column(String(80))
+    ruleset_sha256: Mapped[str] = mapped_column(String(64))
+    retrieval_version: Mapped[str] = mapped_column(String(80))
+    trusted_index_payload_hash: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(20), default="running", index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finding_count: Mapped[int] = mapped_column(Integer, default=0)
+    insufficient_evidence_count: Mapped[int] = mapped_column(Integer, default=0)
+    run_payload_sha256: Mapped[str | None] = mapped_column(String(64))
+    error_code: Mapped[str | None] = mapped_column(String(120))
+
+    material: Mapped[MarketingMaterial] = relationship(back_populates="screening_runs")
+    findings: Mapped[list[RiskFinding]] = relationship(
+        back_populates="screening_run", cascade="all, delete-orphan"
+    )
+
+
+class RiskFinding(Base):
+    __tablename__ = "risk_findings"
+    __table_args__ = (
+        CheckConstraint(
+            f"evidence_status IN ({sql_values(FINDING_EVIDENCE_STATUS_VALUES)})",
+            name="ck_risk_findings_evidence_status",
+        ),
+        CheckConstraint("raw_start_offset >= 0", name="ck_risk_findings_start"),
+        CheckConstraint("raw_end_offset > raw_start_offset", name="ck_risk_findings_end"),
+        CheckConstraint("length(finding_sha256) = 64", name="ck_risk_findings_sha"),
+        UniqueConstraint("screening_run_id", "finding_sha256", name="uq_risk_findings_run_sha"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    screening_run_id: Mapped[int] = mapped_column(
+        ForeignKey("screening_runs.id", ondelete="CASCADE"), index=True
+    )
+    segment_id: Mapped[int] = mapped_column(
+        ForeignKey("material_segments.id", ondelete="RESTRICT"), index=True
+    )
+    rule_id: Mapped[str] = mapped_column(String(120), index=True)
+    category: Mapped[str] = mapped_column(String(120))
+    severity: Mapped[str] = mapped_column(String(20))
+    signal_strength: Mapped[str] = mapped_column(String(20))
+    matched_text: Mapped[str] = mapped_column(Text)
+    raw_start_offset: Mapped[int] = mapped_column(Integer)
+    raw_end_offset: Mapped[int] = mapped_column(Integer)
+    normalized_match: Mapped[str] = mapped_column(Text)
+    explanation: Mapped[str] = mapped_column(Text)
+    review_question: Mapped[str] = mapped_column(Text)
+    evidence_status: Mapped[str] = mapped_column(String(40))
+    finding_sha256: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    screening_run: Mapped[ScreeningRun] = relationship(back_populates="findings")
+    segment: Mapped[MaterialSegment] = relationship(back_populates="findings")
+    evidence_links: Mapped[list[FindingEvidenceLink]] = relationship(
+        back_populates="finding", cascade="all, delete-orphan"
+    )
+
+
+class FindingEvidenceLink(Base):
+    __tablename__ = "finding_evidence_links"
+    __table_args__ = (
+        CheckConstraint(
+            f"support_type IN ({sql_values(FINDING_SUPPORT_TYPE_VALUES)})",
+            name="ck_finding_evidence_links_support_type",
+        ),
+        CheckConstraint(
+            "length(chunk_identity_sha256) = 64",
+            name="ck_finding_evidence_links_identity_sha",
+        ),
+        CheckConstraint(
+            "length(chunk_content_sha256) = 64",
+            name="ck_finding_evidence_links_content_sha",
+        ),
+        UniqueConstraint(
+            "finding_id", "knowledge_chunk_id", name="uq_finding_evidence_links_chunk"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    finding_id: Mapped[int] = mapped_column(
+        ForeignKey("risk_findings.id", ondelete="CASCADE"), index=True
+    )
+    knowledge_chunk_id: Mapped[int] = mapped_column(
+        ForeignKey("knowledge_chunks.id", ondelete="RESTRICT"), index=True
+    )
+    support_type: Mapped[str] = mapped_column(String(40))
+    retrieval_rank: Mapped[int] = mapped_column(Integer)
+    retrieval_score: Mapped[float] = mapped_column(Float)
+    chunk_identity_sha256: Mapped[str] = mapped_column(String(64))
+    chunk_content_sha256: Mapped[str] = mapped_column(String(64))
+    source_document_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    source_locator_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    evidence_references_snapshot_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    finding: Mapped[RiskFinding] = relationship(back_populates="evidence_links")
 
 
 class Regulation(Base):

@@ -44,3 +44,7 @@ class ParsedArtifactIntegrityError(BaoxiaoError):
 
 class FieldEvidenceError(BaoxiaoError):
     """Raised when structured fields are not supported by immutable evidence."""
+
+
+class ScreeningError(BaoxiaoError):
+    """Raised when deterministic compliance screening fails closed."""
