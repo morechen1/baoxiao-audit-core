@@ -31,9 +31,12 @@ Unicode NFKC，将 Unicode 空白序列折叠为一个空格，并只为匹配�
 合同外利益、产品性质混淆、绝对化宣传、不当比较排名、退保/现金价值误述、等待期/犹豫期
 误述、责任免除弱化。命中只代表风险信号。
 
-规则按 `rule_id` 固定顺序执行；同一规则的重叠命中确定性合并。required context 和 exception
-以强/弱标点及转折、对象切换词构造的确定性局部子句判断，不会用同一长 segment 中无关的
-“保险”满足上下文，也不会用远端其他产品的例外取消当前命中。`finding_sha256` 由材料、
+规则按 `rule_id` 固定顺序执行；同一规则的重叠命中确定性合并。required context 必须与命中位于
+同一局部子句，默认不能跨越句号、问号、感叹号、分号或单个换行；逗号、顿号和冒号是弱边界。
+风险短语本身仍可跨格式换行。`marketing_claim_negation_scope_v1` 只在同一局部子句内识别
+“不得、禁止、请勿、并非、不同于、不代表、说法不准确/没有依据”等否定或纠错语境，并以
+转折、销售主体或产品/账户切换词截断作用域。不会用远端“保险”满足上下文，也不会用另一主体
+或产品的例外取消当前命中。`finding_sha256` 由材料、
 规则集、规则、原始区间和规范化命中构成，不依赖 segment ordinal 或 segment SHA，
 不包含数据库 ID、时间戳或检索结果。
 
@@ -53,12 +56,13 @@ canonical mismatch、伪造/孤儿 chunk、资格漂移、Penalty 身份错误�
 - RegulatoryCase 永不作为正式证据；
 - 每个 finding 最多 5 条，同一 SourceDocument 最多 2 条，同一 chunk 不重复；
 - locator 或 evidence references 为空的结果不会进入证据包；
-- `deterministic_evidence_support_v1` 在召回后按每条规则声明的 chunk kind、字段证据和语义模式
-  再次准入；标题、机关、文号、金额或正确 record type 本身不能证明支持；
+- `deterministic_evidence_support_v2` 在召回后按每条规则声明的 chunk kind、字段证据、任一模式和
+  `required_all_pattern_groups` 再次准入；严格组在同一法规局部子句内全部满足才算支持，标题、
+  机关、文号、金额或正确 record type 本身不能证明支持；
 - `normative_basis` 只以 `article_text` 字段证据判定，`basic_information` 只能展示来源；
 - `enforcement_example` 重点核验 `illegal_facts` 与 `original_sales_wording`，无关处罚会被排除；
-- 快照保存 chunk 两类哈希、来源 URL、信任状态、locator、字段证据、语义匹配模式、匹配字段、
-  判定版本、原因及上下文范围，不复制原件全文。
+- 快照保存 chunk 两类哈希、来源 URL、信任状态、locator、字段证据、实际命中子串、命中的
+  pattern groups、确定性语义分数与原因、匹配字段、判定版本及上下文范围，不复制原件全文。
 
 证据不足不会删除 finding，也不会被解释为“没有风险”，只会标为
 `partially_supported` 或 `evidence_insufficient`。
@@ -73,7 +77,11 @@ canonical mismatch、伪造/孤儿 chunk、资格漂移、Penalty 身份错误�
 问题、固定整改模板和证据快照。消费者端 `consumer_protection_notice_v1` 仅使用固定通俗提示，
 保留来源链接，不推荐购买或退保。run 保存完整规范化 ruleset 快照，finding 保存实际使用的
 解释、复核问题、整改模板、消费者提示、严重度及信号强度；历史报告只读取运行时快照，当前
-规则文件被修改或删除后也不会改变旧报告。两类报告均为纯读取，不创建记录或改变 finding。
+规则文件被修改或删除后也不会改变旧报告。证据链接统一按 support type、retrieval rank、score、
+pilot ID 和 chunk identity 排序，不使用数据库主键或 relationship 加载顺序；排除明确的运行/材料
+数据库身份后，相同业务数据在不同 PostgreSQL 数据库中的规范化报告 SHA-256 一致。机构报告
+同时独立重算已选链接的严格语义准入，并展示已选、语义有效和无关链接数量。两类报告均为纯
+读取，不创建记录或改变 finding。
 
 API：
 
@@ -104,7 +112,7 @@ API 和 CLI 共用 `DeterministicScreeningService`。
 回滚全部 finding 与 evidence，并提交最小 `failed` run、稳定公开错误码和完成时间，不保留
 内部异常或半成品。报告读取不写数据库。
 
-`tests/fixtures/constructed_screening_eval_v1` 的 44 条样本全部标记 `constructed=true`，只进入
+`tests/fixtures/constructed_screening_eval_v1` 的 60 条样本全部标记 `constructed=true`，只进入
 测试进程和 `MarketingMaterial`（正式离线验收时）；它们永不进入 SourceDocument、
 KnowledgeChunk 或可信检索结果。
 

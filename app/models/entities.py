@@ -497,8 +497,12 @@ class FindingEvidenceLink(Base):
     support_evaluation_version: Mapped[str] = mapped_column(String(80))
     support_evaluation_passed: Mapped[bool] = mapped_column(Boolean)
     matched_support_patterns: Mapped[list[str]] = mapped_column(JSON)
+    actual_matched_substrings: Mapped[list[str]] = mapped_column(JSON)
+    matched_pattern_groups: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
     matched_evidence_fields: Mapped[list[str]] = mapped_column(JSON)
     support_reason: Mapped[str] = mapped_column(String(120))
+    semantic_support_score: Mapped[float] = mapped_column(Float)
+    semantic_support_reason: Mapped[str] = mapped_column(String(120))
     context_scope: Mapped[str] = mapped_column(String(80))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

@@ -22,7 +22,7 @@
       "positive_patterns": ["返[\\s]*现", "返[\\s]*点", "赠[\\s]*送[\\s]*合[\\s]*同[\\s]*外[\\s]*利[\\s]*益", "私[\\s]*下[\\s]*补[\\s]*贴", "购[\\s]*买[\\s]*保[\\s]*险[\\s]*赠[\\s]*送[\\s]*现[\\s]*金"],
       "exception_patterns": ["不[\\s]*得", "禁[\\s]*止"], "required_context_patterns": [],
       "retrieval_queries": ["保险销售 合同外利益 返佣 返现"], "preferred_record_types": ["regulation", "penalty"], "evidence_requirements": ["normative_basis", "enforcement_example"],
-      "evidence_matchers": {"normative_basis":{"allowed_chunk_kinds":["article_text"],"required_any_patterns":["合同约定以外|额外利益|返现|返佣|利益"],"required_evidence_fields":["article_text"]},"enforcement_example":{"allowed_chunk_kinds":["penalty_entry"],"required_any_patterns":["合同约定以外的利益|额外利益|返现|返佣|补贴"],"required_evidence_fields":["illegal_facts","original_sales_wording"]}},
+      "evidence_matchers": {"normative_basis":{"allowed_chunk_kinds":["article_text"],"required_any_patterns":["合同约定以外的利益|返现|返佣|回扣|额外利益|投保人利益输送"],"required_all_pattern_groups":[["合同约定以外的利益|返现|返佣|回扣|额外利益|投保人利益输送"]],"required_all_pattern_groups_scope":"local_clause","required_evidence_fields":["article_text"]},"enforcement_example":{"allowed_chunk_kinds":["penalty_entry"],"required_any_patterns":["合同约定以外的利益|额外利益|返现|返佣|补贴"],"required_evidence_fields":["illegal_facts","original_sales_wording"]}},
       "explanation_template": "该表述包含合同外利益风险信号，需要核验利益来源及合同依据。", "review_question_template": "所述利益是否写入保险合同并符合销售管理要求？", "institution_remediation_template": "核对并删除无法证明的合同外利益承诺。", "consumer_notice_template": "合同外返现或补贴承诺需要谨慎核对。"
     },
     {
@@ -30,7 +30,7 @@
       "positive_patterns": ["中[\\s]*奖", "限[\\s]*时[\\s]*优[\\s]*惠", "免[\\s]*费[\\s]*领[\\s]*取", "红[\\s]*包"],
       "exception_patterns": ["不[\\s]*含[\\s]*投[\\s]*保", "非[\\s]*保[\\s]*险"], "required_context_patterns": ["保[\\s]*险|投[\\s]*保|保[\\s]*单|购[\\s]*买[\\s]*保[\\s]*险"], "context_max_distance": 8,
       "retrieval_queries": ["保险销售 优惠 中奖 奖品诱导"], "preferred_record_types": ["regulation", "penalty"], "evidence_requirements": ["normative_basis", "enforcement_example"],
-      "evidence_matchers": {"normative_basis":{"allowed_chunk_kinds":["article_text"],"required_any_patterns":["优惠|中奖|奖品|赠送|诱导|虚假|欺骗"],"required_evidence_fields":["article_text"]},"enforcement_example":{"allowed_chunk_kinds":["penalty_entry"],"required_any_patterns":["优惠|中奖|奖品|赠送|诱导"],"required_evidence_fields":["illegal_facts","original_sales_wording"]}},
+      "evidence_matchers": {"normative_basis":{"allowed_chunk_kinds":["article_text"],"required_any_patterns":["虚假|欺骗|促销|优惠|中奖|奖品|诱导(?:投保人)?订立保险合同"],"required_all_pattern_groups":[["虚假|欺骗"],["促销|优惠|中奖|奖品|诱导(?:投保人)?订立保险合同|宣传"]],"required_all_pattern_groups_scope":"local_clause","required_evidence_fields":["article_text"]},"enforcement_example":{"allowed_chunk_kinds":["penalty_entry"],"required_any_patterns":["优惠|中奖|奖品|赠送|诱导"],"required_evidence_fields":["illegal_facts","original_sales_wording"]}},
       "explanation_template": "促销或奖品表述与投保语境同时出现，可能形成不当诱导风险。", "review_question_template": "促销条件、奖品真实性及与投保行为的关系是否充分披露？", "institution_remediation_template": "核对促销真实性、适用条件及投保关联。", "consumer_notice_template": "投保相关优惠或中奖宣传应先核对真实条件。"
     },
     {
@@ -70,7 +70,7 @@
       "positive_patterns": ["保[\\s]*险[\\s]*就[\\s]*是[\\s]*存[\\s]*款", "银[\\s]*行[\\s]*理[\\s]*财", "和[\\s]*定[\\s]*期[\\s]*存[\\s]*款[\\s]*完[\\s]*全[\\s]*一[\\s]*样", "随[\\s]*存[\\s]*随[\\s]*取", "不[\\s]*是[\\s]*保[\\s]*险[\\s]*只[\\s]*是[\\s]*储[\\s]*蓄"],
       "exception_patterns": ["不[\\s]*同[\\s]*于[\\s]*银[\\s]*行[\\s]*理[\\s]*财", "不[\\s]*是[\\s]*银[\\s]*行[\\s]*理[\\s]*财", "不[\\s]*是[\\s]*存[\\s]*款"], "required_context_patterns": [],
       "retrieval_queries": ["保险产品性质 存款 理财 混淆"], "preferred_record_types": ["regulation", "penalty", "product_document"], "evidence_requirements": ["normative_basis", "enforcement_example"],
-      "evidence_matchers": {"normative_basis":{"allowed_chunk_kinds":["article_text"],"required_any_patterns":["保险产品|存款|理财|储蓄|产品性质"],"required_evidence_fields":["article_text"]},"enforcement_example":{"allowed_chunk_kinds":["penalty_entry"],"required_any_patterns":["存款|理财|储蓄|混淆保险"],"required_evidence_fields":["illegal_facts","original_sales_wording"]}},
+      "evidence_matchers": {"normative_basis":{"allowed_chunk_kinds":["article_text"],"required_any_patterns":["保险|保险产品|存款|理财|储蓄|非保险产品|混淆"],"required_all_pattern_groups":[["保险|保险产品"],["存款|理财|储蓄|非保险产品|混淆"]],"required_all_pattern_groups_scope":"local_clause","required_evidence_fields":["article_text"]},"enforcement_example":{"allowed_chunk_kinds":["penalty_entry"],"required_any_patterns":["存款|理财|储蓄|混淆保险"],"required_evidence_fields":["illegal_facts","original_sales_wording"]}},
       "explanation_template": "该表述可能混淆保险与存款、理财或储蓄的产品性质。", "review_question_template": "是否清楚说明这是保险产品及其保障、期限和费用特征？", "institution_remediation_template": "明确保险产品性质，删除与存款或理财等同的表述。", "consumer_notice_template": "保险并不等同于银行存款或普通理财。"
     },
     {
@@ -78,7 +78,7 @@
       "positive_patterns": ["监[\\s]*管[\\s]*推[\\s]*荐", "银[\\s]*保[\\s]*监[\\s]*会[\\s]*指[\\s]*定", "国[\\s]*家[\\s]*认[\\s]*证[\\s]*收[\\s]*益", "备[\\s]*案[^。；！？]{0,10}监[\\s]*管[\\s]*保[\\s]*证", "监[\\s]*管[\\s]*部[\\s]*门[^。；！？]{0,8}担[\\s]*保"],
       "exception_patterns": ["备[\\s]*案[\\s]*不[\\s]*等[\\s]*于", "监[\\s]*管[\\s]*部[\\s]*门[\\s]*不[\\s]*担[\\s]*保"], "required_context_patterns": [],
       "retrieval_queries": ["保险销售 监管背书 备案 担保"], "preferred_record_types": ["regulation", "penalty"], "evidence_requirements": ["normative_basis", "enforcement_example"],
-      "evidence_matchers": {"normative_basis":{"allowed_chunk_kinds":["article_text"],"required_any_patterns":["监管|备案|推荐|担保|虚假|误导"],"required_evidence_fields":["article_text"]},"enforcement_example":{"allowed_chunk_kinds":["penalty_entry"],"required_any_patterns":["监管推荐|监管指定|国家认证|监管保证|监管担保"],"required_evidence_fields":["illegal_facts","original_sales_wording"]}},
+      "evidence_matchers": {"normative_basis":{"allowed_chunk_kinds":["article_text"],"required_any_patterns":["监管机构|监管部门|审核|备案|保证|担保|推荐|名义|形象|引人误解"],"required_all_pattern_groups":[["监管机构|监管部门|审核|备案"],["保证|担保|推荐|名义|形象|引人误解"]],"required_all_pattern_groups_scope":"local_clause","required_evidence_fields":["article_text"]},"enforcement_example":{"allowed_chunk_kinds":["penalty_entry"],"required_any_patterns":["监管推荐|监管指定|国家认证|监管保证|监管担保"],"required_evidence_fields":["illegal_facts","original_sales_wording"]}},
       "explanation_template": "该表述可能使消费者误认为监管机构推荐产品或担保收益。", "review_question_template": "是否存在可核验的监管文件，且表述是否误导为监管担保？", "institution_remediation_template": "删除无法证明的监管背书表述。", "consumer_notice_template": "监管备案通常不等于监管机构对收益或安全性作担保。"
     },
     {

@@ -5,7 +5,7 @@ import json
 import re
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import cast
+from typing import TypedDict, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -21,11 +21,11 @@ from app.services.knowledge import (
     TrustedKnowledgeSearchService,
 )
 from app.services.knowledge.chunks import RANKING_VERSION
-from app.services.screening.rules import MarketingRiskRule, SupportType
+from app.services.screening.rules import EvidenceMatcher, MarketingRiskRule, SupportType
 
 MAX_EVIDENCE_PER_FINDING = 5
 MAX_EVIDENCE_PER_DOCUMENT = 2
-SUPPORT_EVALUATION_VERSION = "deterministic_evidence_support_v1"
+SUPPORT_EVALUATION_VERSION = "deterministic_evidence_support_v2"
 
 
 @dataclass(frozen=True)
@@ -41,8 +41,12 @@ class EvidenceSupportDecision:
     result: SearchResult
     passed: bool
     matched_support_patterns: tuple[str, ...]
+    actual_matched_substrings: tuple[str, ...]
+    matched_pattern_groups: tuple[dict[str, object], ...]
     matched_evidence_fields: tuple[str, ...]
     support_reason: str
+    semantic_support_score: float
+    semantic_support_reason: str
     context_scope: str
 
 
@@ -52,6 +56,15 @@ class EvidenceAssemblyResult:
     candidates_total: int
     candidates_passed: int
     candidates_rejected: int
+
+
+class SemanticSupportResult(TypedDict):
+    passed: bool
+    matched_patterns: tuple[str, ...]
+    actual_matched_substrings: tuple[str, ...]
+    matched_pattern_groups: tuple[dict[str, object], ...]
+    score: float
+    reason: str
 
 
 class DeterministicEvidenceSupportEvaluator:
@@ -76,6 +89,10 @@ class DeterministicEvidenceSupportEvaluator:
                 False,
                 (),
                 (),
+                (),
+                (),
+                "chunk_kind_not_allowed",
+                0.0,
                 "chunk_kind_not_allowed",
                 context_scope,
             )
@@ -92,32 +109,40 @@ class DeterministicEvidenceSupportEvaluator:
                 False,
                 (),
                 (),
+                (),
+                (),
+                "required_evidence_field_missing",
+                0.0,
                 "required_evidence_field_missing",
                 context_scope,
             )
         evidence_text = "\n".join(str(item.get("quote") or "") for item in references)
-        matched = tuple(
-            pattern
-            for pattern in matcher.required_any_patterns
-            if re.search(pattern, evidence_text)
-        )
-        if not matched:
+        semantic = evaluate_semantic_support(matcher, evidence_text)
+        if not semantic["passed"]:
             return EvidenceSupportDecision(
                 support_type,
                 result,
                 False,
-                (),
+                semantic["matched_patterns"],
+                semantic["actual_matched_substrings"],
+                semantic["matched_pattern_groups"],
                 fields,
                 "semantic_pattern_not_matched",
+                float(semantic["score"]),
+                str(semantic["reason"]),
                 context_scope,
             )
         return EvidenceSupportDecision(
             support_type,
             result,
             True,
-            matched,
+            semantic["matched_patterns"],
+            semantic["actual_matched_substrings"],
+            semantic["matched_pattern_groups"],
             fields,
             "semantic_evidence_match",
+            float(semantic["score"]),
+            str(semantic["reason"]),
             context_scope,
         )
 
@@ -284,6 +309,7 @@ class FindingEvidenceAssembler:
             source_document_snapshot_json={
                 "source_document_id": result.source_document_id,
                 "record_type": result.record_type,
+                "chunk_kind": result.chunk_kind,
                 "pilot_id": result.pilot_id,
                 "title": result.title,
                 "source_url": result.source_url,
@@ -295,10 +321,89 @@ class FindingEvidenceAssembler:
             support_evaluation_version=SUPPORT_EVALUATION_VERSION,
             support_evaluation_passed=decision.passed,
             matched_support_patterns=list(decision.matched_support_patterns),
+            actual_matched_substrings=list(decision.actual_matched_substrings),
+            matched_pattern_groups=list(decision.matched_pattern_groups),
             matched_evidence_fields=list(decision.matched_evidence_fields),
             support_reason=decision.support_reason,
+            semantic_support_score=decision.semantic_support_score,
+            semantic_support_reason=decision.semantic_support_reason,
             context_scope=decision.context_scope,
         )
 
 
 RETRIEVAL_VERSION = f"trusted_search_{RANKING_VERSION}"
+
+
+def evaluate_semantic_support(
+    matcher: EvidenceMatcher,
+    evidence_text: str,
+) -> SemanticSupportResult:
+    semantic_text = _semantic_pattern_scope(matcher, evidence_text)
+    pattern_hits = {
+        pattern: tuple(match.group(0) for match in re.finditer(pattern, semantic_text))
+        for pattern in matcher.required_any_patterns
+    }
+    matched_patterns = tuple(pattern for pattern, hits in pattern_hits.items() if hits)
+    actual = tuple(sorted({value for hits in pattern_hits.values() for value in hits}))
+
+    matched_groups: list[dict[str, object]] = []
+    satisfied_groups = 0
+    for index, group in enumerate(matcher.required_all_pattern_groups):
+        group_hits = {
+            pattern: tuple(match.group(0) for match in re.finditer(pattern, semantic_text))
+            for pattern in group
+        }
+        matched = tuple(pattern for pattern, hits in group_hits.items() if hits)
+        substrings = tuple(sorted({value for hits in group_hits.values() for value in hits}))
+        if matched:
+            satisfied_groups += 1
+        matched_groups.append(
+            {
+                "group_index": index,
+                "matched_patterns": list(matched),
+                "actual_matched_substrings": list(substrings),
+            }
+        )
+
+    any_gate_passed = bool(matched_patterns)
+    group_count = len(matcher.required_all_pattern_groups)
+    all_groups_passed = satisfied_groups == group_count
+    gates_total = 1 + group_count
+    score = (int(any_gate_passed) + satisfied_groups) / gates_total
+    passed = any_gate_passed and all_groups_passed
+    if not any_gate_passed:
+        reason = "required_any_pattern_not_matched"
+    elif not all_groups_passed:
+        reason = "required_all_pattern_group_not_matched"
+    else:
+        reason = "all_declared_semantic_patterns_matched"
+    return {
+        "passed": passed,
+        "matched_patterns": matched_patterns,
+        "actual_matched_substrings": actual,
+        "matched_pattern_groups": tuple(matched_groups),
+        "score": score,
+        "reason": reason,
+    }
+
+
+def _semantic_pattern_scope(matcher: EvidenceMatcher, evidence_text: str) -> str:
+    if (
+        not matcher.required_all_pattern_groups
+        or matcher.required_all_pattern_groups_scope == "evidence_text"
+    ):
+        return evidence_text
+    clauses = [value for value in re.split(r"[。！？；]+", evidence_text) if value.strip()]
+    if not clauses:
+        return evidence_text
+
+    def satisfied_group_count(clause: str) -> int:
+        return sum(
+            any(re.search(pattern, clause) for pattern in group)
+            for group in matcher.required_all_pattern_groups
+        )
+
+    return max(
+        enumerate(clauses),
+        key=lambda value: (satisfied_group_count(value[1]), -value[0]),
+    )[1]

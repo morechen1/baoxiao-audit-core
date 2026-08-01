@@ -178,6 +178,55 @@ def test_exception_does_not_cross_strong_newline_boundary() -> None:
     ] == [(0, 4, "保证收益")]
 
 
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("保险\n中奖", False),
+        ("保险。\n中奖", False),
+        ("购买保险即可中奖", True),
+        ("监管\n推荐", True),
+    ],
+)
+def test_required_context_uses_strong_clause_boundaries(text: str, expected: bool) -> None:
+    findings = _engine(text)
+    actual = any(
+        value.rule_id in {"false_promotion_or_prize", "regulatory_endorsement"}
+        for value in findings
+    )
+    assert actual is expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "银行理财并非保险产品。",
+        "银行理财不同于保险。",
+        "请勿将保险与银行理财混淆。",
+        "监管推荐的说法不准确。",
+        "保证收益的说法不准确。",
+        "零风险的说法不准确。",
+        "收益最高的说法没有依据。",
+        "排名第一的说法不准确。",
+        "随时退保没有损失的说法不准确。",
+        "没有等待期的说法不准确。",
+        "禁止限时优惠诱导投保。",
+    ],
+)
+def test_generic_local_negation_and_metalanguage_suppress_findings(text: str) -> None:
+    assert _engine(text) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "rule_id"),
+    [
+        ("监管部门不担保收益，但销售人员仍称监管推荐。", "regulatory_endorsement"),
+        ("条款明确为非保证利益，但营销人员承诺保证收益。", "guaranteed_return_or_principal"),
+    ],
+)
+def test_negation_does_not_cross_adversative_or_speaker_boundary(text: str, rule_id: str) -> None:
+    assert rule_id in {finding.rule_id for finding in _engine(text)}
+
+
 @pytest.mark.parametrize("prefix_length", [1197, 1198, 1199])
 def test_long_segment_overlap_finds_guarantee_once_with_exact_span(prefix_length: int) -> None:
     text = "甲" * prefix_length + "保证收益"
@@ -223,8 +272,8 @@ def test_overlap_merge_and_finding_sha_are_stable() -> None:
 
 def test_constructed_fixture_exact_rules_and_spans() -> None:
     samples = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    assert len(samples) == 44
-    assert sum(bool(sample["expected_rule_ids"]) for sample in samples) == 28
+    assert len(samples) == 60
+    assert sum(bool(sample["expected_rule_ids"]) for sample in samples) == 31
     for sample in samples:
         findings = _engine(_sample_text(sample))
         actual_rules = sorted({finding.rule_id for finding in findings})
@@ -405,8 +454,12 @@ def test_evidence_selection_keeps_required_types_deduplicated_and_bounded() -> N
             result=value,
             passed=True,
             matched_support_patterns=("测试",),
+            actual_matched_substrings=("测试",),
+            matched_pattern_groups=(),
             matched_evidence_fields=("article_text",),
             support_reason="semantic_evidence_match",
+            semantic_support_score=1.0,
+            semantic_support_reason="all_declared_semantic_patterns_matched",
             context_scope="not_applicable",
         )
 
@@ -508,6 +561,54 @@ def test_basic_information_cannot_satisfy_normative_basis() -> None:
     decision = DeterministicEvidenceSupportEvaluator.evaluate(rule, "normative_basis", result)
     assert decision.passed is False
     assert decision.support_reason == "chunk_kind_not_allowed"
+
+
+@pytest.mark.parametrize(
+    ("rule_id", "quote", "expected", "expected_groups"),
+    [
+        (
+            "regulatory_endorsement",
+            "金融监管总局规定的其他提示内容",
+            False,
+            0,
+        ),
+        (
+            "regulatory_endorsement",
+            "不得利用监管机构审核或备案程序提供保证等引人误解的表述",
+            True,
+            2,
+        ),
+        ("extra_contractual_benefit", "提示保单利益具有不确定性", False, 0),
+        ("extra_contractual_benefit", "不得给予合同约定以外的利益或返佣", True, 1),
+        ("product_nature_confusion", "规范保险产品销售行为", False, 1),
+        ("product_nature_confusion", "规范保险产品销售行为；商标不得引起混淆", False, 1),
+        ("product_nature_confusion", "不得将保险产品与理财产品混淆", True, 2),
+        ("false_promotion_or_prize", "不得以其他方式诱导消费者", False, 0),
+        ("false_promotion_or_prize", "不得进行虚假促销诱导订立保险合同", True, 2),
+    ],
+)
+def test_normative_evidence_requires_all_strict_pattern_groups(
+    rule_id: str,
+    quote: str,
+    expected: bool,
+    expected_groups: int,
+) -> None:
+    rule = next(value for value in load_ruleset().rules if value.rule_id == rule_id)
+    result = _semantic_result(
+        record_type="regulation",
+        chunk_kind="article_text",
+        evidence_references=[{"field_name": "article_text", "quote": quote}],
+    )
+    decision = DeterministicEvidenceSupportEvaluator.evaluate(rule, "normative_basis", result)
+    assert decision.passed is expected
+    assert sum(bool(group["matched_patterns"]) for group in decision.matched_pattern_groups) == (
+        expected_groups
+    )
+    if expected:
+        assert decision.semantic_support_score == 1.0
+        assert decision.actual_matched_substrings
+    else:
+        assert decision.semantic_support_score < 1.0
 
 
 def test_missing_required_support_type_yields_partial_status(monkeypatch) -> None:

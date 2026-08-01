@@ -189,8 +189,12 @@ class DeterministicScreeningService:
                                 "support_evaluation_version": link.support_evaluation_version,
                                 "support_evaluation_passed": link.support_evaluation_passed,
                                 "matched_support_patterns": link.matched_support_patterns,
+                                "actual_matched_substrings": link.actual_matched_substrings,
+                                "matched_pattern_groups": link.matched_pattern_groups,
                                 "matched_evidence_fields": link.matched_evidence_fields,
                                 "support_reason": link.support_reason,
+                                "semantic_support_score": link.semantic_support_score,
+                                "semantic_support_reason": link.semantic_support_reason,
                                 "context_scope": link.context_scope,
                             }
                             for link in assembly.links

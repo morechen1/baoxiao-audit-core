@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import Counter
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -9,6 +11,8 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.exceptions import ScreeningError
 from app.models import MarketingMaterial, RiskFinding, ScreeningRun
 from app.models.enums import FindingEvidenceStatus
+from app.services.screening.evidence import evaluate_semantic_support
+from app.services.screening.rules import EvidenceMatcher
 
 INSTITUTION_REPORT_VERSION = "institution_compliance_report_v1"
 CONSUMER_NOTICE_VERSION = "consumer_protection_notice_v1"
@@ -20,6 +24,16 @@ ILLUSTRATIVE_PRODUCT_CONTEXT_NOTICE = (
     "该条款仅用于展示同类保险合同中可能存在的等待期、现金价值、退保损失或"
     "责任免除结构，不代表输入材料对应的具体产品条款。"
 )
+SUPPORT_TYPE_PRIORITY = {
+    "normative_basis": 0,
+    "enforcement_example": 1,
+    "product_term_context": 2,
+}
+CANONICAL_REPORT_EXCLUDED_KEYS = {
+    "material_id",
+    "screening_run_id",
+    "source_document_id",
+}
 
 
 class ScreeningReportService:
@@ -76,6 +90,17 @@ class ScreeningReportService:
             "findings": rows,
             "evidence_summary": {
                 "link_count": sum(len(finding.evidence_links) for finding in findings),
+                "selected_evidence_links": sum(len(finding.evidence_links) for finding in findings),
+                "selected_evidence_links_semantically_valid": sum(
+                    _link_semantically_valid(finding, link)
+                    for finding in findings
+                    for link in finding.evidence_links
+                ),
+                "selected_irrelevant_links": sum(
+                    not _link_semantically_valid(finding, link)
+                    for finding in findings
+                    for link in finding.evidence_links
+                ),
                 "source_document_count": len(
                     {
                         link.source_document_snapshot_json["source_document_id"]
@@ -98,7 +123,7 @@ class ScreeningReportService:
         evidence_links = []
         seen: set[str] = set()
         for finding in findings:
-            for link in finding.evidence_links:
+            for link in _sorted_evidence_links(finding):
                 source_url = str(link.source_document_snapshot_json["source_url"])
                 key = f"{source_url}:{link.chunk_identity_sha256}"
                 if key not in seen:
@@ -110,6 +135,10 @@ class ScreeningReportService:
                             "support_type": link.support_type,
                             "context_scope": link.context_scope,
                             "chunk_identity_sha256": link.chunk_identity_sha256,
+                            "actual_matched_substrings": link.actual_matched_substrings,
+                            "matched_pattern_groups": link.matched_pattern_groups,
+                            "semantic_support_score": link.semantic_support_score,
+                            "semantic_support_reason": link.semantic_support_reason,
                         }
                     )
         return {
@@ -156,14 +185,15 @@ class ScreeningReportService:
                     "support_evaluation_version": link.support_evaluation_version,
                     "support_evaluation_passed": link.support_evaluation_passed,
                     "matched_support_patterns": link.matched_support_patterns,
+                    "actual_matched_substrings": link.actual_matched_substrings,
+                    "matched_pattern_groups": link.matched_pattern_groups,
                     "matched_evidence_fields": link.matched_evidence_fields,
                     "support_reason": link.support_reason,
+                    "semantic_support_score": link.semantic_support_score,
+                    "semantic_support_reason": link.semantic_support_reason,
                     "context_scope": link.context_scope,
                 }
-                for link in sorted(
-                    finding.evidence_links,
-                    key=lambda value: (value.support_type, value.retrieval_rank, value.id),
-                )
+                for link in _sorted_evidence_links(finding)
             ],
         }
 
@@ -196,3 +226,76 @@ def _has_illustrative_product_context(findings: list[RiskFinding]) -> bool:
         for finding in findings
         for link in finding.evidence_links
     )
+
+
+def _sorted_evidence_links(finding: RiskFinding) -> list[Any]:
+    return sorted(
+        finding.evidence_links,
+        key=lambda value: (
+            SUPPORT_TYPE_PRIORITY[value.support_type],
+            value.retrieval_rank,
+            -value.retrieval_score,
+            str(value.source_document_snapshot_json.get("pilot_id") or ""),
+            value.chunk_identity_sha256,
+        ),
+    )
+
+
+def _link_semantically_valid(finding: RiskFinding, link: Any) -> bool:
+    matchers = finding.rule_snapshot_json.get("evidence_matchers")
+    if not isinstance(matchers, dict):
+        return False
+    raw_matcher = matchers.get(link.support_type)
+    if not isinstance(raw_matcher, dict):
+        return False
+    try:
+        matcher = EvidenceMatcher.model_validate(raw_matcher)
+    except ValueError:
+        return False
+    if link.source_document_snapshot_json.get("chunk_kind") not in matcher.allowed_chunk_kinds:
+        return False
+    references = [
+        item
+        for item in link.evidence_references_snapshot_json
+        if str(item.get("field_name") or "") in matcher.required_evidence_fields
+    ]
+    fields = sorted({str(item.get("field_name") or "") for item in references})
+    if not fields:
+        return False
+    semantic = evaluate_semantic_support(
+        matcher,
+        "\n".join(str(item.get("quote") or "") for item in references),
+    )
+    return bool(
+        semantic["passed"]
+        and link.support_evaluation_passed
+        and list(semantic["actual_matched_substrings"]) == link.actual_matched_substrings
+        and list(semantic["matched_pattern_groups"]) == link.matched_pattern_groups
+        and abs(float(semantic["score"]) - link.semantic_support_score) < 1e-12
+        and str(semantic["reason"]) == link.semantic_support_reason
+    )
+
+
+def canonical_report_payload(report: dict[str, Any]) -> dict[str, Any]:
+    def normalize(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: normalize(item)
+                for key, item in sorted(value.items())
+                if key not in CANONICAL_REPORT_EXCLUDED_KEYS
+            }
+        if isinstance(value, list):
+            return [normalize(item) for item in value]
+        return value
+
+    return cast(dict[str, Any], normalize(report))
+
+
+def canonical_report_sha256(report: dict[str, Any]) -> str:
+    payload = json.dumps(
+        canonical_report_payload(report),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return hashlib.sha256(payload).hexdigest()

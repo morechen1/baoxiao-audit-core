@@ -19,6 +19,8 @@ class EvidenceMatcher(BaseModel):
 
     allowed_chunk_kinds: tuple[str, ...] = Field(min_length=1)
     required_any_patterns: tuple[str, ...] = Field(min_length=1)
+    required_all_pattern_groups: tuple[tuple[str, ...], ...] = ()
+    required_all_pattern_groups_scope: Literal["evidence_text", "local_clause"] = "evidence_text"
     required_evidence_fields: tuple[str, ...] = Field(min_length=1)
 
     @field_validator("required_any_patterns")
@@ -27,6 +29,21 @@ class EvidenceMatcher(BaseModel):
         try:
             for value in values:
                 re.compile(value)
+        except re.error as exc:
+            raise ValueError("invalid evidence matcher regex") from exc
+        return values
+
+    @field_validator("required_all_pattern_groups")
+    @classmethod
+    def groups_compile(
+        cls, values: tuple[tuple[str, ...], ...]
+    ) -> tuple[tuple[str, ...], ...]:
+        try:
+            for group in values:
+                if not group:
+                    raise ValueError("evidence matcher group cannot be empty")
+                for pattern in group:
+                    re.compile(pattern)
         except re.error as exc:
             raise ValueError("invalid evidence matcher regex") from exc
         return values
@@ -45,8 +62,17 @@ class MarketingRiskRule(BaseModel):
     required_context_patterns: tuple[str, ...] = ()
     context_scope: Literal["local_clause"] = "local_clause"
     context_max_distance: int = Field(default=80, ge=0, le=240)
+    required_context_allow_format_newline: bool = False
     exception_scope: Literal["local_clause"] = "local_clause"
+    claim_negation_scope_version: Literal["marketing_claim_negation_scope_v1"] = (
+        "marketing_claim_negation_scope_v1"
+    )
     adversative_boundaries: tuple[str, ...] = (
+        "实际销售人员仍称",
+        "销售人员仍称",
+        "营销人员承诺",
+        "另一个产品",
+        "另一个账户",
         "但",
         "但是",
         "然而",

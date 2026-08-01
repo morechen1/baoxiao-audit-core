@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
@@ -19,15 +19,31 @@ from app.services.knowledge import KnowledgeIndexService
 from app.services.screening import DeterministicScreeningService, MarketingRuleSet, load_ruleset
 from app.services.screening.evidence import SUPPORT_EVALUATION_VERSION
 from app.services.screening.normalization import normalize_marketing_text
-from app.services.screening.reports import ILLUSTRATIVE_PRODUCT_CONTEXT_NOTICE
+from app.services.screening.reports import (
+    ILLUSTRATIVE_PRODUCT_CONTEXT_NOTICE,
+    canonical_report_sha256,
+)
 
 NON_PENALTY_ARCHIVE_SHA256 = "09b7c1c1fa35aeda8eabe87405f897d9f838681135ef98c1d4e979fc6ad51e48"
 PENALTY_ARCHIVE_SHA256 = "4b9dd8e5938d1114d66478e90ef25e9beaff6ab00e60245b926a6234ca76389f"
+FORBIDDEN_NORMATIVE_CHUNKS = {
+    "regulatory_endorsement": {
+        "cb306ddab3d697dbc49df233d9dc568c6934f2555abd0df670f3931da4efe960",
+        "5597f2f9eecccf988d346961600335b92e14272490620cd946af183c3527e04d",
+    },
+    "extra_contractual_benefit": {
+        "c29eb875a6f8862f2b3fb95c89068277b17bf0d38abdd009a474b01d487fc7ff",
+    },
+    "product_nature_confusion": {
+        "61f03550569d7cfd7231622707aba3582175f8853ac3f7862fb0dd499dd88a6f",
+    },
+}
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--database-url", required=True)
+    parser.add_argument("--comparison-database-url", required=True)
     parser.add_argument("--data-dir", type=Path, required=True)
     parser.add_argument("--samples", type=Path, required=True)
     parser.add_argument("--json-report", type=Path, required=True)
@@ -68,6 +84,12 @@ def main() -> None:
         product_context_material_matched = 0
         product_context_illustrative = 0
         first_run_ids: dict[str, int] = {}
+        canonical_report_hashes: dict[str, dict[str, str]] = {}
+        selected_evidence_links = 0
+        selected_evidence_links_semantically_valid = 0
+        selected_irrelevant_links = 0
+        forbidden_normative_links = 0
+        matched_pattern_groups_valid = True
         for sample in samples:
             text = _sample_text(sample)
             kwargs = {
@@ -122,6 +144,14 @@ def main() -> None:
                 for link in row["evidence"]
                 if link["source"].get("pilot_id")
             }
+            actual_chunk_identities = {
+                str(link["chunk_identity_sha256"]) for row in first_rows for link in row["evidence"]
+            }
+            expected_chunk_identities = set(sample.get("expected_support_chunk_identities", []))
+            forbidden_chunk_identities = set(sample.get("forbidden_support_chunk_identities", []))
+            chunk_expectations_match = expected_chunk_identities.issubset(
+                actual_chunk_identities
+            ) and not forbidden_chunk_identities.intersection(actual_chunk_identities)
             expected_pilot_ids = set(sample.get("expected_support_pilot_ids", []))
             forbidden_pilot_ids = set(sample.get("forbidden_support_pilot_ids", []))
             pilot_expectations_match = expected_pilot_ids.issubset(
@@ -156,6 +186,18 @@ def main() -> None:
                 and set(actual_product_scopes) == {expected_product_scope}
             )
             first_evidence = [link for row in first_rows for link in row["evidence"]]
+            forbidden_normative_links += sum(
+                link["support_type"] == "normative_basis"
+                and str(link["chunk_identity_sha256"])
+                in FORBIDDEN_NORMATIVE_CHUNKS.get(str(row["rule_id"]), set())
+                for row in first_rows
+                for link in row["evidence"]
+            )
+            matched_pattern_groups_valid &= all(
+                _matched_groups_complete(row, link)
+                for row in first_rows
+                for link in row["evidence"]
+            )
             evidence_links_total += len(first_evidence)
             evidence_links_passed += sum(
                 bool(link["support_evaluation_passed"]) for link in first_evidence
@@ -175,6 +217,16 @@ def main() -> None:
             )
             institution = service.institution_report(session, first.id)
             consumer = service.consumer_notice(session, first.id)
+            summary = institution["evidence_summary"]
+            selected_evidence_links += int(summary["selected_evidence_links"])
+            selected_evidence_links_semantically_valid += int(
+                summary["selected_evidence_links_semantically_valid"]
+            )
+            selected_irrelevant_links += int(summary["selected_irrelevant_links"])
+            canonical_report_hashes[str(sample["sample_id"])] = {
+                "institution_report": canonical_report_sha256(institution),
+                "consumer_notice": canonical_report_sha256(consumer),
+            }
             institution_valid &= (
                 institution["summary"]["finding_count"] == len(first_rows)
                 and "不构成违法认定" in institution["disclaimer"]
@@ -210,6 +262,8 @@ def main() -> None:
                     ),
                     "actual_support_pilot_ids": sorted(actual_pilot_ids),
                     "support_pilot_expectations_match": pilot_expectations_match,
+                    "actual_support_chunk_identities": sorted(actual_chunk_identities),
+                    "support_chunk_expectations_match": chunk_expectations_match,
                     "required_support_types_match": required_support_types_match,
                     "product_context_scopes": actual_product_scopes,
                     "product_context_scope_match": product_scope_match,
@@ -234,8 +288,14 @@ def main() -> None:
                 SourceDocument.source_title.like("构造评估%")
             )
         )
+        cross_database_report = _cross_database_report_check(
+            args.comparison_database_url,
+            args.data_dir,
+            samples,
+            canonical_report_hashes,
+        )
         report = {
-            "schema_version": "deterministic-screening-acceptance-v2",
+            "schema_version": "deterministic-screening-acceptance-v3",
             "archive_inputs": {
                 "non_penalty_post_review_v2_1_sha256": NON_PENALTY_ARCHIVE_SHA256,
                 "penalty_post_review_v3_3_sha256": PENALTY_ARCHIVE_SHA256,
@@ -271,6 +331,13 @@ def main() -> None:
             "evidence_links_total": evidence_links_total,
             "evidence_links_passed": evidence_links_passed,
             "evidence_links_rejected_as_irrelevant": evidence_links_rejected,
+            "selected_evidence_links": selected_evidence_links,
+            "selected_evidence_links_semantically_valid": (
+                selected_evidence_links_semantically_valid
+            ),
+            "selected_irrelevant_links": selected_irrelevant_links,
+            "forbidden_normative_links_selected": forbidden_normative_links,
+            "matched_pattern_groups_validation": matched_pattern_groups_valid,
             "supported_count": supported,
             "partially_supported_count": partial,
             "status_matches_expected_count": status_matches_expected,
@@ -285,6 +352,12 @@ def main() -> None:
                 for row in sample_rows
                 if "S031" <= row["sample_id"] <= "S038"
             ),
+            "strong_boundary_and_negation_pass": all(
+                row["exact_rule_match"] and row["exact_span_match"]
+                for row in sample_rows
+                if "S045" <= row["sample_id"] <= "S060"
+            ),
+            "cross_database_report_stability": cross_database_report,
             "long_segment_boundary_pass": all(
                 row["exact_rule_match"] and row["exact_span_match"] and row["deterministic_rerun"]
                 for row in sample_rows
@@ -324,12 +397,17 @@ def main() -> None:
         status_matches_expected != expected_status_findings,
         unrelated_enforcement_selected != 0,
         not all(row["support_pilot_expectations_match"] for row in sample_rows),
+        not all(row["support_chunk_expectations_match"] for row in sample_rows),
         not all(row["required_support_types_match"] for row in sample_rows),
         not all(row["product_context_scope_match"] for row in sample_rows),
         not historical_snapshot_pass,
         not report["local_context_adversarial_pass"],
         not report["long_segment_boundary_pass"],
         not report["nfkc_combining_cluster_pass"],
+        selected_irrelevant_links != 0,
+        forbidden_normative_links != 0,
+        not matched_pattern_groups_valid,
+        not cross_database_report["passed"],
     ]
     if any(failures):
         raise SystemExit("deterministic_screening_acceptance_failed")
@@ -346,6 +424,75 @@ def _sample_text(sample: dict[str, Any]) -> str:
         return str(sample["text"])
     builder = sample["text_builder"]
     return str(builder["prefix"]) * int(builder["repeat"]) + str(builder["suffix"])
+
+
+def _matched_groups_complete(row: dict[str, Any], link: dict[str, Any]) -> bool:
+    matcher = row["rule_snapshot"]["evidence_matchers"][link["support_type"]]
+    required_groups = matcher.get("required_all_pattern_groups", [])
+    actual_groups = link["matched_pattern_groups"]
+    return (
+        len(actual_groups) == len(required_groups)
+        and all(group["matched_patterns"] for group in actual_groups)
+        and bool(link["actual_matched_substrings"])
+        and float(link["semantic_support_score"]) == 1.0
+        and link["semantic_support_reason"] == "all_declared_semantic_patterns_matched"
+    )
+
+
+def _cross_database_report_check(
+    database_url: str,
+    data_dir: Path,
+    samples: list[dict[str, Any]],
+    expected_hashes: dict[str, dict[str, str]],
+) -> dict[str, Any]:
+    engine = create_engine(database_url)
+    with engine.begin() as connection:
+        for sequence in (
+            "marketing_materials_id_seq",
+            "material_segments_id_seq",
+            "screening_runs_id_seq",
+            "risk_findings_id_seq",
+            "finding_evidence_links_id_seq",
+        ):
+            connection.execute(text(f"SELECT setval('{sequence}', 100000, false)"))
+    settings = Settings(database_url=database_url, data_dir=data_dir)
+    service = DeterministicScreeningService(load_ruleset(), settings)
+    actual_hashes: dict[str, dict[str, str]] = {}
+    with Session(engine, expire_on_commit=False) as session:
+        verification = KnowledgeIndexService(settings).verify_chunks(session)
+        if not verification.valid or verification.active_chunks != 73:
+            raise SystemExit("screening_comparison_trusted_index_invalid")
+        for sample in samples:
+            run = service.run(
+                session,
+                title=f"构造评估 {sample['sample_id']}",
+                material_type="sales_script",
+                raw_text=_sample_text(sample),
+                source_label="constructed_screening_eval_v1",
+                external_reference=sample["sample_id"],
+                is_constructed_evaluation=True,
+            )
+            actual_hashes[str(sample["sample_id"])] = {
+                "institution_report": canonical_report_sha256(
+                    service.institution_report(session, run.id)
+                ),
+                "consumer_notice": canonical_report_sha256(
+                    service.consumer_notice(session, run.id)
+                ),
+            }
+    engine.dispose()
+    mismatches = sorted(
+        sample_id
+        for sample_id, expected in expected_hashes.items()
+        if actual_hashes.get(sample_id) != expected
+    )
+    return {
+        "passed": not mismatches,
+        "sample_count": len(samples),
+        "primary_key_sequence_offset": 100000,
+        "mismatched_samples": mismatches,
+        "canonical_report_hashes": actual_hashes,
+    }
 
 
 def _historical_snapshot_check(
@@ -429,6 +576,13 @@ def _markdown(report: dict[str, Any]) -> str:
         f"- 证据语义评估：`{report['evidence_semantic_evaluation_version']}`",
         f"- 证据链接总数/通过：{report['evidence_links_total']}/{report['evidence_links_passed']}",
         f"- 被拒绝的不相关候选：{report['evidence_links_rejected_as_irrelevant']}",
+        "- 正式入选/严格语义有效/无关链接："
+        f"{report['selected_evidence_links']}/"
+        f"{report['selected_evidence_links_semantically_valid']}/"
+        f"{report['selected_irrelevant_links']}",
+        f"- 禁止法规块误选：{report['forbidden_normative_links_selected']}",
+        "- pattern groups 完整："
+        f"{'PASS' if report['matched_pattern_groups_validation'] else 'FAIL'}",
         "- 证据状态符合预期："
         f"{report['status_matches_expected_count']}/"
         f"{report['status_expected_finding_count']}",
@@ -439,6 +593,9 @@ def _markdown(report: dict[str, Any]) -> str:
         f"{report['product_context_illustrative']}",
         f"- 历史报告快照：{'PASS' if report['historical_report_snapshot_pass'] else 'FAIL'}",
         f"- 局部上下文对抗：{'PASS' if report['local_context_adversarial_pass'] else 'FAIL'}",
+        f"- 强边界与否定语境：{'PASS' if report['strong_boundary_and_negation_pass'] else 'FAIL'}",
+        "- 跨数据库报告 SHA："
+        f"{'PASS' if report['cross_database_report_stability']['passed'] else 'FAIL'}",
         f"- 超长分段边界：{'PASS' if report['long_segment_boundary_pass'] else 'FAIL'}",
         f"- 组合字符 NFKC：{'PASS' if report['nfkc_combining_cluster_pass'] else 'FAIL'}",
         f"- 可信知识块：{verification['active_chunks']} {chunk_counts}",

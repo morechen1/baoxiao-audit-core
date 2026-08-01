@@ -10,6 +10,25 @@ from app.services.screening.normalization import NormalizedText, normalize_marke
 from app.services.screening.rules import MarketingRiskRule, MarketingRuleSet
 from app.services.screening.segmenter import SegmentCandidate
 
+NEGATION_SCOPE_VERSION = "marketing_claim_negation_scope_v1"
+NEGATION_PREFIX_PATTERNS = (
+    r"不[\s]*得(?:[\s]*宣[\s]*传)?",
+    r"禁[\s]*止",
+    r"严[\s]*禁",
+    r"切[\s]*勿",
+    r"不[\s]*应",
+    r"不[\s]*要",
+    r"请[\s]*勿(?:[\s]*将)?",
+    r"不[\s]*可[\s]*声[\s]*称",
+)
+NEGATION_SUFFIX_PATTERNS = (
+    r"(?:的[\s]*)?说[\s]*法(?:[\s]*并)?[\s]*(?:不[\s]*准[\s]*确|错[\s]*误|没[\s]*有[\s]*依[\s]*据)",
+    r"并[\s]*非",
+    r"不[\s]*等[\s]*于",
+    r"不[\s]*同[\s]*于",
+    r"不[\s]*代[\s]*表",
+)
+
 
 @dataclass(frozen=True)
 class FindingCandidate:
@@ -81,7 +100,13 @@ class DeterministicComplianceRuleEngine:
             (match.start(), match.end())
             for pattern in rule.positive_patterns
             for match in re.finditer(pattern, normalized.text)
-            if self._required_context_present(normalized.text, match.start(), match.end(), rule)
+            if self._required_context_present(
+                segment.text,
+                normalized,
+                match.start(),
+                match.end(),
+                rule,
+            )
             and not self._excepted(
                 segment.text,
                 normalized,
@@ -154,34 +179,42 @@ class DeterministicComplianceRuleEngine:
         relative_end = relative_start + len(
             normalize_marketing_text(raw_text[raw_start:raw_end]).text
         )
-        return any(
+        rule_exception = any(
             _pattern_is_local(pattern, clause, relative_start, relative_end, 40)
             for pattern in rule.exception_patterns
         )
+        return rule_exception or _claim_is_negated(clause, relative_start, relative_end, rule)
 
     @staticmethod
     def _required_context_present(
-        text: str,
+        raw_text: str,
+        normalized: NormalizedText,
         start: int,
         end: int,
         rule: MarketingRiskRule,
     ) -> bool:
         if not rule.required_context_patterns:
             return True
+        raw_start, raw_end = normalized.raw_span(start, end)
+        clause_start, clause_end = _required_context_clause_span(
+            raw_text,
+            raw_start,
+            raw_end,
+            rule,
+        )
+        clause_raw = raw_text[clause_start:clause_end]
+        text = normalize_marketing_text(clause_raw).text
+        local_start = len(normalize_marketing_text(raw_text[clause_start:raw_start]).text)
+        local_end = local_start + len(normalize_marketing_text(raw_text[raw_start:raw_end]).text)
         for pattern in rule.required_context_patterns:
             for value in re.finditer(pattern, text):
-                if value.end() < start:
-                    distance = start - value.end()
-                    between = text[value.end() : start]
-                elif value.start() > end:
-                    distance = value.start() - end
-                    between = text[end : value.start()]
+                if value.end() < local_start:
+                    distance = local_start - value.end()
+                elif value.start() > local_end:
+                    distance = value.start() - local_end
                 else:
                     distance = 0
-                    between = ""
-                if distance <= rule.context_max_distance and not any(
-                    boundary in between for boundary in rule.adversative_boundaries
-                ):
+                if distance <= rule.context_max_distance:
                     return True
         return False
 
@@ -216,6 +249,52 @@ def _local_clause_span(
             right = boundary.start()
             break
     return left, right
+
+
+def _required_context_clause_span(
+    text: str,
+    start: int,
+    end: int,
+    rule: MarketingRiskRule,
+) -> tuple[int, int]:
+    strong_boundary = (
+        r"[。！？；]" if rule.required_context_allow_format_newline else r"(?:\r\n|[。！？；\r\n])"
+    )
+    markers = [
+        strong_boundary,
+        *map(re.escape, sorted(rule.adversative_boundaries, key=len, reverse=True)),
+    ]
+    boundaries = list(re.finditer("|".join(markers), text))
+    left = 0
+    right = len(text)
+    for boundary in boundaries:
+        if boundary.end() <= start:
+            left = boundary.end()
+        elif boundary.start() >= end:
+            right = boundary.start()
+            break
+    return left, right
+
+
+def _claim_is_negated(
+    clause: str,
+    match_start: int,
+    match_end: int,
+    rule: MarketingRiskRule,
+) -> bool:
+    if rule.claim_negation_scope_version != NEGATION_SCOPE_VERSION:
+        raise ScreeningError("screening_ruleset_invalid")
+    for pattern in NEGATION_PREFIX_PATTERNS:
+        for value in re.finditer(pattern, clause):
+            if value.end() <= match_start and match_start - value.end() <= 12:
+                return True
+    for pattern in NEGATION_SUFFIX_PATTERNS:
+        for value in re.finditer(pattern, clause):
+            if value.start() >= match_end and value.start() - match_end <= 4:
+                return True
+            if value.start() <= match_start and value.end() >= match_end:
+                return True
+    return False
 
 
 def _pattern_is_local(
