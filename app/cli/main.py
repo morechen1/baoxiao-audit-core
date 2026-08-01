@@ -37,6 +37,11 @@ from app.services.collection import (
     SafeUrlPolicy,
     WebPageCollector,
 )
+from app.services.explanation import (
+    ControlledExplanationService,
+    load_prompt_registry,
+    prompt_sha256,
+)
 from app.services.knowledge import (
     KnowledgeIndexService,
     SearchRequest,
@@ -66,8 +71,79 @@ from app.services.validation import ValidationService
 app = typer.Typer(help="保销智审后端数据与审核工作流 CLI", no_args_is_help=True)
 knowledge_app = typer.Typer(help="可验证的可信词法检索管理", no_args_is_help=True)
 screening_app = typer.Typer(help="确定性营销合规风险筛查", no_args_is_help=True)
+explanation_app = typer.Typer(help="受控RAG解释编排与引用验证", no_args_is_help=True)
 app.add_typer(knowledge_app, name="knowledge")
 app.add_typer(screening_app, name="screening")
+app.add_typer(explanation_app, name="explanation")
+
+
+@explanation_app.command("create")
+def explanation_create(
+    screening_run_id: int = typer.Option(..., "--screening-run-id", min=1),
+    audience: str = typer.Option(...),
+    provider: str = typer.Option("deterministic_fixture"),
+    retry_of_id: int | None = typer.Option(None, "--retry-of-id", min=1),
+) -> None:
+    with SessionLocal() as session:
+        run = ControlledExplanationService().create(
+            session,
+            screening_run_id=screening_run_id,
+            audience=audience,
+            provider_name=provider,
+            retry_of_id=retry_of_id,
+        )
+    typer.echo(
+        json.dumps(
+            {
+                "explanation_run_id": run.id,
+                "status": run.status,
+                "validation_status": run.validation_status,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+
+
+@explanation_app.command("show")
+def explanation_show(run_id: int = typer.Argument(..., min=1)) -> None:
+    with SessionLocal() as session:
+        payload = ControlledExplanationService().show(session, run_id)
+    typer.echo(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))
+
+
+@explanation_app.command("artifact")
+def explanation_artifact(run_id: int = typer.Argument(..., min=1)) -> None:
+    with SessionLocal() as session:
+        payload = ControlledExplanationService().artifact(session, run_id)
+    typer.echo(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))
+
+
+@explanation_app.command("citations")
+def explanation_citations(run_id: int = typer.Argument(..., min=1)) -> None:
+    with SessionLocal() as session:
+        payload = ControlledExplanationService().citations(session, run_id)
+    typer.echo(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))
+
+
+@explanation_app.command("prompts")
+def explanation_prompts() -> None:
+    registry = load_prompt_registry()
+    typer.echo(
+        json.dumps(
+            [
+                {
+                    "prompt_version": prompt.prompt_version,
+                    "audience": prompt.audience,
+                    "output_schema_version": prompt.output_schema_version,
+                    "prompt_sha256": prompt_sha256(prompt),
+                }
+                for prompt in registry.prompts
+            ],
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
 
 
 @screening_app.command("run")

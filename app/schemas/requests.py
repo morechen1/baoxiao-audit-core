@@ -48,3 +48,9 @@ class ScreeningCreateRequest(BaseModel):
     raw_text: str
     source_label: str = "user_submission"
     external_reference: str | None = None
+
+
+class ExplanationCreateRequest(BaseModel):
+    audience: Literal["institution", "consumer"]
+    provider: Literal["deterministic_fixture", "external"]
+    retry_of_id: int | None = Field(default=None, gt=0)

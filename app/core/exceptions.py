@@ -48,3 +48,7 @@ class FieldEvidenceError(BaoxiaoError):
 
 class ScreeningError(BaoxiaoError):
     """Raised when deterministic compliance screening fails closed."""
+
+
+class ExplanationError(BaoxiaoError):
+    """Raised when controlled explanation orchestration fails closed."""

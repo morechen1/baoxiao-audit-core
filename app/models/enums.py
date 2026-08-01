@@ -85,6 +85,28 @@ class FindingSupportType(StrEnum):
     PRODUCT_TERM_CONTEXT = "product_term_context"
 
 
+class ExplanationAudience(StrEnum):
+    INSTITUTION = "institution"
+    CONSUMER = "consumer"
+
+
+class ExplanationRunStatus(StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    REJECTED = "rejected"
+    FAILED = "failed"
+
+
+class ExplanationValidationStatus(StrEnum):
+    PENDING = "pending"
+    PASSED = "passed"
+    REJECTED_INVALID_SCHEMA = "rejected_invalid_schema"
+    REJECTED_INVALID_CITATION = "rejected_invalid_citation"
+    REJECTED_UNSUPPORTED_CLAIM = "rejected_unsupported_claim"
+    REJECTED_POLICY_VIOLATION = "rejected_policy_violation"
+
+
 class SampleCategory(StrEnum):
     COMPLIANT = "compliant"
     BOUNDARY = "boundary"
@@ -125,3 +147,6 @@ MARKETING_MATERIAL_TYPE_VALUES = tuple(value.value for value in MarketingMateria
 SCREENING_STATUS_VALUES = tuple(value.value for value in ScreeningStatus)
 FINDING_EVIDENCE_STATUS_VALUES = tuple(value.value for value in FindingEvidenceStatus)
 FINDING_SUPPORT_TYPE_VALUES = tuple(value.value for value in FindingSupportType)
+EXPLANATION_AUDIENCE_VALUES = tuple(value.value for value in ExplanationAudience)
+EXPLANATION_RUN_STATUS_VALUES = tuple(value.value for value in ExplanationRunStatus)
+EXPLANATION_VALIDATION_STATUS_VALUES = tuple(value.value for value in ExplanationValidationStatus)

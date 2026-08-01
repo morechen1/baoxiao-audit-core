@@ -23,6 +23,10 @@
 | GET | `/api/v1/screenings/{run_id}` | 读取筛查结果 |
 | GET | `/api/v1/screenings/{run_id}/institution-report` | 读取机构端证据报告 |
 | GET | `/api/v1/screenings/{run_id}/consumer-notice` | 读取消费者端固定风险提示 |
+| POST | `/api/v1/screenings/{run_id}/explanations` | 为完成的筛查创建受控解释 |
+| GET | `/api/v1/explanations/{run_id}` | 读取解释运行状态和审计哈希 |
+| GET | `/api/v1/explanations/{run_id}/artifact` | 读取已验证的结构化解释 Artifact |
+| GET | `/api/v1/explanations/{run_id}/citations` | 读取已验证的连续证据摘录 |
 
 未捕获异常返回 `{"error":{"code","message","details"}}`。FastAPI 自身的输入错误返回
 标准 422 结构；下一阶段可统一转换为同一错误信封。
@@ -67,3 +71,15 @@
 输出只包含风险信号、待核验问题和可信证据快照，不构成违法认定。两个报告 GET 端点
 只读取已有 finding，不创建新记录。完整边界见
 [确定性营销合规风险筛查](deterministic-compliance-screening.md)。
+
+## 受控解释
+
+解释创建只接受 `audience=institution|consumer` 以及
+`provider=deterministic_fixture|external`。当前 external Provider 默认禁用并返回
+`explanation_provider_not_configured`。服务只对 `completed` ScreeningRun 工作，并在调用
+Provider 前重新验证 finding 数量、可信索引 payload、已选块 identity/content hash、来源
+URL 与 locator。rejected/failed run 的 Artifact 端点返回稳定的
+`explanation_artifact_not_available`，不会返回未验证自由文本或内部异常。
+
+完整上下文、引用、无依据陈述、历史快照和 illustrative 产品条款边界见
+[受控 RAG 解释编排与引用验证层](controlled-rag-explanation-layer.md)。

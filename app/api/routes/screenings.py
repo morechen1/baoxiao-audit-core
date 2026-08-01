@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_db
-from app.schemas.requests import ScreeningCreateRequest
+from app.schemas.requests import ExplanationCreateRequest, ScreeningCreateRequest
+from app.services.explanation import ControlledExplanationService
 from app.services.screening import DeterministicScreeningService
 
 router = APIRouter(prefix="/api/v1/screenings", tags=["screenings"])
@@ -57,3 +58,24 @@ def get_consumer_notice(
     session: Session = Depends(get_db),
 ) -> dict[str, object]:
     return DeterministicScreeningService().consumer_notice(session, run_id)
+
+
+@router.post("/{run_id}/explanations")
+def create_explanation(
+    run_id: int,
+    request: ExplanationCreateRequest,
+    session: Session = Depends(get_db),
+) -> dict[str, object]:
+    run = ControlledExplanationService().create(
+        session,
+        screening_run_id=run_id,
+        audience=request.audience,
+        provider_name=request.provider,
+        retry_of_id=request.retry_of_id,
+    )
+    return {
+        "explanation_run_id": run.id,
+        "status": run.status,
+        "validation_status": run.validation_status,
+        "artifact_endpoint": f"/api/v1/explanations/{run.id}/artifact",
+    }
