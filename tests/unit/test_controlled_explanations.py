@@ -534,7 +534,9 @@ def test_evidence_insufficient_builds_and_persists_zero_citation_artifact(
     assert session.query(ExplanationArtifact).one().citations == []
 
 
-def _budget_context(finding_count: int, evidence_per_finding: int) -> BuiltContext:
+def _budget_context(
+    finding_count: int, evidence_per_finding: int, *, illustrative: bool = False
+) -> BuiltContext:
     findings: list[ControlledFinding] = []
     bindings: dict[str, EvidenceBinding] = {}
     ordinal = 1
@@ -543,11 +545,12 @@ def _budget_context(finding_count: int, evidence_per_finding: int) -> BuiltConte
         for evidence_index in range(evidence_per_finding):
             key = f"E{ordinal:03d}"
             quote = f"规范证据{finding_index}-{evidence_index}。" + "严" * 580
+            evidence_field = "exclusions" if illustrative else "article_text"
             segment = AllowedEvidenceSegment(
-                field_name="article_text",
+                field_name=evidence_field,
                 quote=quote,
                 evidence_snapshot={
-                    "field_name": "article_text",
+                    "field_name": evidence_field,
                     "mode": "verbatim",
                     "start_offset": finding_index * 1000 + evidence_index * 600,
                     "end_offset": finding_index * 1000 + evidence_index * 600 + len(quote),
@@ -555,19 +558,21 @@ def _budget_context(finding_count: int, evidence_per_finding: int) -> BuiltConte
             )
             evidence = ControlledEvidence(
                 citation_key=key,
-                support_type="normative_basis",
+                support_type="product_term_context" if illustrative else "normative_basis",
                 source_title="监管规则" + "甲" * 30,
                 source_url=f"https://example.test/rule/{finding_index}",
                 pilot_id=f"REG-{finding_index:03d}",
-                record_type="regulation",
-                chunk_kind="article_text",
+                record_type="product_document" if illustrative else "regulation",
+                chunk_kind="exclusions" if illustrative else "article_text",
                 quote=quote,
                 source_locator={"article_number": f"第{finding_index + 1}条", "path": "层" * 30},
                 evidence_references=[segment.evidence_snapshot],
-                context_scope="not_applicable",
+                context_scope=(
+                    "illustrative_not_material_specific" if illustrative else "not_applicable"
+                ),
                 chunk_identity_sha256=f"{ordinal:064x}",
                 chunk_content_sha256=f"{ordinal + 1000:064x}",
-                evidence_field_name="article_text",
+                evidence_field_name=evidence_field,
             )
             evidence_rows.append(evidence)
             bindings[key] = EvidenceBinding(
@@ -621,12 +626,15 @@ def _budget_context(finding_count: int, evidence_per_finding: int) -> BuiltConte
     )
 
 
-@pytest.mark.parametrize("finding_count,evidence_count", [(20, 4)])
+@pytest.mark.parametrize(
+    "finding_count,evidence_count,illustrative",
+    [(20, 4, False), (20, 4, True)],
+)
 def test_context_budget_preserves_minimum_evidence_and_valid_output(
-    finding_count: int, evidence_count: int
+    finding_count: int, evidence_count: int, illustrative: bool
 ) -> None:
-    first = _budget_context(finding_count, evidence_count)
-    second = _budget_context(finding_count, evidence_count)
+    first = _budget_context(finding_count, evidence_count, illustrative=illustrative)
+    second = _budget_context(finding_count, evidence_count, illustrative=illustrative)
     assert first.payload_sha256 == second.payload_sha256
     assert all(len(finding.evidence) >= 1 for finding in first.payload.findings)
     visible_keys = {
