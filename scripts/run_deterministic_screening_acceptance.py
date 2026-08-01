@@ -16,7 +16,10 @@ from app.models import (
     SourceDocument,
 )
 from app.services.knowledge import KnowledgeIndexService
-from app.services.screening import DeterministicScreeningService, load_ruleset
+from app.services.screening import DeterministicScreeningService, MarketingRuleSet, load_ruleset
+from app.services.screening.evidence import SUPPORT_EVALUATION_VERSION
+from app.services.screening.normalization import normalize_marketing_text
+from app.services.screening.reports import ILLUSTRATIVE_PRODUCT_CONTEXT_NOTICE
 
 NON_PENALTY_ARCHIVE_SHA256 = "09b7c1c1fa35aeda8eabe87405f897d9f838681135ef98c1d4e979fc6ad51e48"
 PENALTY_ARCHIVE_SHA256 = "4b9dd8e5938d1114d66478e90ef25e9beaff6ab00e60245b926a6234ca76389f"
@@ -55,16 +58,28 @@ def main() -> None:
         deterministic = True
         institution_valid = True
         consumer_valid = True
+        evidence_links_total = 0
+        evidence_links_passed = 0
+        evidence_links_rejected = 0
+        status_matches_expected = 0
+        expected_status_findings = 0
+        enforcement_semantically_matched = 0
+        unrelated_enforcement_selected = 0
+        product_context_material_matched = 0
+        product_context_illustrative = 0
+        first_run_ids: dict[str, int] = {}
         for sample in samples:
+            text = _sample_text(sample)
             kwargs = {
                 "title": f"构造评估 {sample['sample_id']}",
                 "material_type": "sales_script",
-                "raw_text": sample["text"],
+                "raw_text": text,
                 "source_label": "constructed_screening_eval_v1",
                 "external_reference": sample["sample_id"],
                 "is_constructed_evaluation": True,
             }
             first = service.run(session, **kwargs)
+            first_run_ids[sample["sample_id"]] = first.id
             first_detail = service.show(session, first.id)
             second = service.run(session, **kwargs)
             second_detail = service.show(session, second.id)
@@ -97,6 +112,67 @@ def main() -> None:
             supported += statuses.count("supported")
             partial += statuses.count("partially_supported")
             insufficient += statuses.count("evidence_insufficient")
+            expected_status = sample.get("expected_evidence_status")
+            if expected_status is not None:
+                expected_status_findings += len(first_rows)
+                status_matches_expected += sum(status == expected_status for status in statuses)
+            actual_pilot_ids = {
+                str(link["source"]["pilot_id"])
+                for row in first_rows
+                for link in row["evidence"]
+                if link["source"].get("pilot_id")
+            }
+            expected_pilot_ids = set(sample.get("expected_support_pilot_ids", []))
+            forbidden_pilot_ids = set(sample.get("forbidden_support_pilot_ids", []))
+            pilot_expectations_match = expected_pilot_ids.issubset(
+                actual_pilot_ids
+            ) and not forbidden_pilot_ids.intersection(actual_pilot_ids)
+            unrelated_enforcement_selected += sum(
+                link["support_type"] == "enforcement_example"
+                and str(link["source"].get("pilot_id")) in forbidden_pilot_ids
+                for row in first_rows
+                for link in row["evidence"]
+            )
+            required_support_types_match = (
+                all(
+                    tuple(row["rule_snapshot"]["evidence_requirements"])
+                    == tuple(sample.get("required_support_types", ()))
+                    for row in first_rows
+                )
+                if first_rows
+                else True
+            )
+            actual_product_scopes = [
+                link["context_scope"]
+                for row in first_rows
+                for link in row["evidence"]
+                if link["support_type"] == "product_term_context"
+            ]
+            expected_product_scope = sample.get("expected_product_context_scope")
+            product_scope_match = (
+                not actual_product_scopes
+                if expected_product_scope is None
+                else bool(actual_product_scopes)
+                and set(actual_product_scopes) == {expected_product_scope}
+            )
+            first_evidence = [link for row in first_rows for link in row["evidence"]]
+            evidence_links_total += len(first_evidence)
+            evidence_links_passed += sum(
+                bool(link["support_evaluation_passed"]) for link in first_evidence
+            )
+            evidence_links_rejected += int(
+                first.evidence_evaluation_summary_json["candidates_rejected"]
+            )
+            enforcement_semantically_matched += sum(
+                link["support_type"] == "enforcement_example" and link["support_evaluation_passed"]
+                for link in first_evidence
+            )
+            product_context_material_matched += actual_product_scopes.count(
+                "material_product_matched"
+            )
+            product_context_illustrative += actual_product_scopes.count(
+                "illustrative_not_material_specific"
+            )
             institution = service.institution_report(session, first.id)
             consumer = service.consumer_notice(session, first.id)
             institution_valid &= (
@@ -106,10 +182,17 @@ def main() -> None:
             consumer_valid &= "不构成违法认定" in consumer["disclaimer"] and all(
                 link["source_url"] for link in consumer["evidence_links"]
             )
+            if expected_product_scope == "illustrative_not_material_specific":
+                institution_valid &= (
+                    institution["product_context_notice"] == ILLUSTRATIVE_PRODUCT_CONTEXT_NOTICE
+                )
+                consumer_valid &= (
+                    consumer["product_context_notice"] == ILLUSTRATIVE_PRODUCT_CONTEXT_NOTICE
+                )
             sample_rows.append(
                 {
                     "sample_id": sample["sample_id"],
-                    "text": sample["text"],
+                    "text": text,
                     "expected_rule_ids": sample["expected_rule_ids"],
                     "actual_rule_ids": first_rules,
                     "exact_rule_match": rules_match,
@@ -118,8 +201,25 @@ def main() -> None:
                     "exact_span_match": spans_match,
                     "findings": first_rows,
                     "deterministic_rerun": rerun_match,
+                    "evidence_statuses": statuses,
+                    "expected_evidence_status": expected_status,
+                    "evidence_status_match": (
+                        all(status == expected_status for status in statuses)
+                        if expected_status is not None
+                        else True
+                    ),
+                    "actual_support_pilot_ids": sorted(actual_pilot_ids),
+                    "support_pilot_expectations_match": pilot_expectations_match,
+                    "required_support_types_match": required_support_types_match,
+                    "product_context_scopes": actual_product_scopes,
+                    "product_context_scope_match": product_scope_match,
                 }
             )
+        historical_snapshot_pass = _historical_snapshot_check(
+            session,
+            ruleset,
+            first_run_ids["S044"],
+        )
         after = _trusted_counts(session)
         regulatory_case_evidence = session.scalar(
             select(func.count(FindingEvidenceLink.id))
@@ -135,7 +235,7 @@ def main() -> None:
             )
         )
         report = {
-            "schema_version": "deterministic-screening-acceptance-v1",
+            "schema_version": "deterministic-screening-acceptance-v2",
             "archive_inputs": {
                 "non_penalty_post_review_v2_1_sha256": NON_PENALTY_ARCHIVE_SHA256,
                 "penalty_post_review_v3_3_sha256": PENALTY_ARCHIVE_SHA256,
@@ -167,6 +267,32 @@ def main() -> None:
             "evidence_supported_count": supported,
             "evidence_partially_supported_count": partial,
             "evidence_insufficient_count": insufficient,
+            "evidence_semantic_evaluation_version": SUPPORT_EVALUATION_VERSION,
+            "evidence_links_total": evidence_links_total,
+            "evidence_links_passed": evidence_links_passed,
+            "evidence_links_rejected_as_irrelevant": evidence_links_rejected,
+            "supported_count": supported,
+            "partially_supported_count": partial,
+            "status_matches_expected_count": status_matches_expected,
+            "status_expected_finding_count": expected_status_findings,
+            "enforcement_examples_semantically_matched": enforcement_semantically_matched,
+            "unrelated_enforcement_examples_selected": unrelated_enforcement_selected,
+            "product_context_material_matched": product_context_material_matched,
+            "product_context_illustrative": product_context_illustrative,
+            "historical_report_snapshot_pass": historical_snapshot_pass,
+            "local_context_adversarial_pass": all(
+                row["exact_rule_match"] and row["exact_span_match"]
+                for row in sample_rows
+                if "S031" <= row["sample_id"] <= "S038"
+            ),
+            "long_segment_boundary_pass": all(
+                row["exact_rule_match"] and row["exact_span_match"] and row["deterministic_rerun"]
+                for row in sample_rows
+                if "S039" <= row["sample_id"] <= "S041"
+            ),
+            "nfkc_combining_cluster_pass": (
+                normalize_marketing_text("e\u0301保证收益").text == "é保证收益"
+            ),
             "institution_report_validation": institution_valid,
             "consumer_notice_validation": consumer_valid,
             "regulatory_case_evidence_count": regulatory_case_evidence,
@@ -195,6 +321,15 @@ def main() -> None:
         constructed_in_source != 0,
         before != after,
         bool(report["sensitive_data_scan"]["matches"]),
+        status_matches_expected != expected_status_findings,
+        unrelated_enforcement_selected != 0,
+        not all(row["support_pilot_expectations_match"] for row in sample_rows),
+        not all(row["required_support_types_match"] for row in sample_rows),
+        not all(row["product_context_scope_match"] for row in sample_rows),
+        not historical_snapshot_pass,
+        not report["local_context_adversarial_pass"],
+        not report["long_segment_boundary_pass"],
+        not report["nfkc_combining_cluster_pass"],
     ]
     if any(failures):
         raise SystemExit("deterministic_screening_acceptance_failed")
@@ -204,6 +339,43 @@ def main() -> None:
         encoding="utf-8",
     )
     args.markdown_report.write_text(_markdown(report), encoding="utf-8")
+
+
+def _sample_text(sample: dict[str, Any]) -> str:
+    if "text" in sample:
+        return str(sample["text"])
+    builder = sample["text_builder"]
+    return str(builder["prefix"]) * int(builder["repeat"]) + str(builder["suffix"])
+
+
+def _historical_snapshot_check(
+    session: Session,
+    ruleset: MarketingRuleSet,
+    run_id: int,
+) -> bool:
+    baseline_service = DeterministicScreeningService(ruleset)
+    baseline_institution = baseline_service.institution_report(session, run_id)
+    baseline_consumer = baseline_service.consumer_notice(session, run_id)
+    changed_payload = ruleset.model_dump(mode="json")
+    target_rule_id = baseline_institution["findings"][0]["rule_id"]
+    for rule in changed_payload["rules"]:
+        if rule["rule_id"] == target_rule_id:
+            rule["institution_remediation_template"] = "验收时修改但不得影响历史"
+            rule["consumer_notice_template"] = "验收时修改但不得影响历史"
+    changed = DeterministicScreeningService(MarketingRuleSet.model_validate(changed_payload))
+    changed_pass = (
+        changed.institution_report(session, run_id) == baseline_institution
+        and changed.consumer_notice(session, run_id) == baseline_consumer
+    )
+    deleted_payload = ruleset.model_dump(mode="json")
+    deleted_payload["rules"] = [
+        rule for rule in deleted_payload["rules"] if rule["rule_id"] != target_rule_id
+    ]
+    deleted = DeterministicScreeningService(MarketingRuleSet.model_validate(deleted_payload))
+    return changed_pass and (
+        deleted.institution_report(session, run_id) == baseline_institution
+        and deleted.consumer_notice(session, run_id) == baseline_consumer
+    )
 
 
 def _trusted_counts(session: Session) -> dict[str, object]:
@@ -254,6 +426,21 @@ def _markdown(report: dict[str, Any]) -> str:
         f"- 原始 span 精确匹配：{span_count}/{sample_count}",
         f"- 预期/实际 findings：{expected_count}/{actual_count}",
         f"- 证据 supported/partial/insufficient：{evidence_counts}",
+        f"- 证据语义评估：`{report['evidence_semantic_evaluation_version']}`",
+        f"- 证据链接总数/通过：{report['evidence_links_total']}/{report['evidence_links_passed']}",
+        f"- 被拒绝的不相关候选：{report['evidence_links_rejected_as_irrelevant']}",
+        "- 证据状态符合预期："
+        f"{report['status_matches_expected_count']}/"
+        f"{report['status_expected_finding_count']}",
+        f"- 语义匹配处罚案例：{report['enforcement_examples_semantically_matched']}",
+        f"- 误选无关处罚案例：{report['unrelated_enforcement_examples_selected']}",
+        "- 产品上下文 material matched/illustrative："
+        f"{report['product_context_material_matched']}/"
+        f"{report['product_context_illustrative']}",
+        f"- 历史报告快照：{'PASS' if report['historical_report_snapshot_pass'] else 'FAIL'}",
+        f"- 局部上下文对抗：{'PASS' if report['local_context_adversarial_pass'] else 'FAIL'}",
+        f"- 超长分段边界：{'PASS' if report['long_segment_boundary_pass'] else 'FAIL'}",
+        f"- 组合字符 NFKC：{'PASS' if report['nfkc_combining_cluster_pass'] else 'FAIL'}",
         f"- 可信知识块：{verification['active_chunks']} {chunk_counts}",
         f"- RegulatoryCase 证据：{report['regulatory_case_evidence_count']}",
         f"- 机构报告：{'PASS' if report['institution_report_validation'] else 'FAIL'}",

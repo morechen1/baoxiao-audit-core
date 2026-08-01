@@ -8,13 +8,17 @@
 
 ## 版本化处理链
 
-`marketing_text_normalization_v1` 对每个字符执行 Unicode NFKC，将 Unicode 空白序列折叠
-为一个空格，并只为匹配而小写化 ASCII 拉丁字母。原始文本不变；每个规范化字符都保存
+`marketing_text_normalization_v2` 对基础字符及其后续 combining marks 组成的字符簇执行
+Unicode NFKC，将 Unicode 空白序列折叠为一个空格，并只为匹配而小写化 ASCII 拉丁字母。
+原始文本不变；字符簇规范化后产生的每个字符都映射到完整原始字符簇区间，因此组合序列
+`e + combining acute` 会成为单字符 `é`，其后的中文 offset 仍然精确。每个规范化字符都保存
 到原始 Python 字符串索引区间的映射，因此 finding 的 `matched_text` 永远等于
 `raw_text[raw_start_offset:raw_end_offset]`。
 
-`marketing_segmenter_v1` 优先使用空行和中文句号、问号、感叹号、分号分段，将短标题与
-后续正文合并，并以固定上限切分超长段落。`segment_sha256` 只使用输入哈希、ordinal、原始
+`marketing_segmenter_v2` 优先使用空行和中文句号、问号、感叹号、分号分段，将短标题与
+后续正文合并；超过 1200 字符时使用固定 96 字符重叠区切分，避免切断风险短语、数字、金额
+或文号。重叠区的重复命中按规则、原始 offset 和规范化命中去重，并绑定最小 ordinal segment。
+`segment_sha256` 只使用输入哈希、ordinal、原始
 区间、文本和分段器版本，不使用数据库主键或随机值。
 
 ## 规则注册表
@@ -27,8 +31,10 @@
 合同外利益、产品性质混淆、绝对化宣传、不当比较排名、退保/现金价值误述、等待期/犹豫期
 误述、责任免除弱化。命中只代表风险信号。
 
-规则按 `rule_id` 固定顺序执行；同一规则的重叠命中确定性合并，局部 exception pattern
-只在命中附近生效。`finding_sha256` 由材料、规则集、segment 身份、规则和原始区间构成，
+规则按 `rule_id` 固定顺序执行；同一规则的重叠命中确定性合并。required context 和 exception
+以强/弱标点及转折、对象切换词构造的确定性局部子句判断，不会用同一长 segment 中无关的
+“保险”满足上下文，也不会用远端其他产品的例外取消当前命中。`finding_sha256` 由材料、
+规则集、规则、原始区间和规范化命中构成，不依赖 segment ordinal 或 segment SHA，
 不包含数据库 ID、时间戳或检索结果。
 
 ## 可信证据组合
@@ -47,16 +53,27 @@ canonical mismatch、伪造/孤儿 chunk、资格漂移、Penalty 身份错误�
 - RegulatoryCase 永不作为正式证据；
 - 每个 finding 最多 5 条，同一 SourceDocument 最多 2 条，同一 chunk 不重复；
 - locator 或 evidence references 为空的结果不会进入证据包；
-- 快照保存 chunk 两类哈希、来源 URL、信任状态、locator 和 evidence references，不复制原件全文。
+- `deterministic_evidence_support_v1` 在召回后按每条规则声明的 chunk kind、字段证据和语义模式
+  再次准入；标题、机关、文号、金额或正确 record type 本身不能证明支持；
+- `normative_basis` 只以 `article_text` 字段证据判定，`basic_information` 只能展示来源；
+- `enforcement_example` 重点核验 `illegal_facts` 与 `original_sales_wording`，无关处罚会被排除；
+- 快照保存 chunk 两类哈希、来源 URL、信任状态、locator、字段证据、语义匹配模式、匹配字段、
+  判定版本、原因及上下文范围，不复制原件全文。
 
 证据不足不会删除 finding，也不会被解释为“没有风险”，只会标为
 `partially_supported` 或 `evidence_insufficient`。
+
+未绑定输入材料具体产品时，ProductDocument 证据固定标记为
+`illustrative_not_material_specific`。机构端和消费者端均明确说明：该条款只展示同类保险合同
+可能存在的等待期、现金价值、退保损失或责任免除结构，不代表输入材料对应产品的合同事实。
 
 ## 报告
 
 机构端 `institution_compliance_report_v1` 提供计数、精确原文、上下文、固定解释、人工复核
 问题、固定整改模板和证据快照。消费者端 `consumer_protection_notice_v1` 仅使用固定通俗提示，
-保留来源链接，不推荐购买或退保。两类报告均为纯读取，不创建记录或改变 finding。
+保留来源链接，不推荐购买或退保。run 保存完整规范化 ruleset 快照，finding 保存实际使用的
+解释、复核问题、整改模板、消费者提示、严重度及信号强度；历史报告只读取运行时快照，当前
+规则文件被修改或删除后也不会改变旧报告。两类报告均为纯读取，不创建记录或改变 finding。
 
 API：
 
@@ -83,10 +100,11 @@ API 和 CLI 共用 `DeterministicScreeningService`。
 ## 事务、幂等与样本隔离
 
 `input_sha256` 给材料明确身份，相同输入复用材料和 segment，但允许绑定不同规则集/可信索引
-快照再次筛查。单次 run 在一个数据库事务内写入 finding 和全部证据；任一门禁或证据链接失败
-会整体 rollback。报告读取不写数据库。
+快照再次筛查。可信索引或输入预检失败时不创建 run；run 创建后的执行使用 savepoint，失败时
+回滚全部 finding 与 evidence，并提交最小 `failed` run、稳定公开错误码和完成时间，不保留
+内部异常或半成品。报告读取不写数据库。
 
-`tests/fixtures/constructed_screening_eval_v1` 的 30 条样本全部标记 `constructed=true`，只进入
+`tests/fixtures/constructed_screening_eval_v1` 的 44 条样本全部标记 `constructed=true`，只进入
 测试进程和 `MarketingMaterial`（正式离线验收时）；它们永不进入 SourceDocument、
 KnowledgeChunk 或可信检索结果。
 
