@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.api.routes import health_router, sources_router, workflow_router
+from app.api.routes import health_router, knowledge_router, sources_router, workflow_router
 from app.core.exceptions import BaoxiaoError
 from app.core.logging import configure_logging, logger
 
@@ -15,6 +15,7 @@ app = FastAPI(
 app.include_router(health_router)
 app.include_router(sources_router)
 app.include_router(workflow_router)
+app.include_router(knowledge_router)
 
 
 @app.exception_handler(BaoxiaoError)

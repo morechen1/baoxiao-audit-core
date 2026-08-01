@@ -1,4 +1,6 @@
 import json
+from dataclasses import asdict
+from datetime import date
 from pathlib import Path
 
 import typer
@@ -35,7 +37,11 @@ from app.services.collection import (
     SafeUrlPolicy,
     WebPageCollector,
 )
-from app.services.knowledge import KnowledgeIndexService
+from app.services.knowledge import (
+    KnowledgeIndexService,
+    SearchRequest,
+    TrustedKnowledgeSearchService,
+)
 from app.services.parsing import ParsingService
 from app.services.penalty_entries import (
     build_penalty_identity_material,
@@ -57,6 +63,87 @@ from app.services.structured_revisions import StructuredDraftRevisionService
 from app.services.validation import ValidationService
 
 app = typer.Typer(help="保销智审后端数据与审核工作流 CLI", no_args_is_help=True)
+knowledge_app = typer.Typer(help="可验证的可信词法检索管理", no_args_is_help=True)
+app.add_typer(knowledge_app, name="knowledge")
+
+
+@knowledge_app.command("rebuild")
+def knowledge_rebuild(
+    document_id: int | None = typer.Option(None, min=1, help="仅重建指定文档"),
+) -> None:
+    """Materialize trusted structured records into immutable lexical chunks."""
+    with SessionLocal() as session:
+        service = KnowledgeIndexService()
+        if document_id is not None:
+            summary = service.rebuild_document_chunks(session, document_id)
+            payload = asdict(summary)
+        else:
+            all_summary = service.rebuild_all_trusted_chunks(session)
+            payload = asdict(all_summary)
+    typer.echo(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+
+
+@knowledge_app.command("verify")
+def knowledge_verify() -> None:
+    """Verify active chunks, trust state, locators and source identities."""
+    with SessionLocal() as session:
+        report = KnowledgeIndexService().verify_chunks(session)
+    typer.echo(json.dumps(asdict(report), ensure_ascii=False, sort_keys=True))
+    if not report.valid:
+        raise typer.Exit(code=1)
+
+
+@knowledge_app.command("search")
+def knowledge_search(
+    query: str = typer.Argument("", help="查询文本；留空时必须使用有界过滤"),
+    record_type: list[str] | None = typer.Option(None, "--record-type"),
+    pilot_id: list[str] | None = typer.Option(None, "--pilot-id"),
+    authority: str | None = typer.Option(None),
+    date_from: str | None = typer.Option(None, help="YYYY-MM-DD"),
+    date_to: str | None = typer.Option(None, help="YYYY-MM-DD"),
+    evidence_quality: list[str] | None = typer.Option(None, "--evidence-quality"),
+    limit: int = typer.Option(20, min=1, max=100),
+    offset: int = typer.Option(0, min=0, max=10_000),
+) -> None:
+    """Search active trusted chunks using the shared deterministic search service."""
+    request = SearchRequest(
+        query=query,
+        record_types=tuple(record_type or ()),
+        pilot_ids=tuple(pilot_id or ()),
+        authority=authority,
+        date_from=_parse_cli_date(date_from),
+        date_to=_parse_cli_date(date_to),
+        evidence_quality=tuple(evidence_quality or ()),
+        limit=limit,
+        offset=offset,
+    )
+    with SessionLocal() as session:
+        results = TrustedKnowledgeSearchService().search(session, request)
+    typer.echo(
+        json.dumps(
+            [result.as_dict() for result in results],
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        )
+    )
+
+
+@knowledge_app.command("stats")
+def knowledge_stats() -> None:
+    """Show trusted knowledge materialization statistics."""
+    with SessionLocal() as session:
+        report = KnowledgeIndexService().verify_chunks(session)
+    typer.echo(json.dumps(asdict(report), ensure_ascii=False, sort_keys=True))
+
+
+def _parse_cli_date(value: str | None) -> date | None:
+    if value is None:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise typer.BadParameter("date must use YYYY-MM-DD") from exc
 
 
 @app.command("init-db")
