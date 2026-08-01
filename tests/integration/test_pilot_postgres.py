@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 import pytest
 import yaml
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
@@ -57,6 +57,8 @@ def postgres_sessions():
     if not database_url.startswith("postgresql") or "test" not in database_name:
         pytest.skip("dedicated PostgreSQL test database is required")
     engine = create_engine(database_url, pool_pre_ping=True)
+    with engine.begin() as connection:
+        connection.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
