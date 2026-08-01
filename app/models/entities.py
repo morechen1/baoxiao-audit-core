@@ -232,6 +232,12 @@ class KnowledgeChunk(Base):
             postgresql_using="gin",
             postgresql_ops={"normalized_text": "gin_trgm_ops"},
         ).ddl_if(dialect="postgresql"),
+        Index(
+            "ix_knowledge_chunks_authority_filter_text_trgm",
+            "authority_filter_text",
+            postgresql_using="gin",
+            postgresql_ops={"authority_filter_text": "gin_trgm_ops"},
+        ).ddl_if(dialect="postgresql"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -239,7 +245,7 @@ class KnowledgeChunk(Base):
         ForeignKey("source_documents.id", ondelete="CASCADE"), index=True
     )
     record_type: Mapped[str] = mapped_column(String(50), index=True)
-    structured_record_id: Mapped[int] = mapped_column(Integer, index=True)
+    structured_record_id: Mapped[int | None] = mapped_column(Integer, index=True)
     pilot_id: Mapped[str | None] = mapped_column(String(64), index=True)
     portable_record_key: Mapped[str | None] = mapped_column(String(64), index=True)
     chunk_kind: Mapped[str] = mapped_column(String(80))
@@ -249,6 +255,7 @@ class KnowledgeChunk(Base):
     normalized_text: Mapped[str] = mapped_column(Text)
     lexical_tokens: Mapped[str] = mapped_column(Text)
     authority: Mapped[str | None] = mapped_column(String(500), index=True)
+    authority_filter_text: Mapped[str | None] = mapped_column(String(500))
     relevant_date: Mapped[date | None] = mapped_column(Date, index=True)
     source_url: Mapped[str] = mapped_column(String(4096))
     source_locator_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

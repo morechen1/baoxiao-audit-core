@@ -4,15 +4,19 @@ from dataclasses import asdict, dataclass
 from datetime import date
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import TrustGateError
-from app.models import KnowledgeChunk, SourceDocument
+from app.models import KnowledgeChunk, Penalty, ProductDocument, Regulation, SourceDocument
 from app.models.enums import APPROVABLE_STATUSES, AuthenticityType, DataType, KnowledgeIndexStatus
 from app.services.knowledge.chunks import RANKING_VERSION
 from app.services.knowledge.materialization import MATERIALIZABLE_TYPES
-from app.services.knowledge.normalization import han_bigram_tokens, trusted_lexical_normalize
+from app.services.knowledge.normalization import (
+    han_bigram_tokens,
+    normalize_authority_for_filter,
+    trusted_lexical_normalize,
+)
 
 MAX_QUERY_LENGTH = 500
 MAX_LIMIT = 100
@@ -44,6 +48,17 @@ class SearchRequest:
             raise TrustGateError("knowledge_search_record_type_invalid")
         if set(self.evidence_quality) - {"A", "B", "C", "D"}:
             raise TrustGateError("knowledge_search_evidence_quality_invalid")
+        if not trusted_lexical_normalize(self.query) and not any(
+            (
+                self.record_types,
+                self.pilot_ids,
+                normalize_authority_for_filter(self.authority or ""),
+                self.date_from,
+                self.date_to,
+                self.evidence_quality,
+            )
+        ):
+            raise TrustGateError("knowledge_search_filter_required")
 
 
 @dataclass(frozen=True)
@@ -53,7 +68,7 @@ class SearchResult:
     record_type: str
     pilot_id: str | None
     source_document_id: int
-    structured_record_id: int
+    structured_record_id: int | None
     portable_record_key: str | None
     chunk_kind: str
     chunk_ordinal: int
@@ -92,6 +107,41 @@ class TrustedKnowledgeSearchService:
                 SourceDocument.final_review_status.in_(APPROVABLE_STATUSES),
                 SourceDocument.knowledge_index_status == KnowledgeIndexStatus.INDEXED.value,
                 SourceDocument.data_type != DataType.REGULATORY_CASE.value,
+                or_(
+                    and_(
+                        KnowledgeChunk.record_type == DataType.REGULATION.value,
+                        KnowledgeChunk.structured_record_id.is_(None),
+                        KnowledgeChunk.chunk_kind == "basic_information",
+                    ),
+                    and_(
+                        KnowledgeChunk.record_type == DataType.REGULATION.value,
+                        KnowledgeChunk.structured_record_id.is_not(None),
+                        select(Regulation.id)
+                        .where(
+                            Regulation.id == KnowledgeChunk.structured_record_id,
+                            Regulation.document_id == KnowledgeChunk.source_document_id,
+                        )
+                        .exists(),
+                    ),
+                    and_(
+                        KnowledgeChunk.record_type == DataType.PRODUCT_DOCUMENT.value,
+                        select(ProductDocument.id)
+                        .where(
+                            ProductDocument.id == KnowledgeChunk.structured_record_id,
+                            ProductDocument.document_id == KnowledgeChunk.source_document_id,
+                        )
+                        .exists(),
+                    ),
+                    and_(
+                        KnowledgeChunk.record_type == DataType.PENALTY.value,
+                        select(Penalty.id)
+                        .where(
+                            Penalty.id == KnowledgeChunk.structured_record_id,
+                            Penalty.document_id == KnowledgeChunk.source_document_id,
+                        )
+                        .exists(),
+                    ),
+                ),
             )
         )
         if request.record_types:
@@ -99,8 +149,9 @@ class TrustedKnowledgeSearchService:
         if request.pilot_ids:
             statement = statement.where(KnowledgeChunk.pilot_id.in_(request.pilot_ids))
         if request.authority:
+            normalized_authority = normalize_authority_for_filter(request.authority)
             statement = statement.where(
-                func.lower(KnowledgeChunk.authority).contains(request.authority.lower())
+                KnowledgeChunk.authority_filter_text.contains(normalized_authority)
             )
         if request.date_from:
             statement = statement.where(KnowledgeChunk.relevant_date >= request.date_from)
@@ -139,7 +190,20 @@ class TrustedKnowledgeSearchService:
                 item[1].chunk_identity_sha256,
             )
         )
-        page = scored[request.offset : request.offset + request.limit]
+        deduplicated = []
+        seen: set[tuple[object, ...]] = set()
+        for item in scored:
+            chunk = item[1]
+            key = (
+                (chunk.source_document_id, chunk.chunk_kind, chunk.chunk_content_sha256)
+                if chunk.chunk_kind == "basic_information"
+                else (chunk.chunk_identity_sha256,)
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            deduplicated.append(item)
+        page = deduplicated[request.offset : request.offset + request.limit]
         return [
             SearchResult(
                 score=score,

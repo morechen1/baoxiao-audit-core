@@ -5,6 +5,7 @@ import unicodedata
 
 NORMALIZATION_VERSION = "trusted_lexical_normalization_v1"
 TOKENIZER_VERSION = "han_bigram_lexical_v1"
+AUTHORITY_FILTER_NORMALIZATION_VERSION = "trusted_authority_filter_normalization_v1"
 
 _TOKEN_SEGMENT = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]+|[a-z0-9]+(?:[._/-][a-z0-9]+)*")
 _DOCUMENT_NUMBER = re.compile(
@@ -20,6 +21,12 @@ def trusted_lexical_normalize(value: str) -> str:
     """Normalize retrieval text without changing the immutable source text."""
     normalized = unicodedata.normalize("NFKC", value).lower()
     return " ".join(normalized.split())
+
+
+def normalize_authority_for_filter(value: str) -> str:
+    """Build the versioned authority-only filter value without changing source text."""
+    normalized = unicodedata.normalize("NFKC", value).lower()
+    return "".join(character for character in normalized if not character.isspace())
 
 
 def han_bigram_tokens(value: str) -> list[str]:

@@ -34,6 +34,7 @@ from app.services.validation import ValidationService
 from migrations.versions import b9c8d7e6f5a4_support_multi_record_penalties as migration
 
 V0_8_REVISION = "a8b7c6d5e4f3"
+V0_9_REVISION = "b9c8d7e6f5a4"
 
 
 @pytest.fixture
@@ -202,6 +203,44 @@ def _legacy_provenance() -> list[dict[str, object]]:
             "draft_generation_version": "v0.8",
         }
     ]
+
+
+def test_trusted_retrieval_downgrade_preserves_shared_pg_trgm_extension(
+    postgres_migration_url: str,
+) -> None:
+    engine = create_engine(postgres_migration_url)
+    with engine.begin() as connection:
+        connection.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+        connection.execute(text("CREATE TABLE shared_trigram_probe (value TEXT NOT NULL)"))
+        connection.execute(
+            text(
+                "CREATE INDEX ix_shared_trigram_probe "
+                "ON shared_trigram_probe USING gin (value gin_trgm_ops)"
+            )
+        )
+
+    command.upgrade(Config("alembic.ini"), "head")
+    command.downgrade(Config("alembic.ini"), V0_9_REVISION)
+
+    with engine.connect() as connection:
+        extension_exists = connection.execute(
+            text("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm')")
+        ).scalar_one()
+        table_exists = connection.execute(
+            text("SELECT to_regclass('public.shared_trigram_probe') IS NOT NULL")
+        ).scalar_one()
+        index_exists = connection.execute(
+            text("SELECT to_regclass('public.ix_shared_trigram_probe') IS NOT NULL")
+        ).scalar_one()
+        knowledge_table_exists = connection.execute(
+            text("SELECT to_regclass('public.knowledge_chunks') IS NOT NULL")
+        ).scalar_one()
+    engine.dispose()
+
+    assert extension_exists is True
+    assert table_exists is True
+    assert index_exists is True
+    assert knowledge_table_exists is False
 
 
 def test_postgres_v0_8_penalty_upgrade_is_explicitly_isolated(

@@ -57,7 +57,7 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("record_type", sa.String(length=50), nullable=False),
-        sa.Column("structured_record_id", sa.Integer(), nullable=False),
+        sa.Column("structured_record_id", sa.Integer(), nullable=True),
         sa.Column("pilot_id", sa.String(length=64), nullable=True),
         sa.Column("portable_record_key", sa.String(length=64), nullable=True),
         sa.Column("chunk_kind", sa.String(length=80), nullable=False),
@@ -67,6 +67,7 @@ def upgrade() -> None:
         sa.Column("normalized_text", sa.Text(), nullable=False),
         sa.Column("lexical_tokens", sa.Text(), nullable=False),
         sa.Column("authority", sa.String(length=500), nullable=True),
+        sa.Column("authority_filter_text", sa.String(length=500), nullable=True),
         sa.Column("relevant_date", sa.Date(), nullable=True),
         sa.Column("source_url", sa.String(length=4096), nullable=False),
         sa.Column("source_locator_json", sa.JSON(), nullable=False),
@@ -135,14 +136,17 @@ def upgrade() -> None:
             "CREATE INDEX ix_knowledge_chunks_normalized_text_trgm "
             "ON knowledge_chunks USING gin (normalized_text gin_trgm_ops)"
         )
+        op.execute(
+            "CREATE INDEX ix_knowledge_chunks_authority_filter_text_trgm "
+            "ON knowledge_chunks USING gin (authority_filter_text gin_trgm_ops)"
+        )
 
 
 def downgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
+        op.execute("DROP INDEX IF EXISTS ix_knowledge_chunks_authority_filter_text_trgm")
         op.execute("DROP INDEX IF EXISTS ix_knowledge_chunks_normalized_text_trgm")
         op.execute("DROP INDEX IF EXISTS ix_knowledge_chunks_lexical_tokens_fts")
     op.drop_table("knowledge_chunks")
     op.drop_table("knowledge_index_runs")
-    if bind.dialect.name == "postgresql":
-        op.execute("DROP EXTENSION IF EXISTS pg_trgm")

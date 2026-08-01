@@ -33,7 +33,12 @@ from app.services.knowledge import (
     SearchRequest,
     TrustedKnowledgeSearchService,
 )
-from app.services.knowledge.normalization import han_bigram_tokens, trusted_lexical_normalize
+from app.services.knowledge.chunks import recompute_chunk_identity
+from app.services.knowledge.normalization import (
+    han_bigram_tokens,
+    normalize_authority_for_filter,
+    trusted_lexical_normalize,
+)
 from app.services.parsed_artifacts import ParsedArtifactService
 from app.services.parsing.base import ParsedDocument, ParsedPage
 from app.services.penalty_entries import (
@@ -245,9 +250,9 @@ def _trusted_regulation(session) -> tuple[SourceDocument, Regulation]:
     return document, regulation
 
 
-def _trusted_penalty(session) -> tuple[SourceDocument, Penalty]:
+def _trusted_penalty(session, *, authority: str = "某金融监管局") -> tuple[SourceDocument, Penalty]:
     text = (
-        "某保险公司\n某金融监管局\n乌金罚决字〔2025〕9号\n2025年10月15日\n"
+        f"某保险公司\n{authority}\n乌金罚决字〔2025〕9号\n2025年10月15日\n"
         "销售误导\n罚款10万元\n“优惠”“中奖”"
     )
     document = SourceDocument(
@@ -255,7 +260,7 @@ def _trusted_penalty(session) -> tuple[SourceDocument, Penalty]:
         source_url="https://example.test/penalty",
         final_url="https://example.test/penalty.json",
         source_title="处罚公示",
-        publisher="某金融监管局",
+        publisher=authority,
         raw_file_path="pending",
         raw_text=text,
         sha256="0" * 64,
@@ -296,7 +301,6 @@ def _trusted_penalty(session) -> tuple[SourceDocument, Penalty]:
             "mode": "verbatim",
         }
     ]
-    authority = "某金融监管局"
     authority_start = text.index(authority)
     evidence["authority"] = [
         {
@@ -577,7 +581,9 @@ def test_regulation_builder_preserves_structured_fields_and_evidence(session) ->
         "article_text",
         "scope_and_status",
     ]
-    assert chunks[0].structured_record_id == regulation.id
+    assert chunks[0].structured_record_id is None
+    assert chunks[0].portable_record_key is None
+    assert chunks[1].structured_record_id == regulation.id
     assert "金监规〔2023〕2号" in chunks[0].text
     assert any(
         item["field_name"] == "document_number" for item in chunks[0].evidence_reference_json
@@ -686,8 +692,8 @@ def test_search_tie_order_is_repeatable(session) -> None:
     _service(session).rebuild_document_chunks(session, document.id)
     service = TrustedKnowledgeSearchService()
 
-    first = service.search(session, SearchRequest(query=""))
-    second = service.search(session, SearchRequest(query=""))
+    first = service.search(session, SearchRequest(query="", record_types=("product_document",)))
+    second = service.search(session, SearchRequest(query="", record_types=("product_document",)))
 
     assert [item.chunk_identity_sha256 for item in first] == [
         item.chunk_identity_sha256 for item in second
@@ -762,8 +768,13 @@ def test_pagination_is_bounded_and_non_overlapping(session) -> None:
     _service(session).rebuild_document_chunks(session, document.id)
     service = TrustedKnowledgeSearchService()
 
-    first = service.search(session, SearchRequest(query="", limit=2))
-    second = service.search(session, SearchRequest(query="", limit=2, offset=2))
+    first = service.search(
+        session, SearchRequest(query="", record_types=("product_document",), limit=2)
+    )
+    second = service.search(
+        session,
+        SearchRequest(query="", record_types=("product_document",), limit=2, offset=2),
+    )
 
     assert len(first) == 2
     assert len(second) == 1
@@ -844,3 +855,291 @@ def test_full_rebuild_failure_records_failed_run_and_keeps_prior_chunks(
 
     assert session.query(KnowledgeChunk).filter_by(is_active=True).count() == active_before
     assert session.query(KnowledgeIndexRun).filter_by(status="failed").count() == 1
+
+
+def test_regulation_document_basic_information_is_materialized_once(session) -> None:
+    document, first = _trusted_regulation(session)
+    suffixes = (
+        ("第二条", "规范销售人员行为。"),
+        ("第三条", "保护投保人权益。"),
+        ("第四条", "强化信息披露。"),
+        ("第五条", "明确责任边界。"),
+    )
+    document.raw_text = (document.raw_text or "") + "".join(
+        f"\n\n{article_number} {article_text}" for article_number, article_text in suffixes
+    )
+    _persist_artifacts(session, document, document.raw_text)
+    for article_number, article_text in suffixes:
+        evidence = json.loads(json.dumps(first.field_evidence_json, ensure_ascii=False))
+        for field_name, value in (
+            ("article_number", article_number),
+            ("article_text", article_text),
+        ):
+            start = document.raw_text.index(value)
+            evidence[field_name] = [
+                {
+                    "quote": value,
+                    "page_number": 1,
+                    "start_offset": start,
+                    "end_offset": start + len(value),
+                    "mode": "verbatim",
+                }
+            ]
+        session.add(
+            Regulation(
+                document_id=document.id,
+                title=first.title,
+                document_number=first.document_number,
+                issuing_authority=first.issuing_authority,
+                validity_status="unknown",
+                article_number=article_number,
+                article_text=article_text,
+                source_quote=article_text,
+                field_evidence_json=evidence,
+                final_review_status=first.final_review_status,
+            )
+        )
+    session.commit()
+
+    summary = _service(session).rebuild_document_chunks(session, document.id)
+    chunks = session.query(KnowledgeChunk).filter_by(is_active=True).all()
+    results = TrustedKnowledgeSearchService().search(
+        session, SearchRequest(query="保险销售行为管理办法")
+    )
+
+    assert (summary.records, summary.active_chunks) == (5, 11)
+    assert sum(chunk.chunk_kind == "basic_information" for chunk in chunks) == 1
+    assert sum(chunk.chunk_kind == "article_text" for chunk in chunks) == 5
+    assert sum(chunk.chunk_kind == "scope_and_status" for chunk in chunks) == 5
+    assert sum(result.chunk_kind == "basic_information" for result in results) == 1
+    basic = next(chunk for chunk in chunks if chunk.chunk_kind == "basic_information")
+    assert basic.structured_record_id is None
+    assert basic.portable_record_key is None
+
+
+def test_regulation_document_shared_field_conflict_fails_closed(session) -> None:
+    document, first = _trusted_regulation(session)
+    _service(session).rebuild_document_chunks(session, document.id)
+    document.raw_text = f"{document.raw_text}\n\n另一办法\n第二条 其他正文。"
+    _persist_artifacts(session, document, document.raw_text)
+    evidence = json.loads(json.dumps(first.field_evidence_json, ensure_ascii=False))
+    for field_name, value in (
+        ("title", "另一办法"),
+        ("article_number", "第二条"),
+        ("article_text", "其他正文。"),
+    ):
+        start = document.raw_text.index(value)
+        evidence[field_name] = [
+            {
+                "quote": value,
+                "page_number": 1,
+                "start_offset": start,
+                "end_offset": start + len(value),
+                "mode": "verbatim",
+            }
+        ]
+    session.add(
+        Regulation(
+            document_id=document.id,
+            title="另一办法",
+            document_number=first.document_number,
+            issuing_authority=first.issuing_authority,
+            validity_status="unknown",
+            article_number="第二条",
+            article_text="其他正文。",
+            source_quote="其他正文。",
+            field_evidence_json=evidence,
+            final_review_status=first.final_review_status,
+        )
+    )
+    session.commit()
+
+    with pytest.raises(TrustGateError, match="knowledge_regulation_document_fields_inconsistent"):
+        _service(session).rebuild_document_chunks(session, document.id)
+    assert session.query(KnowledgeChunk).filter_by(is_active=True).count() == 3
+
+    with pytest.raises(TrustGateError, match="knowledge_regulation_document_fields_inconsistent"):
+        _service(session).rebuild_all_trusted_chunks(session)
+    assert session.query(KnowledgeChunk).filter_by(is_active=True).count() == 0
+    assert session.query(KnowledgeChunk).filter_by(is_active=False).count() == 3
+    assert _service(session).verify_chunks(session).eligibility_drift_documents == 1
+
+
+@pytest.mark.parametrize("query", ["", "   ", "\u2003\u3000\n"])
+def test_empty_normalized_query_requires_structured_filter(query: str) -> None:
+    with pytest.raises(TrustGateError, match="knowledge_search_filter_required"):
+        SearchRequest(query=query)
+    assert SearchRequest(query=query, authority="金融监管").authority
+    assert SearchRequest(query=query, date_from=date(2025, 1, 1)).date_from
+    assert SearchRequest(query=query, record_types=("penalty",)).record_types
+
+
+def test_empty_query_api_and_cli_fail_closed(session, monkeypatch) -> None:
+    app.dependency_overrides[get_db] = lambda: session
+    try:
+        response = TestClient(app).get("/api/v1/knowledge/search", params={"query": "\u3000"})
+    finally:
+        app.dependency_overrides.clear()
+
+    class SessionContext:
+        def __enter__(self):
+            return session
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return False
+
+    monkeypatch.setattr(cli_module, "SessionLocal", SessionContext)
+    cli_result = CliRunner().invoke(cli_app, ["knowledge", "search", "   "])
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "knowledge_search_filter_required"
+    assert cli_result.exit_code != 0
+
+
+def test_authority_filter_uses_versioned_unicode_whitespace_normalization(session) -> None:
+    authority = "乌海金融\n监管\n分\n局"
+    document, _ = _trusted_penalty(session, authority=authority)
+    _service(session).rebuild_document_chunks(session, document.id)
+
+    results = TrustedKnowledgeSearchService().search(
+        session, SearchRequest(query="", authority="乌海金融监管分局")
+    )
+    chunk = session.query(KnowledgeChunk).one()
+
+    assert normalize_authority_for_filter(authority) == "乌海金融监管分局"
+    assert len(results) == 1
+    assert results[0].authority == authority
+    assert chunk.authority_filter_text == "乌海金融监管分局"
+    assert any(item["quote"] == authority for item in results[0].evidence_references)
+
+
+def test_verify_rejects_self_consistent_chunk_with_missing_structured_record(session) -> None:
+    document, _ = _trusted_product(session)
+    _service(session).rebuild_document_chunks(session, document.id)
+    template = session.query(KnowledgeChunk).first()
+    fake_payload = "f" * 64
+    session.add(
+        KnowledgeChunk(
+            source_document_id=document.id,
+            record_type=template.record_type,
+            structured_record_id=999,
+            pilot_id=template.pilot_id,
+            portable_record_key=fake_payload,
+            chunk_kind=template.chunk_kind,
+            chunk_ordinal=template.chunk_ordinal,
+            title=template.title,
+            text=template.text,
+            normalized_text=template.normalized_text,
+            lexical_tokens=template.lexical_tokens,
+            authority=template.authority,
+            authority_filter_text=template.authority_filter_text,
+            relevant_date=template.relevant_date,
+            source_url=template.source_url,
+            source_locator_json=template.source_locator_json,
+            evidence_reference_json=template.evidence_reference_json,
+            evidence_quality=template.evidence_quality,
+            authenticity_status=template.authenticity_status,
+            review_status=template.review_status,
+            source_payload_hash=fake_payload,
+            chunk_content_sha256=template.chunk_content_sha256,
+            chunk_identity_sha256=recompute_chunk_identity(
+                raw_artifact_sha256=document.sha256,
+                record_type=template.record_type,
+                portable_record_key_value=fake_payload,
+                chunk_kind=template.chunk_kind,
+                chunk_ordinal=template.chunk_ordinal,
+                chunk_content_sha256=template.chunk_content_sha256,
+                chunker_version=template.chunker_version,
+                tokenizer_version=template.tokenizer_version,
+            ),
+            tokenizer_version=template.tokenizer_version,
+            chunker_version=template.chunker_version,
+            ranking_version=template.ranking_version,
+            is_active=True,
+        )
+    )
+    session.commit()
+
+    report = _service(session).verify_chunks(session)
+    results = TrustedKnowledgeSearchService().search(session, SearchRequest(query="保险责任"))
+
+    assert report.valid is False
+    assert report.structured_record_orphans == 1
+    assert report.extra_active_chunks == 1
+    assert all(result.structured_record_id != 999 for result in results)
+
+
+def test_verify_detects_stale_self_consistent_product_chunks(session) -> None:
+    document, product = _trusted_product(session)
+    _service(session).rebuild_document_chunks(session, document.id)
+    product.waiting_period = "等待期六十日"
+    start = (document.raw_text or "").index(product.waiting_period)
+    product.field_evidence_json = {
+        **product.field_evidence_json,
+        "waiting_period": [
+            {
+                "quote": product.waiting_period,
+                "page_number": 1,
+                "start_offset": start,
+                "end_offset": start + len(product.waiting_period),
+                "mode": "verbatim",
+            }
+        ],
+    }
+    session.commit()
+
+    report = _service(session).verify_chunks(session)
+
+    assert report.valid is False
+    assert report.canonical_mismatches == 3
+    assert report.missing_expected_chunks == 0
+    assert report.extra_active_chunks == 0
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("knowledge_index_status", KnowledgeIndexStatus.NOT_INDEXED.value),
+        ("final_review_status", ReviewStatus.REJECTED.value),
+    ],
+)
+def test_full_rebuild_retires_documents_with_explicitly_lost_eligibility(
+    session, field_name: str, value: str
+) -> None:
+    document, _ = _trusted_product(session)
+    _service(session).rebuild_document_chunks(session, document.id)
+    setattr(document, field_name, value)
+    session.commit()
+
+    summary = _service(session).rebuild_all_trusted_chunks(session)
+
+    assert summary.retired == 3
+    assert session.query(KnowledgeChunk).filter_by(is_active=True).count() == 0
+    assert session.query(KnowledgeChunk).filter_by(is_active=False).count() == 3
+    assert _service(session).verify_chunks(session).valid
+    assert not TrustedKnowledgeSearchService().search(
+        session, SearchRequest(query="", record_types=("product_document",))
+    )
+
+
+def test_full_eligibility_drift_is_reported_and_stale_chunks_are_retired(session) -> None:
+    document, _ = _trusted_product(session)
+    _service(session).rebuild_document_chunks(session, document.id)
+    document.metadata_json = {
+        **document.metadata_json,
+        "automatic_validation": {"valid": False, "issues": ["synthetic"]},
+    }
+    session.commit()
+
+    report = _service(session).verify_chunks(session)
+    assert report.eligibility_drift_documents == 1
+    assert report.ineligible_active_chunks == 3
+
+    with pytest.raises(TrustGateError, match="knowledge_document_validation_failed"):
+        _service(session).rebuild_all_trusted_chunks(session)
+
+    assert session.query(KnowledgeChunk).filter_by(is_active=True).count() == 0
+    assert session.query(KnowledgeChunk).filter_by(is_active=False).count() == 3
+    run = session.query(KnowledgeIndexRun).order_by(KnowledgeIndexRun.id.desc()).first()
+    assert run.status == "failed"
+    assert run.payload_hash is None

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -24,6 +26,8 @@ from app.models.enums import APPROVABLE_STATUSES, AuthenticityType, DataType, Kn
 from app.services.knowledge.chunks import (
     CHUNKER_VERSION,
     RANKING_VERSION,
+    ChunkCandidate,
+    build_document_chunks,
     build_record_chunks,
     recompute_chunk_identity,
 )
@@ -77,6 +81,12 @@ class VerificationReport:
     penalty_identity_failures: int
     source_locator_missing: int
     duplicate_active_identities: int
+    missing_expected_chunks: int
+    extra_active_chunks: int
+    canonical_mismatches: int
+    structured_record_orphans: int
+    duplicate_document_level_chunks: int
+    eligibility_drift_documents: int
     errors: list[str]
 
 
@@ -84,10 +94,10 @@ class TrustedKnowledgeMaterializationService:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
 
-    def rebuild_document_chunks(self, session: Session, document_id: int) -> RebuildSummary:
-        document = session.get(SourceDocument, document_id)
-        if document is None:
-            raise TrustGateError("knowledge_document_not_index_eligible")
+    def build_expected_document_chunks(
+        self, session: Session, document: SourceDocument
+    ) -> tuple[list[Any], list[ChunkCandidate]]:
+        """Apply every trust gate once and build the sole canonical candidate set."""
         self._ensure_eligible(session, document)
         records = StateMachineService.structured_records(session, document)
         pilot_ids = list(
@@ -108,8 +118,17 @@ class TrustedKnowledgeMaterializationService:
             .order_by(ReviewDecision.id.desc())
         )
         provenance_by_record = self._provenance_by_record(document)
-        candidates = []
+        candidates: list[ChunkCandidate] = []
         try:
+            candidates.extend(
+                build_document_chunks(
+                    document,
+                    records,
+                    pilot_id=pilot_id,
+                    verified_source=verified_source,
+                    evidence_quality=quality,
+                )
+            )
             for record in records:
                 if isinstance(record, Penalty):
                     try:
@@ -142,7 +161,14 @@ class TrustedKnowledgeMaterializationService:
             raise TrustGateError("knowledge_chunk_build_failed")
         if len(identities) != len(set(identities)):
             raise TrustGateError("knowledge_chunk_duplicate_identity")
+        return records, candidates
 
+    def rebuild_document_chunks(self, session: Session, document_id: int) -> RebuildSummary:
+        document = session.get(SourceDocument, document_id)
+        if document is None:
+            raise TrustGateError("knowledge_document_not_index_eligible")
+        records, candidates = self.build_expected_document_chunks(session, document)
+        identities = [candidate.chunk_identity_sha256 for candidate in candidates]
         summary = RebuildSummary(source_document_id=document.id, records=len(records))
         now = datetime.now(UTC)
         try:
@@ -181,6 +207,7 @@ class TrustedKnowledgeMaterializationService:
                             normalized_text=candidate.normalized_text,
                             lexical_tokens=candidate.lexical_tokens,
                             authority=candidate.authority,
+                            authority_filter_text=candidate.authority_filter_text,
                             relevant_date=candidate.relevant_date,
                             source_url=candidate.source_url,
                             source_locator_json=candidate.source_locator,
@@ -205,6 +232,7 @@ class TrustedKnowledgeMaterializationService:
                             or existing.text != candidate.text
                         ):
                             raise TrustGateError("knowledge_chunk_hash_mismatch")
+                        self._apply_canonical_values(existing, candidate, document)
                         if not existing.is_active:
                             existing.is_active = True
                             existing.retired_at = None
@@ -232,22 +260,45 @@ class TrustedKnowledgeMaterializationService:
         session.add(run)
         session.commit()
         summary = RebuildAllSummary(run_id=run.run_id)
-        document_ids = list(
-            session.scalars(
-                select(SourceDocument.id)
-                .where(
-                    SourceDocument.knowledge_index_status == KnowledgeIndexStatus.INDEXED.value,
-                    SourceDocument.data_type.in_(MATERIALIZABLE_TYPES),
-                )
-                .order_by(SourceDocument.id)
-            )
-        )
+        documents = list(session.scalars(select(SourceDocument).order_by(SourceDocument.id)))
         try:
-            for document_id in document_ids:
+            for document in documents:
+                has_active = (
+                    session.scalar(
+                        select(KnowledgeChunk.id).where(
+                            KnowledgeChunk.source_document_id == document.id,
+                            KnowledgeChunk.is_active.is_(True),
+                        )
+                    )
+                    is not None
+                )
+                claims_materializable = (
+                    document.knowledge_index_status == KnowledgeIndexStatus.INDEXED.value
+                    and document.data_type in MATERIALIZABLE_TYPES
+                )
+                if not has_active and not claims_materializable:
+                    continue
+                if not self._eligible_state(document):
+                    summary.retired += self._retire_active(session, document.id)
+                    session.commit()
+                    continue
                 try:
-                    result = self.rebuild_document_chunks(session, document_id)
+                    self._ensure_eligible(session, document)
                 except TrustGateError as exc:
-                    summary.errors[document_id] = str(exc)
+                    summary.retired += self._retire_active(session, document.id)
+                    session.commit()
+                    summary.errors[document.id] = str(exc)
+                    raise
+                try:
+                    result = self.rebuild_document_chunks(session, document.id)
+                except TrustGateError as exc:
+                    if str(exc) in {
+                        "knowledge_regulation_document_fields_inconsistent",
+                        "knowledge_chunk_duplicate_identity",
+                    }:
+                        summary.retired += self._retire_active(session, document.id)
+                        session.commit()
+                    summary.errors[document.id] = str(exc)
                     raise
                 summary.documents += 1
                 summary.records += result.records
@@ -266,9 +317,10 @@ class TrustedKnowledgeMaterializationService:
             run.completed_at = datetime.now(UTC)
             run.source_document_count = summary.documents
             run.record_count = summary.records
-            run.chunk_count = summary.chunks
+            run.chunk_count = len(active_identities)
             run.payload_hash = hashlib.sha256(canonical_json_bytes(active_identities)).hexdigest()
             session.commit()
+            summary.chunks = len(active_identities)
             return summary
         except TrustGateError as exc:
             stored_run = session.get(KnowledgeIndexRun, run.id)
@@ -278,25 +330,16 @@ class TrustedKnowledgeMaterializationService:
                 stored_run.error_code = str(exc)
                 stored_run.source_document_count = summary.documents
                 stored_run.record_count = summary.records
-                stored_run.chunk_count = summary.chunks
+                stored_run.chunk_count = (
+                    session.query(KnowledgeChunk).filter_by(is_active=True).count()
+                )
                 session.commit()
             raise
 
     def retire_document_chunks(self, session: Session, document_id: int) -> int:
-        chunks = list(
-            session.scalars(
-                select(KnowledgeChunk).where(
-                    KnowledgeChunk.source_document_id == document_id,
-                    KnowledgeChunk.is_active.is_(True),
-                )
-            )
-        )
-        now = datetime.now(UTC)
-        for chunk in chunks:
-            chunk.is_active = False
-            chunk.retired_at = now
+        retired = self._retire_active(session, document_id)
         session.commit()
-        return len(chunks)
+        return retired
 
     def verify(self, session: Session) -> VerificationReport:
         chunks = list(session.scalars(select(KnowledgeChunk).order_by(KnowledgeChunk.id)))
@@ -308,33 +351,36 @@ class TrustedKnowledgeMaterializationService:
         regulatory_cases = 0
         penalty_failures = 0
         locator_missing = 0
-        identity_counts: dict[str, int] = {}
-        by_type: dict[str, int] = {}
-        by_document: dict[int, int] = {}
+        missing_expected = 0
+        extra_active = 0
+        canonical_mismatches = 0
+        structured_orphans = 0
+        eligibility_drift = 0
+        identity_counts: dict[str, int] = defaultdict(int)
+        by_type: dict[str, int] = defaultdict(int)
+        by_document: dict[int, int] = defaultdict(int)
+        active_by_document: dict[int, list[KnowledgeChunk]] = defaultdict(list)
+
         for chunk in active:
-            identity_counts[chunk.chunk_identity_sha256] = (
-                identity_counts.get(chunk.chunk_identity_sha256, 0) + 1
-            )
-            by_type[chunk.record_type] = by_type.get(chunk.record_type, 0) + 1
-            by_document[chunk.source_document_id] = by_document.get(chunk.source_document_id, 0) + 1
+            identity_counts[chunk.chunk_identity_sha256] += 1
+            by_type[chunk.record_type] += 1
+            by_document[chunk.source_document_id] += 1
+            active_by_document[chunk.source_document_id].append(chunk)
             document = session.get(SourceDocument, chunk.source_document_id)
             if document is None:
                 orphan_chunks += 1
-                errors.append(f"orphan:{chunk.chunk_identity_sha256}")
+                errors.append(f"knowledge_chunk_source_document_missing:{chunk.id}")
                 continue
             if chunk.record_type == DataType.REGULATORY_CASE.value:
                 regulatory_cases += 1
-                errors.append(f"regulatory_case:{chunk.chunk_identity_sha256}")
-            if not self._eligible_state(document):
-                ineligible += 1
-                errors.append(f"ineligible:{chunk.chunk_identity_sha256}")
+                errors.append(f"knowledge_regulatory_case_active:{chunk.id}")
             content_hash = hashlib.sha256(
                 trusted_lexical_normalize(chunk.text).encode("utf-8")
             ).hexdigest()
             identity_hash = recompute_chunk_identity(
                 raw_artifact_sha256=document.sha256,
                 record_type=chunk.record_type,
-                portable_record_key_value=chunk.portable_record_key or "",
+                portable_record_key_value=(chunk.portable_record_key or chunk.source_payload_hash),
                 chunk_kind=chunk.chunk_kind,
                 chunk_ordinal=chunk.chunk_ordinal,
                 chunk_content_sha256=content_hash,
@@ -346,33 +392,103 @@ class TrustedKnowledgeMaterializationService:
                 or identity_hash != chunk.chunk_identity_sha256
             ):
                 hash_mismatches += 1
-                errors.append(f"hash:{chunk.chunk_identity_sha256}")
+                errors.append(f"knowledge_chunk_hash_mismatch:{chunk.id}")
             if not chunk.source_locator_json or not chunk.source_url:
                 locator_missing += 1
-                errors.append(f"locator:{chunk.chunk_identity_sha256}")
-            if chunk.record_type == DataType.PENALTY.value:
-                record = session.get(Penalty, chunk.structured_record_id)
-                try:
-                    if record is None:
-                        raise ValueError("missing")
-                    PenaltySourceIdentityService(self.settings).validate(session, document, record)
-                except ValueError:
-                    penalty_failures += 1
-                    errors.append(f"penalty_identity:{chunk.chunk_identity_sha256}")
-        duplicates = sum(value > 1 for value in identity_counts.values())
-        eligible_documents = (
-            session.scalar(
-                select(func.count(SourceDocument.id)).where(
+                errors.append(f"knowledge_chunk_source_locator_missing:{chunk.id}")
+
+        state_candidates = list(
+            session.scalars(
+                select(SourceDocument).where(
                     SourceDocument.final_review_status.in_(APPROVABLE_STATUSES),
                     SourceDocument.authenticity_type == AuthenticityType.VERIFIED_PUBLIC.value,
                     SourceDocument.knowledge_index_status == KnowledgeIndexStatus.INDEXED.value,
                     SourceDocument.data_type.in_(MATERIALIZABLE_TYPES),
                 )
             )
-            or 0
         )
+        documents = {document.id: document for document in state_candidates}
+        for document_id in active_by_document:
+            document = session.get(SourceDocument, document_id)
+            if document is not None:
+                documents[document_id] = document
+
+        eligible_documents = 0
+        for document_id, document in sorted(documents.items()):
+            document_active = active_by_document.get(document_id, [])
+            try:
+                records, expected = self.build_expected_document_chunks(session, document)
+            except TrustGateError as exc:
+                ineligible += len(document_active)
+                eligibility_drift += 1
+                errors.append(f"knowledge_document_eligibility_drift:{document_id}:{exc}")
+                if str(exc) in {
+                    "knowledge_penalty_identity_invalid",
+                    "penalty_source_identity_reimport_required",
+                }:
+                    penalty_failures += len(
+                        [chunk for chunk in document_active if chunk.record_type == "penalty"]
+                    )
+                continue
+            eligible_documents += 1
+            record_ids = {record.id for record in records}
+            for chunk in document_active:
+                if chunk.structured_record_id is None:
+                    if chunk.chunk_kind != "basic_information":
+                        structured_orphans += 1
+                        errors.append(f"knowledge_chunk_structured_record_missing:{chunk.id}")
+                elif chunk.structured_record_id not in record_ids:
+                    structured_orphans += 1
+                    errors.append(f"knowledge_chunk_structured_record_missing:{chunk.id}")
+
+            expected_by_slot = {_candidate_slot(candidate): candidate for candidate in expected}
+            active_by_slot: dict[tuple[int | None, str, int], list[KnowledgeChunk]] = defaultdict(
+                list
+            )
+            for chunk in document_active:
+                active_by_slot[_chunk_slot(chunk)].append(chunk)
+            consumed: set[int] = set()
+            for slot, candidate in expected_by_slot.items():
+                matches = active_by_slot.get(slot, [])
+                if not matches:
+                    missing_expected += 1
+                    errors.append(
+                        f"knowledge_chunk_missing_expected:{document_id}:{slot[0]}:{slot[1]}:{slot[2]}"
+                    )
+                    continue
+                chosen = next(
+                    (
+                        chunk
+                        for chunk in matches
+                        if chunk.chunk_identity_sha256 == candidate.chunk_identity_sha256
+                    ),
+                    matches[0],
+                )
+                consumed.add(chosen.id)
+                if not self._canonical_match(chosen, candidate, document):
+                    canonical_mismatches += 1
+                    errors.append(f"knowledge_chunk_canonical_mismatch:{chosen.id}")
+                for duplicate in matches:
+                    if duplicate.id != chosen.id:
+                        consumed.add(duplicate.id)
+                        extra_active += 1
+                        errors.append(f"knowledge_chunk_extra_active:{duplicate.id}")
+            for chunk in document_active:
+                if chunk.id not in consumed:
+                    extra_active += 1
+                    errors.append(f"knowledge_chunk_extra_active:{chunk.id}")
+
+        duplicate_document_level = self._duplicate_document_level_chunks(active)
+        if duplicate_document_level:
+            errors.extend(
+                f"knowledge_chunk_document_level_duplicate:{chunk_id}"
+                for chunk_id in sorted(duplicate_document_level)
+            )
+        duplicates = sum(value - 1 for value in identity_counts.values() if value > 1)
+        if duplicates:
+            errors.append("knowledge_chunk_duplicate_identity")
         return VerificationReport(
-            valid=not errors and duplicates == 0,
+            valid=not errors,
             eligible_source_documents=eligible_documents,
             active_chunks=len(active),
             retired_chunks=len(chunks) - len(active),
@@ -385,7 +501,13 @@ class TrustedKnowledgeMaterializationService:
             penalty_identity_failures=penalty_failures,
             source_locator_missing=locator_missing,
             duplicate_active_identities=duplicates,
-            errors=sorted(errors),
+            missing_expected_chunks=missing_expected,
+            extra_active_chunks=extra_active,
+            canonical_mismatches=canonical_mismatches,
+            structured_record_orphans=structured_orphans,
+            duplicate_document_level_chunks=len(duplicate_document_level),
+            eligibility_drift_documents=eligibility_drift,
+            errors=sorted(set(errors)),
         )
 
     def _ensure_eligible(self, session: Session, document: SourceDocument) -> None:
@@ -394,6 +516,19 @@ class TrustedKnowledgeMaterializationService:
         from app.services.knowledge.service import KnowledgeIndexService
 
         reasons = KnowledgeIndexService(self.settings).rejection_reasons(session, document)
+        review_decisions = list(
+            session.scalars(
+                select(ReviewDecision).where(
+                    ReviewDecision.record_type == document.data_type,
+                    ReviewDecision.record_id == document.id,
+                )
+            )
+        )
+        if (
+            len(review_decisions) != 1
+            or review_decisions[0].decision != document.final_review_status
+        ):
+            reasons.append("review_decision_missing_or_inconsistent")
         if "penalty_source_identity_reimport_required" in reasons:
             raise TrustGateError("penalty_source_identity_reimport_required")
         if "penalty_source_identity_consistency_failed" in reasons:
@@ -433,7 +568,105 @@ class TrustedKnowledgeMaterializationService:
         occurrence = session.get(DocumentOccurrence, decisions[0].verified_occurrence_id)
         if occurrence is None or occurrence.document_id != document.id:
             raise TrustGateError("knowledge_document_not_index_eligible")
-        return {
-            "source_url": occurrence.source_url,
-            "final_url": occurrence.final_url,
-        }
+        return {"source_url": occurrence.source_url, "final_url": occurrence.final_url}
+
+    @staticmethod
+    def _retire_active(session: Session, document_id: int) -> int:
+        chunks = list(
+            session.scalars(
+                select(KnowledgeChunk).where(
+                    KnowledgeChunk.source_document_id == document_id,
+                    KnowledgeChunk.is_active.is_(True),
+                )
+            )
+        )
+        now = datetime.now(UTC)
+        for chunk in chunks:
+            chunk.is_active = False
+            chunk.retired_at = now
+        session.flush()
+        return len(chunks)
+
+    @staticmethod
+    def _apply_canonical_values(
+        chunk: KnowledgeChunk, candidate: ChunkCandidate, document: SourceDocument
+    ) -> None:
+        chunk.record_type = candidate.record_type
+        chunk.structured_record_id = candidate.structured_record_id
+        chunk.pilot_id = candidate.pilot_id
+        chunk.portable_record_key = candidate.portable_record_key
+        chunk.chunk_kind = candidate.chunk_kind
+        chunk.chunk_ordinal = candidate.chunk_ordinal
+        chunk.title = candidate.title
+        chunk.text = candidate.text
+        chunk.normalized_text = candidate.normalized_text
+        chunk.lexical_tokens = candidate.lexical_tokens
+        chunk.authority = candidate.authority
+        chunk.authority_filter_text = candidate.authority_filter_text
+        chunk.relevant_date = candidate.relevant_date
+        chunk.source_url = candidate.source_url
+        chunk.source_locator_json = candidate.source_locator
+        chunk.evidence_reference_json = candidate.evidence_references
+        chunk.evidence_quality = candidate.evidence_quality
+        chunk.authenticity_status = document.authenticity_type
+        chunk.review_status = document.final_review_status
+        chunk.source_payload_hash = candidate.source_payload_hash
+        chunk.chunk_content_sha256 = candidate.chunk_content_sha256
+        chunk.tokenizer_version = TOKENIZER_VERSION
+        chunk.chunker_version = CHUNKER_VERSION
+        chunk.ranking_version = RANKING_VERSION
+
+    @staticmethod
+    def _canonical_match(
+        chunk: KnowledgeChunk, candidate: ChunkCandidate, document: SourceDocument
+    ) -> bool:
+        return (
+            chunk.chunk_identity_sha256 == candidate.chunk_identity_sha256
+            and chunk.source_payload_hash == candidate.source_payload_hash
+            and chunk.structured_record_id == candidate.structured_record_id
+            and chunk.portable_record_key == candidate.portable_record_key
+            and chunk.record_type == candidate.record_type
+            and chunk.chunk_kind == candidate.chunk_kind
+            and chunk.chunk_ordinal == candidate.chunk_ordinal
+            and chunk.title == candidate.title
+            and chunk.text == candidate.text
+            and chunk.normalized_text == candidate.normalized_text
+            and chunk.lexical_tokens == candidate.lexical_tokens
+            and chunk.authority == candidate.authority
+            and chunk.authority_filter_text == candidate.authority_filter_text
+            and chunk.relevant_date == candidate.relevant_date
+            and chunk.source_url == candidate.source_url
+            and chunk.source_locator_json == candidate.source_locator
+            and chunk.evidence_reference_json == candidate.evidence_references
+            and chunk.evidence_quality == candidate.evidence_quality
+            and chunk.authenticity_status == document.authenticity_type
+            and chunk.review_status == document.final_review_status
+            and chunk.tokenizer_version == TOKENIZER_VERSION
+            and chunk.chunker_version == CHUNKER_VERSION
+            and chunk.ranking_version == RANKING_VERSION
+            and chunk.chunk_content_sha256 == candidate.chunk_content_sha256
+        )
+
+    @staticmethod
+    def _duplicate_document_level_chunks(active: list[KnowledgeChunk]) -> set[int]:
+        duplicate_ids: set[int] = set()
+        by_kind: dict[tuple[int, str], list[KnowledgeChunk]] = defaultdict(list)
+        by_content: dict[tuple[int, str, str], list[KnowledgeChunk]] = defaultdict(list)
+        for chunk in active:
+            if chunk.chunk_kind == "basic_information":
+                by_kind[(chunk.source_document_id, chunk.chunk_kind)].append(chunk)
+            if chunk.structured_record_id is None:
+                by_content[
+                    (chunk.source_document_id, chunk.chunk_kind, chunk.chunk_content_sha256)
+                ].append(chunk)
+        for group in [*by_kind.values(), *by_content.values()]:
+            duplicate_ids.update(chunk.id for chunk in group[1:])
+        return duplicate_ids
+
+
+def _candidate_slot(candidate: ChunkCandidate) -> tuple[int | None, str, int]:
+    return candidate.structured_record_id, candidate.chunk_kind, candidate.chunk_ordinal
+
+
+def _chunk_slot(chunk: KnowledgeChunk) -> tuple[int | None, str, int]:
+    return chunk.structured_record_id, chunk.chunk_kind, chunk.chunk_ordinal

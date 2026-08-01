@@ -6,11 +6,13 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
+from app.core.exceptions import TrustGateError
 from app.models import Penalty, ProductDocument, Regulation, SourceDocument
 from app.services.knowledge.normalization import (
     NORMALIZATION_VERSION,
     TOKENIZER_VERSION,
     lexical_tokens_text,
+    normalize_authority_for_filter,
     trusted_lexical_normalize,
 )
 from app.services.review_payload import canonical_json_bytes, portable_record_key
@@ -22,9 +24,9 @@ RANKING_VERSION = "trusted_lexical_rank_v1"
 @dataclass(frozen=True)
 class ChunkCandidate:
     record_type: str
-    structured_record_id: int
+    structured_record_id: int | None
     pilot_id: str | None
-    portable_record_key: str
+    portable_record_key: str | None
     chunk_kind: str
     chunk_ordinal: int
     title: str
@@ -32,6 +34,7 @@ class ChunkCandidate:
     normalized_text: str
     lexical_tokens: str
     authority: str | None
+    authority_filter_text: str | None
     relevant_date: date | None
     source_url: str
     source_locator: dict[str, Any]
@@ -40,6 +43,135 @@ class ChunkCandidate:
     source_payload_hash: str
     chunk_content_sha256: str
     chunk_identity_sha256: str
+
+
+REGULATION_DOCUMENT_FIELDS = (
+    "title",
+    "document_number",
+    "issuing_authority",
+    "effective_date",
+    "expiry_date",
+)
+
+
+def build_document_chunks(
+    document: SourceDocument,
+    records: list[Regulation | ProductDocument | Penalty],
+    *,
+    pilot_id: str | None,
+    verified_source: dict[str, Any],
+    evidence_quality: str | None,
+) -> list[ChunkCandidate]:
+    """Build stable chunks whose identity belongs to the source document, not a row."""
+    if document.data_type != "regulation":
+        return []
+    regulations = [record for record in records if isinstance(record, Regulation)]
+    if not regulations:
+        return []
+    baseline = regulations[0]
+    baseline_fields = {
+        field_name: getattr(baseline, field_name) for field_name in REGULATION_DOCUMENT_FIELDS
+    }
+    baseline_evidence = _canonical_evidence_references(
+        baseline.field_evidence_json, set(REGULATION_DOCUMENT_FIELDS)
+    )
+    for record in regulations[1:]:
+        fields = {
+            field_name: getattr(record, field_name) for field_name in REGULATION_DOCUMENT_FIELDS
+        }
+        evidence = _canonical_evidence_references(
+            record.field_evidence_json, set(REGULATION_DOCUMENT_FIELDS)
+        )
+        if fields != baseline_fields or evidence != baseline_evidence:
+            raise TrustGateError("knowledge_regulation_document_fields_inconsistent")
+
+    text = _lines(
+        (
+            ("标题", baseline.title),
+            ("文号", baseline.document_number),
+            ("发布机关", baseline.issuing_authority),
+            ("生效日期", baseline.effective_date),
+            ("失效日期", baseline.expiry_date),
+        )
+    )
+    if not trusted_lexical_normalize(text):
+        return []
+    source_locator = {
+        "source_url": verified_source["source_url"],
+        "final_url": verified_source["final_url"],
+        "raw_artifact_sha256": document.sha256,
+        "parsed_artifact_sha256": document.parsed_artifact_sha256,
+        "document_number": baseline.document_number,
+    }
+    source_locator = {key: value for key, value in source_locator.items() if value is not None}
+    payload_hash = document_chunk_payload_hash(
+        document=document,
+        record_type=document.data_type,
+        shared_fields=baseline_fields,
+        evidence_references=baseline_evidence,
+        source_locator=source_locator,
+    )
+    normalized = trusted_lexical_normalize(text)
+    content_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    return [
+        ChunkCandidate(
+            record_type=document.data_type,
+            structured_record_id=None,
+            pilot_id=pilot_id,
+            portable_record_key=None,
+            chunk_kind="basic_information",
+            chunk_ordinal=0,
+            title=baseline.title,
+            text=text,
+            normalized_text=normalized,
+            lexical_tokens=lexical_tokens_text(text),
+            authority=baseline.issuing_authority,
+            authority_filter_text=(
+                normalize_authority_for_filter(baseline.issuing_authority)
+                if baseline.issuing_authority
+                else None
+            ),
+            relevant_date=baseline.effective_date,
+            source_url=str(verified_source["source_url"]),
+            source_locator=source_locator,
+            evidence_references=baseline_evidence,
+            evidence_quality=evidence_quality,
+            source_payload_hash=payload_hash,
+            chunk_content_sha256=content_hash,
+            chunk_identity_sha256=recompute_chunk_identity(
+                raw_artifact_sha256=document.sha256,
+                record_type=document.data_type,
+                portable_record_key_value=payload_hash,
+                chunk_kind="basic_information",
+                chunk_ordinal=0,
+                chunk_content_sha256=content_hash,
+                chunker_version=CHUNKER_VERSION,
+                tokenizer_version=TOKENIZER_VERSION,
+            ),
+        )
+    ]
+
+
+def document_chunk_payload_hash(
+    *,
+    document: SourceDocument,
+    record_type: str,
+    shared_fields: dict[str, Any],
+    evidence_references: list[dict[str, Any]],
+    source_locator: dict[str, Any],
+) -> str:
+    payload = {
+        "record_type": record_type,
+        "raw_artifact_sha256": document.sha256,
+        "parsed_artifact_sha256": document.parsed_artifact_sha256,
+        "shared_fields": {
+            key: value.isoformat() if isinstance(value, date) else value
+            for key, value in shared_fields.items()
+        },
+        "evidence_references": evidence_references,
+        "source_locator": source_locator,
+    }
+    return hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
 
 
 def build_record_chunks(
@@ -96,6 +228,9 @@ def build_record_chunks(
                 normalized_text=normalized,
                 lexical_tokens=lexical_tokens_text(text),
                 authority=authority,
+                authority_filter_text=(
+                    normalize_authority_for_filter(authority) if authority else None
+                ),
                 relevant_date=relevant_date,
                 source_url=str(verified_source["source_url"]),
                 source_locator={
@@ -194,24 +329,7 @@ def _chunk_specs(
 ) -> list[tuple[str, str, str, set[str], str | None, date | None]]:
     if isinstance(record, Regulation):
         title = record.title
-        result = [
-            (
-                "basic_information",
-                title,
-                _lines(
-                    (
-                        ("标题", record.title),
-                        ("文号", record.document_number),
-                        ("发布机关", record.issuing_authority),
-                        ("生效日期", record.effective_date),
-                        ("失效日期", record.expiry_date),
-                    )
-                ),
-                {"title", "document_number", "issuing_authority", "effective_date", "expiry_date"},
-                record.issuing_authority,
-                record.effective_date,
-            )
-        ]
+        result = []
         for part in _paragraph_chunks(record.article_text):
             result.append(
                 (
@@ -380,3 +498,10 @@ def _evidence_references(
                 }
             )
     return result
+
+
+def _canonical_evidence_references(
+    evidence: dict[str, list[dict[str, Any]]], fields: set[str]
+) -> list[dict[str, Any]]:
+    unique = {canonical_json_bytes(item): item for item in _evidence_references(evidence, fields)}
+    return [unique[key] for key in sorted(unique)]

@@ -24,13 +24,18 @@
 真实性快照和版本化哈希。它只能由 `KnowledgeIndexService` 的受控物化方法创建，
 没有任意写入 API。`KnowledgeIndexRun` 记录全量运行状态、数量和有效块身份清单哈希。
 
+法规的 `basic_information` 是 SourceDocument 级块：每份法规只有一个 active
+块，`structured_record_id` 和 `portable_record_key` 为空。它以原件/解析哈希、
+已验证来源、共享字段及精确去重证据生成稳定文档载荷哈希。共享字段或证据不一致时，
+以 `knowledge_regulation_document_fields_inconsistent` 失败关闭。
+
 单文档重建在事务中比对候选块：不再出现的旧块设为 `is_active=false` 并记录
 `retired_at`，新身份创建，已有同一身份直接复用。候选构建或事务中任一校验失败时，
 不会留下该文档半成品，上一版有效块保持可用。重复输入不新增块。
 
 ## 确定性 Chunk 策略
 
-- Regulation：标题/文号/机关/日期基本信息块，按自然段和完整句分割的正文块，
+- Regulation：每文档一个标题/文号/机关/日期基本信息块；每条记录生成正文块，
   以及条款编号/机关/效力快照块。
 - ProductDocument：产品身份、保障责任、条款与风险三类块，只写数据库中实际非空字段。
 - Penalty：每条结构记录一个独立块，保留联合主体结构、条目索引、fingerprint、
@@ -55,10 +60,14 @@
 record type、portable record key、chunk kind、ordinal、content SHA-256、normalization/
 tokenizer/chunker version。它不包含数据库主键、时间戳、本机路径或审核批次 ID。
 
+机关过滤单独使用 `trusted_authority_filter_normalization_v1`：Unicode NFKC、
+拉丁字母小写、删除全部 Unicode 空白，保留其他字符。原始 authority、块文本和证据 quote 不变。
+
 ## PostgreSQL 召回与确定性排序 v1
 
-PostgreSQL 启用 `pg_trgm`，建立 `to_tsvector('simple', lexical_tokens)` GIN 全文索引和
-`normalized_text gin_trgm_ops` GIN 索引。查询使用 token 全文匹配、trigram 和规范文本子串合并召回，
+PostgreSQL 启用 `pg_trgm`，建立词元全文索引以及规范文本、机关过滤文本的 trigram
+索引。`pg_trgm` 可能由整个数据库共享，因此本迁移 downgrade 有意保留该扩展，
+只删除本迁移创建的索引和表。查询使用 token 全文匹配、trigram 和规范文本子串合并召回，
 然后计算 `trusted_lexical_rank_v1`：
 
 ```text
@@ -90,13 +99,16 @@ python -m app.cli.main knowledge stats
 API 和 CLI 共用 `TrustedKnowledgeSearchService`。结果 snippet 仅从块原文截取，不由模型生成；
 每条结果返回已验证 occurrence URL、locator、evidence references 和内容/身份哈希。
 
-`query` 最长 500 字符，`limit` 范围 1–100，`offset` 最大 10000。空查询仅做有界
-结构化过滤和分页，不取消上限全库返回。
+`query` 最长 500 字符，`limit` 范围 1–100，`offset` 最大 10000。规范化后的空查询
+必须包含 record type、pilot ID、authority、日期或证据质量过滤，否则以
+`knowledge_search_filter_required` 拒绝。`limit` 和 `offset` 不是结构化过滤。
 
 ## 验证、失败关闭与后续扩展
 
-`knowledge verify` 重算哈希并检查 orphan、不合格文档活跃块、RegulatoryCase 误入、
-Penalty 身份、来源 locator 和活跃身份重复。任一异常都返回非零。所有可搜结果还会在
+`knowledge verify` 对每份文档执行一次完整准入闸门，使用与 rebuild 共享的规范候选构建器。
+它检测缺失/多余块、结构记录 orphan、未由 Builder 生成的自洽块、字段/证据/locator 漂移、
+文档级重复和完整资格漂移。全量 rebuild 原子退役明确失去资格的块；仍声称 indexed
+但完整闸门失败时，退役旧块并将运行标记为 failed。任一异常都返回非零。所有可搜结果还会在
 查询时再与当前 `SourceDocument` 的审核、真实性和索引状态联合校验，因此失去资格后
 即使尚未执行退役也不可被搜到。
 

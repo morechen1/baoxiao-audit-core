@@ -41,8 +41,9 @@
 
 `GET /api/v1/knowledge/search` 支持 `query`、可重复的 `record_types`/
 `pilot_ids`/`evidence_quality`、`authority`、`date_from`、`date_to`、`limit` 和
-`offset`。`query` 最长 500 字符，`limit` 为 1–100。空查询仍受结构化过滤和分页上限
-约束。结果只来自活跃的 `verified_public` 已审核、已准入块，不包含
+`offset`。`query` 最长 500 字符，`limit` 为 1–100。规范化后的空查询必须提供
+`record_types`、`pilot_ids`、`authority`、日期或 `evidence_quality` 过滤，否则返回
+`knowledge_search_filter_required`。结果只来自活跃的 `verified_public` 已审核、已准入块，不包含
 `RegulatoryCase`。
 
 每条结果返回确定性分数/排名、记录与来源身份、原文 snippet、命中 token、
