@@ -324,7 +324,9 @@ def _execute_fixture_corpus_offline(samples: list[dict[str, Any]]) -> dict[str, 
     results: list[dict[str, Any]] = []
     for sample in samples:
         scenario = str(sample["scenario"])
-        expected_status = "passed" if sample["expected"] == "passed" else sample["expected"]
+        expected_error_code: str | None = (
+            None if sample["expected"] == "passed" else str(sample["expected"])
+        )
         audience = str(sample["audience"])
         prompt = load_prompt(audience)
         built = _built_context()
@@ -343,7 +345,7 @@ def _execute_fixture_corpus_offline(samples: list[dict[str, Any]]) -> dict[str, 
                 run_status = "completed"
                 artifact_count = 1
             except Exception as exc:
-                actual_status = str(exc)
+                actual_status = "failed"
                 actual_error_code = str(exc)
                 run_status = "failed"
         else:
@@ -355,23 +357,33 @@ def _execute_fixture_corpus_offline(samples: list[dict[str, Any]]) -> dict[str, 
                 run_status = "completed"
                 artifact_count = 1
             except ExplanationError as exc:
-                actual_status = str(exc)
+                actual_status = "rejected"
                 actual_error_code = str(exc)
                 run_status = "rejected"
             except Exception:
-                actual_status = "provider_exception"
+                actual_status = "failed"
                 actual_error_code = "provider_exception"
                 run_status = "failed"
-        passed = actual_status == expected_status
+        expected_status: str = (
+            "passed"
+            if sample["expected"] == "passed"
+            else "failed"
+            if expected_error_code
+            in ("explanation_provider_timeout", "explanation_provider_failed")
+            else "rejected"
+        )
+        outcome_matches_expectation = actual_status == expected_status and (
+            expected_status == "passed" or actual_error_code == expected_error_code
+        )
         results.append(
             {
                 "sample_id": sample["id"],
                 "audience": audience,
                 "expected_status": expected_status,
                 "actual_status": actual_status,
-                "expected_error_code": (None if expected_status == "passed" else expected_status),
+                "expected_error_code": expected_error_code,
                 "actual_error_code": actual_error_code,
-                "passed": passed,
+                "outcome_matches_expectation": outcome_matches_expectation,
                 "explanation_run_status": run_status,
                 "artifact_count": artifact_count,
                 "scenario": scenario,
@@ -384,16 +396,18 @@ def _execute_fixture_corpus_offline(samples: list[dict[str, Any]]) -> dict[str, 
     return {
         "results": results,
         "constructed_valid_executed": len(valid),
-        "constructed_valid_passed": sum(item["passed"] for item in valid),
-        "constructed_valid_failed": len(valid) - sum(item["passed"] for item in valid),
+        "constructed_valid_passed": sum(item["outcome_matches_expectation"] for item in valid),
+        "constructed_valid_failed": sum(not item["outcome_matches_expectation"] for item in valid),
         "constructed_valid_artifact_count": sum(
-            item["artifact_count"] for item in valid if item["passed"]
+            item["artifact_count"] for item in valid if item["outcome_matches_expectation"]
         ),
         "constructed_invalid_executed": len(invalid),
         "constructed_invalid_blocked": len(rejected_runs) + len(failed_runs),
-        "constructed_invalid_unexpected_pass": sum(item["passed"] for item in invalid),
+        "constructed_invalid_unexpected_pass": sum(
+            item["actual_status"] == "passed" for item in invalid
+        ),
         "invalid_error_code_match_count": sum(
-            item["expected_error_code"] == item["actual_error_code"] for item in invalid
+            item["outcome_matches_expectation"] for item in invalid
         ),
         "rejected_run_count": len(rejected_runs),
         "failed_run_count": len(failed_runs),
@@ -401,15 +415,16 @@ def _execute_fixture_corpus_offline(samples: list[dict[str, Any]]) -> dict[str, 
         "rejected_artifact_count": sum(item["artifact_count"] for item in invalid),
         "uncited_claim_rejection_count": sum(
             item["scenario"] in {"no_citations", "uncited_claim", "executive_uncited"}
-            and item["passed"]
+            and item["outcome_matches_expectation"]
             for item in invalid
         ),
         "trivial_quote_rejection_count": sum(
-            item["scenario"] == "trivial_quote" and item["passed"] for item in invalid
+            item["scenario"] == "trivial_quote" and item["outcome_matches_expectation"]
+            for item in invalid
         ),
         "metadata_quote_rejection_count": sum(
             item["scenario"] in {"metadata_quote", "metadata_pilot_id", "metadata_url"}
-            and item["passed"]
+            and item["outcome_matches_expectation"]
             for item in invalid
         ),
     }
@@ -469,16 +484,26 @@ def main() -> None:
     os.environ["DATA_DIR"] = str(args.data_dir.resolve())
     get_settings.cache_clear()
     db_available = bool(args.database_url)
+    postgresql_available = bool(
+        args.database_url
+        and (
+            "postgresql" in str(args.database_url).lower()
+            or "postgres" in str(args.database_url).lower()
+        )
+    )
+    comparison_available = bool(args.comparison_database_url)
     if db_available:
         assert args.database_url is not None
         primary = _execute_database(args.database_url)
         comparison = (
-            _execute_database(args.comparison_database_url)
-            if args.comparison_database_url
-            else primary
+            _execute_database(args.comparison_database_url) if comparison_available else primary
         )
-        context_stable = primary["contexts"] == comparison["contexts"]
-        artifact_stable = primary["artifacts"] == comparison["artifacts"]
+        context_stable = (
+            primary["contexts"] == comparison["contexts"] if comparison_available else None
+        )
+        artifact_stable = (
+            primary["artifacts"] == comparison["artifacts"] if comparison_available else None
+        )
         evidence_insufficient_pass = _exercise_evidence_insufficient(args.database_url)
     else:
         primary = {
@@ -508,9 +533,13 @@ def main() -> None:
     consumer_prompt = load_prompt("consumer")
 
     valid_artifact_count_db = 0
+    budget_exercise: dict[str, Any] = {}
+    context_budget_pressure_executed = False
+    context_budget_preserves_minimum_evidence = False
+    context_too_large_fail_closed = False
     if db_available:
         budget_exercise = _exercise_budget_pressure()
-        context_budget_pressure_executed = True
+        context_budget_pressure_executed = budget_exercise.get("executed", 0) >= 3
         context_budget_preserves_minimum_evidence = budget_exercise.get("preserves_minimum", False)
         context_too_large_fail_closed = budget_exercise.get("fail_closed", False)
         valid_artifact_count_db = primary["sample_count"] * 2 + (
@@ -543,11 +572,18 @@ def main() -> None:
         "context_schema_version": "controlled_rag_context_v1",
         "provider_version": "controlled_fixture_provider_v2",
         "database_executed": db_available,
-        "postgresql_executed": False,
-        "comparison_database_executed": False,
+        "postgresql_executed": db_available and postgresql_available,
+        "comparison_database_executed": db_available and comparison_available,
         "docker_executed": False,
         "alembic_check_executed": False,
-        "formal_database_acceptance_completed": False,
+        "formal_database_acceptance_completed": (
+            db_available
+            and postgresql_available
+            and comparison_available
+            and bool(context_stable)
+            and bool(artifact_stable)
+            and bool(evidence_insufficient_pass)
+        ),
         "offline_constructed_evaluation_completed": True,
         "screening_sample_count": primary["sample_count"],
         "screening_finding_count": primary["screening_finding_count"],
@@ -601,11 +637,13 @@ def main() -> None:
         "trivial_quote_rejection_count": evaluation["trivial_quote_rejection_count"],
         "metadata_quote_rejection_count": evaluation["metadata_quote_rejection_count"],
         "cross_finding_missing_citation_rejection_count": sum(
-            item["actual_error_code"] == "explanation_citation_wrong_finding" and not item["passed"]
+            item["actual_error_code"] == "explanation_citation_wrong_finding"
+            and item["outcome_matches_expectation"]
             for item in evaluation["results"]
         ),
         "partial_certainty_rejection_count": sum(
-            item["actual_error_code"] == "explanation_missing_uncertainty" and not item["passed"]
+            item["actual_error_code"] == "explanation_missing_uncertainty"
+            and item["outcome_matches_expectation"]
             for item in evaluation["results"]
         ),
         "hidden_segment_rejection_count": 0,

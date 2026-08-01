@@ -118,13 +118,20 @@ class DeterministicFixtureProvider:
                         finding.finding_key,
                     )
                 else:
+                    base_text = (
+                        "现有证据显示，确定性规则识别到“" + finding.matched_text + "”这一表述。"
+                    )
+                    if finding.evidence_status in uncertain:
+                        base_text += "可能存在风险信号，需要进一步核验。"
+                    else:
+                        base_text += "需要进一步核验。"
                     explanation = self._grounded(
                         "deterministic_finding_explanation",
-                        f"现有证据显示，确定性规则识别到“{finding.matched_text}”这一风险信号。",
+                        base_text,
                         finding.finding_key,
                         citations[:1],
                     )
-                    assessment_text = "现有证据显示该风险信号，仍需人工复核完整材料。"
+                    assessment_text = "现有证据显示可能存在风险信号，需要进一步核验。"
                     if finding.evidence_status in uncertain:
                         assessment_text = "现有证据显示可能存在风险信号，需要进一步核验。"
                     if any(item.context_scope == illustrative for item in finding.evidence):
@@ -178,7 +185,7 @@ class DeterministicFixtureProvider:
                     finding.finding_key,
                 )
             else:
-                text = f"现有证据显示，材料中的“{finding.matched_text}”需要您进一步核对。"
+                text = "现有证据显示，材料中的" + finding.matched_text + "需要您进一步核对。"
                 if finding.evidence_status in uncertain:
                     text += "需要进一步核验。"
                 if any(item.context_scope == illustrative for item in finding.evidence):
@@ -317,7 +324,9 @@ class DeterministicFixtureProvider:
             assert isinstance(first_citation, dict)
             first_citation["cited_quote"] = request.context.findings[0].evidence[0].source_url
         elif self.scenario == "new_numeric_claim":
-            claim["text"] = "该公司被罚款1000万元，产品实际收益率为8%。"
+            claim["text"] = (
+                "可能存在风险信号，需要进一步核验。该公司被罚款1000万元，产品实际收益率为8%。"
+            )
         elif self.scenario == "unknown_claim_type":
             claim["claim_type"] = "model_free_form"
         elif self.scenario == "executive_uncited":

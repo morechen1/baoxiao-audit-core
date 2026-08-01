@@ -51,7 +51,7 @@
     {"id":"RAG-048","constructed":true,"audience":"institution","scenario":"uncited_claim","expected":"explanation_unsupported_claim"},
     {"id":"RAG-049","constructed":true,"audience":"consumer","scenario":"trivial_quote","expected":"explanation_citation_too_short"},
     {"id":"RAG-050","constructed":true,"audience":"institution","scenario":"metadata_quote","expected":"explanation_citation_not_substantive"},
-    {"id":"RAG-051","constructed":true,"audience":"consumer","scenario":"new_numeric_claim","expected":"explanation_missing_uncertainty"},
+    {"id":"RAG-051","constructed":true,"audience":"consumer","scenario":"new_numeric_claim","expected":"explanation_unsupported_claim"},
     {"id":"RAG-052","constructed":true,"audience":"institution","scenario":"unknown_claim_type","expected":"explanation_output_invalid_schema"},
     {"id":"RAG-053","constructed":true,"audience":"consumer","scenario":"executive_uncited","expected":"explanation_unsupported_claim"},
     {"id":"RAG-054","constructed":true,"audience":"institution","scenario":"metadata_pilot_id","expected":"explanation_citation_not_substantive"},

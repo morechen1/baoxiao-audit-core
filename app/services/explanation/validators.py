@@ -26,7 +26,6 @@ from app.services.explanation.schemas import (
 UNCERTAINTY_EXPRESSIONS = (
     "可能存在",
     "可能涉及",
-    "风险信号",
     "需要进一步核验",
     "尚需核验",
     "部分支持",
@@ -51,7 +50,7 @@ PARTIAL_CERTAINTY_PATTERNS = (
     r"结论明确",
     r"必然",
     r"一定构成",
-    r"证据充分[^证]",
+    r"证据充分(?:$|[^证])",
     r"可以得出明确结论",
 )
 LEGAL_CONCLUSION_PATTERNS = (

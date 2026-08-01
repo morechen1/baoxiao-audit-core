@@ -1622,3 +1622,169 @@ def test_evidence_insufficient_finding_cannot_borrow_other_finding_citations(
         ControlledExplanationValidator().validate(
             json.dumps(output, ensure_ascii=False), prompt, built
         )
+
+
+# ── V3 targeted tests ─────────────────────────────────────────────────────────
+
+
+def test_bare_risk_signal_word_alone_does_not_satisfy_uncertainty() -> None:
+    """explanation has uncertainty, evidence_assessment has only 风险信号 → reject."""
+    payload, prompt, built = _valid_payload("institution")
+    payload["finding_explanations"][0]["explanation"]["text"] = (
+        "现有证据显示可能存在风险信号，需要进一步核验。"
+    )
+    payload["finding_explanations"][0]["evidence_assessment"]["text"] = (
+        "该证据涉及所识别的风险信号。"
+    )
+    with pytest.raises(ExplanationError, match="explanation_missing_uncertainty"):
+        ControlledExplanationValidator().validate(
+            json.dumps(payload, ensure_ascii=False), prompt, built
+        )
+
+
+def test_may_exist_risk_signal_with_uncertainty_passes() -> None:
+    """full phrase '可能存在风险信号，需要进一步核验' passes."""
+    payload, prompt, built = _valid_payload("institution")
+    payload["finding_explanations"][0]["explanation"]["text"] = (
+        "现有证据显示可能存在风险信号，需要进一步核验。"
+    )
+    payload["finding_explanations"][0]["evidence_assessment"]["text"] = (
+        "可能存在风险信号，需要进一步核验。"
+    )
+    validated = ControlledExplanationValidator().validate(
+        json.dumps(payload, ensure_ascii=False), prompt, built
+    )
+    assert validated.output["schema_version"] == "institution_explanation_v1"
+
+
+def test_new_numeric_claim_rejected_by_number_token_gate() -> None:
+    """RAG-051: uncertainty satisfied but unsupported numbers trigger rejection."""
+    payload, prompt, built = _valid_payload("consumer")
+    payload["risk_explanations"][0]["plain_language_explanation"]["text"] = (
+        "可能存在风险信号，需要进一步核验。该公司被罚款1000万元，产品实际收益率为8%。"
+    )
+    with pytest.raises(ExplanationError, match="explanation_unsupported_claim"):
+        ControlledExplanationValidator().validate(
+            json.dumps(payload, ensure_ascii=False), prompt, built
+        )
+
+
+def test_evidence_insufficient_claim_rejected_by_row_check() -> None:
+    """evidence_insufficient: non-deterministic_template claim with 证据充分 is caught."""
+    f001 = ControlledFinding(
+        finding_key="F001",
+        rule_id="regulatory_endorsement",
+        category="监管背书",
+        severity="high",
+        signal_strength="strong",
+        matched_text="测试",
+        raw_start_offset=0,
+        raw_end_offset=2,
+        deterministic_explanation="该表达可能造成误解。",
+        review_question="是否需要核验？",
+        evidence_status="evidence_insufficient",
+        evidence=[],
+    )
+    context = ControlledRAGContext(
+        context_schema_version="controlled_rag_context_v1",
+        screening_run_payload_sha256="e" * 64,
+        trusted_index_payload_hash="f" * 64,
+        material={"title": "T", "material_type": "advertisement", "input_sha256": "1" * 64},
+        findings=[f001],
+    )
+    built = BuiltContext(context, canonical_sha256(context.model_dump(mode="json")), {})
+    prompt = load_prompt("institution")
+    output = {
+        "schema_version": "institution_explanation_v1",
+        "executive_summary": {
+            "claim_type": "deterministic_template",
+            "text": "以下内容仅解释已持久化的确定性筛查发现。",
+            "finding_keys": ["F001"],
+            "citations": [],
+        },
+        "finding_explanations": [
+            {
+                "finding_key": "F001",
+                "explanation": {
+                    "claim_type": "deterministic_template",
+                    "text": "当前证据不足以作出结论，需要进一步核验。",
+                    "finding_keys": ["F001"],
+                    "citations": [],
+                },
+                "why_it_matters": {
+                    "claim_type": "deterministic_template",
+                    "text": f001.deterministic_explanation,
+                    "finding_keys": ["F001"],
+                    "citations": [],
+                },
+                "evidence_assessment": {
+                    "claim_type": "evidence_assessment",
+                    "text": "证据充分。",
+                    "finding_keys": ["F001"],
+                    "citations": [],
+                },
+                "review_actions": [
+                    {
+                        "claim_type": "deterministic_template",
+                        "text": f001.review_question,
+                        "finding_keys": ["F001"],
+                        "citations": [],
+                    }
+                ],
+            }
+        ],
+        "cross_finding_observations": [],
+        "manual_review_priorities": [],
+        "disclaimer": prompt.required_disclaimer,
+    }
+    with pytest.raises(ExplanationError, match="explanation_unsupported_claim"):
+        ControlledExplanationValidator().validate(
+            json.dumps(output, ensure_ascii=False), prompt, built
+        )
+
+
+def test_offline_fixture_corpus_semantics() -> None:
+    """direct test of _execute_fixture_corpus_offline returns correct semantics."""
+    import json
+    from pathlib import Path as _Path
+
+    fixture_path = (
+        _Path(__file__).parents[1] / "fixtures" / "controlled_rag_eval_v1" / "responses.json"
+    )
+    samples = json.loads(fixture_path.read_text(encoding="utf-8"))["samples"]
+
+    from scripts.run_controlled_rag_acceptance import _execute_fixture_corpus_offline
+
+    result = _execute_fixture_corpus_offline(list(samples))
+
+    assert result["constructed_valid_executed"] == 12
+    assert result["constructed_valid_passed"] == 12
+    assert result["constructed_valid_failed"] == 0
+    assert result["constructed_valid_artifact_count"] == 12
+    assert result["constructed_invalid_executed"] == 43
+    assert result["constructed_invalid_blocked"] == 43
+    assert result["constructed_invalid_unexpected_pass"] == 0
+    assert result["invalid_error_code_match_count"] == 43
+    assert result["rejected_run_count"] == 41
+    assert result["failed_run_count"] == 2
+    assert result["invalid_failed_or_rejected_count"] == 43
+    assert result["rejected_artifact_count"] == 0
+    assert result["uncited_claim_rejection_count"] == 3
+    assert result["trivial_quote_rejection_count"] == 1
+    assert result["metadata_quote_rejection_count"] == 3
+
+    for item in result["results"]:
+        if item["expected_status"] == "passed":
+            assert item["actual_status"] == "passed"
+            assert item["artifact_count"] == 1
+            assert item["outcome_matches_expectation"] is True
+        else:
+            assert item["artifact_count"] == 0
+            assert item["outcome_matches_expectation"] is True
+            assert item["actual_status"] in {"rejected", "failed"}
+            assert item["actual_error_code"] is not None
+            assert item["actual_error_code"] == item["expected_error_code"]
+            if item["explanation_run_status"] == "failed":
+                assert item["actual_status"] == "failed"
+            else:
+                assert item["actual_status"] == "rejected"
