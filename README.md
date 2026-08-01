@@ -19,9 +19,11 @@ FastAPI 和 Typer CLI 共用 service/repository 层。PostgreSQL 保存来源、
 监管规则、行政处罚、产品资料、监管案例和评测样本等结构化记录，以及解析版本、字段
 证据、审核预留/决定和状态历史；`data/raw` 保存按 SHA-256
 命名的原件，`data/parsed_artifacts` 保存按内容哈希命名的不可变解析 JSON。索引服务
-当前只写入可信状态，不做 RAG、全文搜索、向量生成或法律结论。
+并为经审核、经公开来源验证且已准入的法规、产品和处罚记录物化可验证知识块。
+当前提供 PostgreSQL 中文确定性词法检索，不做 RAG、向量生成或自动法律结论。
 
-详细设计见 [架构](docs/architecture.md) 和 [数据模型](docs/data-model.md)。
+详细设计见 [架构](docs/architecture.md)、[数据模型](docs/data-model.md) 和
+[可信知识检索基础层](docs/trusted-retrieval-foundation.md)。
 
 ## 快速启动
 
@@ -88,6 +90,10 @@ python -m app.cli.main list-regulatory-cases \
   --case-usage external_test_candidate
 python -m app.cli.main show-regulatory-case --case-id 1
 python -m app.cli.main index-approved
+python -m app.cli.main knowledge rebuild
+python -m app.cli.main knowledge verify
+python -m app.cli.main knowledge search "销售误导" --record-type penalty
+python -m app.cli.main knowledge stats
 python -m app.cli.main repair-status-consistency --dry-run
 python -m app.cli.main resubmit-for-review --record-type product_document \
   --record-id 123 --reason "已补充可核验官方来源"
@@ -121,6 +127,7 @@ curl -X POST http://localhost:8000/validation/run
 curl 'http://localhost:8000/records?status=pending_review'
 curl 'http://localhost:8000/regulatory-cases?case_usage=external_test_candidate'
 curl 'http://localhost:8000/regulatory-cases/1'
+curl 'http://localhost:8000/api/v1/knowledge/search?query=销售误导&record_types=penalty'
 ```
 
 端点明细见 [API 文档](docs/api.md)。
@@ -185,11 +192,11 @@ make test
   `collect-url` 命令不属于 Pilot 账本流程。
 - 尚未建立法规修订、废止及替代关系库；`validity_status` 仅允许 `NULL/unknown`，
   API 统一展示“效力状态待核验”，不得解释为现行有效。
-- 监管案例索引目前只保存可审计的结构化 payload 和状态，不提供全文检索、排序、向量
-  检索或面向用户的法律判断。
+- 可信检索是“确定性词法排序 v1”，不是标准 BM25；不包含向量检索、RAG
+  或面向用户的法律判断。RegulatoryCase 本阶段明确排除于可信知识块。
 
 ## 下一阶段
 
 接入真实监管来源白名单与 robots/使用条款核验、OCR 人工复核队列、字段抽取器、
-PostgreSQL 全文检索、经批准的 Embedding 管线、权限隔离和审核 UI。任何模型输出仍须
+经批准的 Embedding 管线、词法/向量混合召回、权限隔离和审核 UI。任何模型输出仍须
 绑定原文证据并经过既有审核状态机。
