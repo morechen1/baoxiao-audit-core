@@ -31,6 +31,19 @@ FastAPI 和 Typer CLI 共用 service/repository 层。PostgreSQL 保存来源、
 
 ## 快速启动
 
+### 比赛现场 Demo（推荐）
+
+本机具备 Python 虚拟环境与 PostgreSQL 16 后，直接运行：
+
+```bash
+make demo
+```
+
+它只允许使用本地 `baoxiao_demo` 数据库和 `.demo-data/` 文件目录，自动执行 migration、
+构造赛事数据准备以及三案例 API / Citation / 双端解释预检，然后启动
+`http://127.0.0.1:8000`。构造数据和 `.invalid` 来源仅用于比赛运行时，绝不导入正式数据
+或正式证据库；若端口、PostgreSQL 或虚拟环境缺失，脚本会直接给出可操作的错误。
+
 要求 Docker / Docker Compose，或本地 Python 3.12。
 
 ```bash

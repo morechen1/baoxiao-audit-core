@@ -1,4 +1,4 @@
-.PHONY: install format lint typecheck test up down migrate seed review-demo
+.PHONY: install format lint typecheck test up down migrate seed review-demo demo demo-smoke
 
 install:
 	python3.12 -m venv .venv
@@ -32,3 +32,9 @@ seed:
 review-demo:
 	docker compose exec api python -m app.cli.main seed
 	docker compose exec api python -m app.cli.main export-review-batch --data-type penalty --format jsonl
+
+demo:
+	./scripts/start_demo.sh
+
+demo-smoke:
+	BAOXIAO_DEMO_RUNTIME=1 DATABASE_URL="$${DEMO_DATABASE_URL:-postgresql+psycopg://$${USER}@localhost:5432/baoxiao_demo}" DATA_DIR=.demo-data .venv/bin/python scripts/demo_smoke.py

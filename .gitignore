@@ -19,6 +19,7 @@ data/parsed_artifacts/*
 data/review_batches/*
 data/review_bundles/*
 data/review_results/*
+.demo-data/
 !data/raw/.gitkeep
 !data/parsed/.gitkeep
 !data/review_batches/.gitkeep

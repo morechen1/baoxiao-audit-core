@@ -7,10 +7,10 @@ const demoCases = [
     riskLevel: "high",
     materialType: "advertisement",
     timestamp: "刚刚",
-    rawText: "监管机构推荐本产品，保证年化收益8%，本金绝对安全，今天投保即可领取限量礼品。",
+    rawText: "监管推荐本产品，保证年化收益8%，本金绝对安全，今天投保即可领取限量礼品。",
     summary: "材料同时出现监管背书、保证收益与零风险承诺等高风险信号，建议立即停止投放并由合规人员复核。",
     findings: [
-      finding("F001", "监管背书误导", "high", "监管机构推荐", "该表述可能使消费者误以为产品获得监管机构背书或保证。", "请删除任何暗示监管机构推荐、审批或担保的营销表述。", "请确认营销材料是否使用了监管名称、标识或暗示性措辞。", "E001", "规范性依据 · 构造展示快照", "保险销售行为管理要求", "不得利用监管机构审核或备案程序提供保证等引人误解的表述。", "第十七条", "机构端：该用语可能造成监管背书误解，应结合投放场景复核并完成下架整改。", "消费者端：监管部门不会为具体保险产品作推荐或收益保证，请以合同和正式公开信息为准。"),
+      finding("F001", "监管背书误导", "high", "监管推荐", "该表述可能使消费者误以为产品获得监管机构背书或保证。", "请删除任何暗示监管机构推荐、审批或担保的营销表述。", "请确认营销材料是否使用了监管名称、标识或暗示性措辞。", "E001", "规范性依据 · 构造展示快照", "保险销售行为管理要求", "不得利用监管机构审核或备案程序提供保证等引人误解的表述。", "第十七条", "机构端：该用语可能造成监管背书误解，应结合投放场景复核并完成下架整改。", "消费者端：监管部门不会为具体保险产品作推荐或收益保证，请以合同和正式公开信息为准。"),
       finding("F002", "保证收益或本金", "high", "保证年化收益8%", "承诺固定收益或本金安全可能与保险产品实际风险、合同约定不一致。", "删除“保证”“绝对安全”等确定性承诺，改为以正式合同条款为准。", "该收益表述是否有对应合同依据，且是否完整提示限制条件？", "E002", "处罚案例 · 构造展示快照", "保险营销风险提示材料", "不得以保证收益、保本保息等表述误导消费者。", "风险提示段落", "机构端：当前材料存在确定性收益承诺风险信号，需核对产品条款与适用范围。", "消费者端：看到“保证收益”时，请注意核对保险合同是否真的包含相同承诺及限制条件。"),
       finding("F003", "零风险或无损失", "high", "本金绝对安全", "绝对化安全承诺可能弱化消费者对保险责任、现金价值或退保损失的理解。", "移除绝对化安全表达，并补充与产品相关的真实风险提示。", "材料是否遗漏等待期、责任免除、退保损失等关键说明？", "E003", "产品条款语境 · 构造展示快照", "保险合同风险提示", "投保人应阅读保险责任、责任免除及退保相关约定。", "风险提示", "机构端：该结论仅为风险信号，建议补充完整条款提示并进行人工复核。", "消费者端：保险产品的保障和收益以合同为准，购买前请阅读责任免除和退保相关约定。"),
     ],
@@ -35,10 +35,10 @@ const demoCases = [
     riskLevel: "medium",
     materialType: "sales_script",
     timestamp: "昨日 16:20",
-    rawText: "资金使用灵活，如有需要可随时办理退保并拿回全部投入资金。具体权益和现金价值请以合同约定为准。",
+    rawText: "资金使用灵活，如有需要可随时退保没有损失。具体权益和现金价值请以合同约定为准。",
     summary: "材料含有可能弱化退保损失的表达；虽附有合同提示，仍需人工判断前后表述是否足以避免误导。",
     findings: [
-      finding("F001", "退保 / 现金价值误述", "medium", "随时办理退保并拿回全部投入资金", "该表达可能使消费者忽略退保价值受合同、持有期等条件影响。", "避免使用“全部拿回”等绝对化用语；同时展示与该产品对应的现金价值和退保限制。", "是否已向消费者清晰说明退保金额可能低于已交保费及其适用条件？", "E001", "产品条款语境 · 构造展示快照", "保险合同现金价值说明", "退保时的现金价值按照保险合同约定计算，可能低于已交保险费。", "现金价值条款", "机构端：当前证据有限，但该表述可能弱化退保损失，应结合具体合同与上下文核验。", "消费者端：退保能拿回多少金额要看合同的现金价值约定，可能与已交保费不同，请先核对条款。", "partially_supported"),
+      finding("F001", "退保 / 现金价值误述", "medium", "随时退保没有损失", "该表达可能使消费者忽略退保价值受合同、持有期等条件影响。", "避免使用“没有损失”等绝对化用语；同时展示与该产品对应的现金价值和退保限制。", "是否已向消费者清晰说明退保金额可能低于已交保费及其适用条件？", "E001", "产品条款语境 · 构造展示快照", "保险合同现金价值说明", "退保时的现金价值按照保险合同约定计算，可能低于已交保险费。", "现金价值条款", "机构端：当前证据有限，但该表述可能弱化退保损失，应结合具体合同与上下文核验。", "消费者端：退保能拿回多少金额要看合同的现金价值约定，可能与已交保费不同，请先核对条款。", "partially_supported"),
     ],
   },
 ];
@@ -181,8 +181,9 @@ async function runLiveReview(form) {
     let citations = [];
     if (institutionArtifact) citations = await fetchJson(`/api/v1/explanations/${institutionArtifact.explanation_run_id}/citations`);
     renderStages(6);
+    const constructedRuntime = citations.some((item) => String(item.source_url || "").includes("contest-demo.invalid"));
     state.current = {
-      id: `live-${created.screening_run_id}`, number: "LIVE API", title, rawText, materialType: $("#material-type").value, riskLevel: screening.findings.some((row) => row.severity === "high") ? "high" : screening.findings.some((row) => row.severity === "medium") ? "medium" : "low", summary: institutionReport.disclaimer, findings: screening.findings.map((row, index) => apiFinding(row, index, institutionArtifact, consumerArtifact, citations)), mode: "在线 API 审查 · 当前后端结果", status: created.status, institutionReport, consumerReport, institutionArtifact, consumerArtifact,
+      id: `live-${created.screening_run_id}`, number: "LIVE API", title, rawText, materialType: $("#material-type").value, riskLevel: screening.findings.some((row) => row.severity === "high") ? "high" : screening.findings.some((row) => row.severity === "medium") ? "medium" : "low", summary: institutionReport.disclaimer, findings: screening.findings.map((row, index) => apiFinding(row, index, institutionArtifact, consumerArtifact, citations)), mode: constructedRuntime ? "在线 API 审查 · 隔离构造赛事数据" : "在线 API 审查 · 当前后端结果", status: created.status, institutionReport, consumerReport, institutionArtifact, consumerArtifact,
     };
     renderResult();
     showView("result");
@@ -200,7 +201,12 @@ function renderResult() {
   const medium = findings.filter((item) => item.severity === "medium").length;
   const evidenceCount = findings.reduce((count, item) => count + item.citations.length, 0);
   $("#result-mode").textContent = result.mode;
-  $("#result-content").innerHTML = `<div class="result-hero"><article class="result-summary"><span class="eyebrow">REVIEW RESULT / ${escapeHtml(result.number || "CASE")}</span><h1>${escapeHtml(result.title)}</h1><p>${escapeHtml(result.summary || "审核完成。")}</p><div class="result-kpis"><div><strong class="${riskClass(result.riskLevel)}">${riskLabel(result.riskLevel)}</strong><small>总体风险等级</small></div><div><strong>${findings.length}</strong><small>风险信号</small></div><div><strong>${evidenceCount}</strong><small>可见 Citation</small></div><div><strong>${result.status === "completed" ? "完成" : "已创建"}</strong><small>审核状态</small></div></div></article><aside class="result-status"><div><span class="eyebrow">MATERIAL PROFILE</span><h3>${escapeHtml(result.materialType || "文本材料")}</h3></div><div class="status-list"><span>材料指纹 <b>${result.id.includes("live") ? "已生成" : "演示快照"}</b></span><span>规则筛查 <b>确定性</b></span><span>证据校验 <b>${result.mode.startsWith("在线") ? "后端结果" : "展示完成"}</b></span><span>审计边界 <b>已保留</b></span></div></aside></div><div class="analysis-layout"><article class="findings-panel"><header class="panel-header"><div><span class="eyebrow">RISK FINDINGS</span><h2>风险详情与证据链</h2></div><div class="audience-toggle"><button class="active" data-audience="institution">机构端</button><button data-audience="consumer">消费者端</button></div></header><div id="finding-list">${findings.length ? findings.map(findingRow).join("") : `<div class="empty-result">未发现当前规则集中的风险信号。仍建议按既有人工审核流程确认材料版本与适用范围。</div>`}</div></article><aside class="detail-panel" id="detail-panel"><div class="detail-empty"><div><b>选择一条风险信号</b><br />查看“原文 → 规则 → 依据 → 受控解释”的完整链路。</div></div></aside></div>${result.rawText ? `<div class="notice"><b>材料原文：</b>${escapeHtml(result.rawText)}</div>` : ""}<div class="notice"><b>边界说明：</b>${result.mode.startsWith("在线") ? "结果来自当前后端 API；系统输出为风险信号与证据辅助，不构成违法认定或最终法律意见。" : "该案例及引用均为构造展示数据，仅用于现场演示交互与能力边界；不代表真实监管材料、真实产品或正式可信证据。"}</div>`;
+  const boundaryNotice = result.mode.includes("隔离构造赛事数据")
+    ? "当前后端运行在隔离的构造赛事数据环境；引用不代表真实监管材料、真实产品或正式可信证据。"
+    : result.mode.startsWith("在线")
+      ? "结果来自当前后端 API；系统输出为风险信号与证据辅助，不构成违法认定或最终法律意见。"
+      : "该案例及引用均为构造展示数据，仅用于现场演示交互与能力边界；不代表真实监管材料、真实产品或正式可信证据。";
+  $("#result-content").innerHTML = `<div class="result-hero"><article class="result-summary"><span class="eyebrow">REVIEW RESULT / ${escapeHtml(result.number || "CASE")}</span><h1>${escapeHtml(result.title)}</h1><p>${escapeHtml(result.summary || "审核完成。")}</p><div class="result-kpis"><div><strong class="${riskClass(result.riskLevel)}">${riskLabel(result.riskLevel)}</strong><small>总体风险等级</small></div><div><strong>${findings.length}</strong><small>风险信号</small></div><div><strong>${evidenceCount}</strong><small>可见 Citation</small></div><div><strong>${result.status === "completed" ? "完成" : "已创建"}</strong><small>审核状态</small></div></div></article><aside class="result-status"><div><span class="eyebrow">MATERIAL PROFILE</span><h3>${escapeHtml(result.materialType || "文本材料")}</h3></div><div class="status-list"><span>材料指纹 <b>${result.id.includes("live") ? "已生成" : "演示快照"}</b></span><span>规则筛查 <b>确定性</b></span><span>证据校验 <b>${result.mode.startsWith("在线") ? "后端结果" : "展示完成"}</b></span><span>审计边界 <b>已保留</b></span></div></aside></div><div class="analysis-layout"><article class="findings-panel"><header class="panel-header"><div><span class="eyebrow">RISK FINDINGS</span><h2>风险详情与证据链</h2></div><div class="audience-toggle"><button class="active" data-audience="institution">机构端</button><button data-audience="consumer">消费者端</button></div></header><div id="finding-list">${findings.length ? findings.map(findingRow).join("") : `<div class="empty-result">未发现当前规则集中的风险信号。仍建议按既有人工审核流程确认材料版本与适用范围。</div>`}</div></article><aside class="detail-panel" id="detail-panel"><div class="detail-empty"><div><b>选择一条风险信号</b><br />查看“原文 → 规则 → 依据 → 受控解释”的完整链路。</div></div></aside></div>${result.rawText ? `<div class="notice"><b>材料原文：</b>${escapeHtml(result.rawText)}</div>` : ""}<div class="notice"><b>边界说明：</b>${boundaryNotice}</div>`;
   $$("[data-audience]").forEach((button) => button.addEventListener("click", () => { state.audience = button.dataset.audience; $$("[data-audience]").forEach((item) => item.classList.toggle("active", item === button)); const selected = $(".finding-row.selected"); if (selected) renderDetail(Number(selected.dataset.findingIndex)); }));
   $$(".finding-row").forEach((row) => row.addEventListener("click", () => { $$(".finding-row").forEach((item) => item.classList.remove("selected")); row.classList.add("selected"); renderDetail(Number(row.dataset.findingIndex)); }));
   if (findings.length) { const first = $(".finding-row"); first.classList.add("selected"); renderDetail(0); }
