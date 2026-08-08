@@ -5,7 +5,6 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 PYTHON="$ROOT_DIR/.venv/bin/python"
-ALEMBIC="$ROOT_DIR/.venv/bin/alembic"
 FINAL_PORT="${FINAL_DEMO_PORT:-8000}"
 FINAL_DATABASE_NAME="${FINAL_DATABASE_NAME:-baoxiao_contest_final}"
 FINAL_DATABASE_URL="${FINAL_DATABASE_URL:-postgresql+psycopg://${USER}@localhost:5432/${FINAL_DATABASE_NAME}}"
@@ -27,7 +26,7 @@ case "$FINAL_DATABASE_URL" in
   */"$FINAL_DATABASE_NAME"|*/"$FINAL_DATABASE_NAME"\?*) ;;
   *) fail "FINAL_DATABASE_URL must target $FINAL_DATABASE_NAME." ;;
 esac
-[[ -x "$PYTHON" && -x "$ALEMBIC" ]] || fail "Missing .venv; run make install first."
+[[ -x "$PYTHON" ]] || fail "Missing .venv; run make install first."
 command -v psql >/dev/null || fail "PostgreSQL client psql is required."
 command -v pg_isready >/dev/null || fail "PostgreSQL pg_isready is required."
 pg_isready -h 127.0.0.1 -p 5432 -q || fail "PostgreSQL is not ready on 127.0.0.1:5432."
@@ -39,7 +38,7 @@ if ! psql -h 127.0.0.1 -d postgres -Atqc \
 fi
 
 echo "[final-demo] Applying migrations..."
-"$ALEMBIC" upgrade head
+"$PYTHON" -m alembic upgrade head
 
 document_count="$(psql -h 127.0.0.1 -d "$FINAL_DATABASE_NAME" -Atqc 'SELECT count(*) FROM source_documents')"
 if [[ "$document_count" == "0" ]]; then

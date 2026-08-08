@@ -3,8 +3,8 @@
   "rules": [
     {
       "rule_id": "absolute_or_superlative_claim", "version": "1", "category": "absolute_claim", "severity": "medium", "signal_strength": "medium",
-      "positive_patterns": ["全[\\s]*网[\\s]*第[\\s]*一", "收[\\s]*益[\\s]*最[\\s]*高", "最[\\s]*安[\\s]*全", "最[\\s]*划[\\s]*算", "唯[\\s]*一[\\s]*最[\\s]*佳"],
-      "exception_patterns": ["引[\\s]*用", "法[\\s]*规[\\s]*原[\\s]*文"], "required_context_patterns": [],
+      "positive_patterns": ["全[\\s]*网[\\s]*第[\\s]*一", "收[\\s]*益[\\s]*最[\\s]*高", "最[\\s]*安[\\s]*全", "最[\\s]*划[\\s]*算", "唯[\\s]*一[\\s]*最[\\s]*佳", "绝[\\s]*对[\\s]*(?:高[\\s]*)?(?:收[\\s]*益|回[\\s]*报|赚[\\s]*钱|获[\\s]*利|安[\\s]*全|保[\\s]*障)", "(?:百[\\s]*分[\\s]*之[\\s]*百|百[\\s]*分[\\s]*百|100[\\s]*[%％])[\\s]*(?:高[\\s]*)?(?:收[\\s]*益|回[\\s]*报|赚[\\s]*钱|获[\\s]*利|安[\\s]*全|保[\\s]*障)", "(?:肯[\\s]*定|一[\\s]*定|必[\\s]*然)[\\s]*(?:能[\\s]*|会[\\s]*)?(?:赚[\\s]*钱|获[\\s]*利)", "(?:肯[\\s]*定|一[\\s]*定|必[\\s]*然)[\\s]*(?:(?:是|很|非[\\s]*常|特[\\s]*别)[\\s]*)?(?:安[\\s]*全|有[\\s]*保[\\s]*障|高[\\s]*(?:收[\\s]*益|回[\\s]*报))", "(?:收[\\s]*益|回[\\s]*报)[\\s]*(?:肯[\\s]*定|一[\\s]*定|必[\\s]*然)[\\s]*(?:会[\\s]*|能[\\s]*)?(?:很[\\s]*|非[\\s]*常[\\s]*|特[\\s]*别[\\s]*)?高"],
+      "exception_patterns": ["引[\\s]*用", "法[\\s]*规[\\s]*原[\\s]*文", "不[\\s]*存[\\s]*在[\\s]*绝[\\s]*对"], "required_context_patterns": [],
       "retrieval_queries": ["保险销售 夸大宣传 最高 最佳"], "preferred_record_types": ["regulation", "penalty"], "evidence_requirements": ["normative_basis"],
       "evidence_matchers": {"normative_basis":{"allowed_chunk_kinds":["article_text"],"required_any_patterns":["夸大|虚假|误导|最高|比较|绝对"],"required_evidence_fields":["article_text"]}},
       "explanation_template": "该表述包含绝对化或最高级风险信号，实际含义与证明材料需要人工核验。", "review_question_template": "该最高级表述是否有客观、完整且可复核的比较依据？", "institution_remediation_template": "核对最高级表述的依据、范围和比较条件。", "consumer_notice_template": "绝对化或最高级宣传需要结合可验证依据核对。"
@@ -35,8 +35,8 @@
     },
     {
       "rule_id": "guaranteed_return_or_principal", "version": "1", "category": "guaranteed_return", "severity": "high", "signal_strength": "strong",
-      "positive_patterns": ["保[\\s]*证[\\s]*收[\\s]*益", "保[\\s]*本[\\s]*保[\\s]*息", "稳[\\s]*赚[\\s]*不[\\s]*赔", "绝[\\s]*对[\\s]*不[\\s]*会[\\s]*亏[\\s]*损", "承[\\s]*诺[\\s]*固[\\s]*定[\\s]*收[\\s]*益"],
-      "exception_patterns": ["不[\\s]*保[\\s]*证", "非[\\s]*保[\\s]*证", "保[\\s]*证[\\s]*材[\\s]*料[\\s]*真[\\s]*实[\\s]*性"], "required_context_patterns": [],
+      "positive_patterns": ["保[\\s]*证[\\s]*(?:高[\\s]*|固[\\s]*定[\\s]*|稳[\\s]*定[\\s]*)?收[\\s]*益", "保[\\s]*本[\\s]*保[\\s]*息", "稳[\\s]*赚[\\s]*不[\\s]*赔", "绝[\\s]*对[\\s]*不[\\s]*会[\\s]*亏[\\s]*损", "承[\\s]*诺[\\s]*固[\\s]*定[\\s]*收[\\s]*益", "收[\\s]*益[\\s]*(?:已[\\s]*)?锁[\\s]*定", "固[\\s]*定[\\s]*(?:赚|收[\\s]*益)"],
+      "exception_patterns": ["不[\\s]*保[\\s]*证", "非[\\s]*保[\\s]*证", "不[\\s]*承[\\s]*诺", "未[\\s]*锁[\\s]*定", "并[\\s]*非[\\s]*固[\\s]*定", "保[\\s]*证[\\s]*材[\\s]*料[\\s]*真[\\s]*实[\\s]*性"], "required_context_patterns": [],
       "retrieval_queries": ["保险销售 保证收益 非保证利益"], "preferred_record_types": ["regulation", "penalty"], "evidence_requirements": ["normative_basis", "enforcement_example"],
       "evidence_matchers": {"normative_basis":{"allowed_chunk_kinds":["article_text"],"required_any_patterns":["收益|本金|保险利益|保单利益|保证|固定|承诺|非保证|不确定"],"required_all_pattern_groups":[["收益|本金|保险利益|保单利益"],["保证|固定|承诺|非保证|不确定"]],"required_all_pattern_groups_scope":"local_clause","required_evidence_fields":["article_text"]},"enforcement_example":{"allowed_chunk_kinds":["penalty_entry"],"required_any_patterns":["保证收益|保本|固定收益|稳赚|收益承诺"],"required_evidence_fields":["illegal_facts","original_sales_wording"]}},
       "explanation_template": "该表述可能把非保证利益描述为确定收益，需核对合同和演示依据。", "review_question_template": "是否存在保证性收益或本金承诺，且是否与合同一致？", "institution_remediation_template": "核对是否存在保证性承诺并补充非保证利益说明。", "consumer_notice_template": "这段表述可能把非保证利益描述成确定收益。"
@@ -59,8 +59,8 @@
     },
     {
       "rule_id": "no_risk_or_no_loss", "version": "1", "category": "no_risk", "severity": "high", "signal_strength": "strong",
-      "positive_patterns": ["零[\\s]*风[\\s]*险", "没[\\s]*有[\\s]*任[\\s]*何[\\s]*风[\\s]*险", "对[\\s]*您[\\s]*没[\\s]*有[\\s]*损[\\s]*失", "绝[\\s]*对[\\s]*安[\\s]*全"],
-      "exception_patterns": ["不[\\s]*存[\\s]*在[\\s]*零[\\s]*风[\\s]*险", "并[\\s]*非[\\s]*绝[\\s]*对[\\s]*安[\\s]*全"], "required_context_patterns": [],
+      "positive_patterns": ["零[\\s]*风[\\s]*险", "无[\\s]*风[\\s]*险", "没[\\s]*有[\\s]*任[\\s]*何[\\s]*风[\\s]*险", "完[\\s]*全[\\s]*(?:没[\\s]*有|没|无)[\\s]*风[\\s]*险", "对[\\s]*您[\\s]*没[\\s]*有[\\s]*损[\\s]*失", "绝[\\s]*对[\\s]*安[\\s]*全", "(?:百[\\s]*分[\\s]*之[\\s]*百|百[\\s]*分[\\s]*百|100[\\s]*[%％])[\\s]*不[\\s]*亏", "(?:肯[\\s]*定|一[\\s]*定|绝[\\s]*对)[\\s]*(?:不[\\s]*会|不)[\\s]*(?:亏|亏[\\s]*损|损[\\s]*失)"],
+      "exception_patterns": ["不[\\s]*存[\\s]*在[\\s]*(?:零|无)[\\s]*风[\\s]*险", "并[\\s]*非[\\s]*(?:绝[\\s]*对[\\s]*安[\\s]*全|无[\\s]*风[\\s]*险)", "没[\\s]*有[\\s]*任[\\s]*何(?:[\\s]*保[\\s]*险)?[\\s]*产[\\s]*品[\\s]*是[\\s]*绝[\\s]*对[\\s]*安[\\s]*全"], "required_context_patterns": [],
       "retrieval_queries": ["保险销售 风险提示 损失"], "preferred_record_types": ["regulation", "penalty"], "evidence_requirements": ["normative_basis", "enforcement_example"],
       "evidence_matchers": {"normative_basis":{"allowed_chunk_kinds":["article_text"],"required_any_patterns":["风险|损失|不确定性|提示|披露|误导|承诺|告知"],"required_all_pattern_groups":[["风险|损失|不确定性"],["提示|披露|误导|承诺|告知"]],"required_all_pattern_groups_scope":"local_clause","required_evidence_fields":["article_text"]},"enforcement_example":{"allowed_chunk_kinds":["penalty_entry"],"required_any_patterns":["零风险|没有损失|无损失|绝对安全|隐瞒风险"],"required_evidence_fields":["illegal_facts","original_sales_wording"]}},
       "explanation_template": "该表述可能不当弱化保险产品风险或损失可能。", "review_question_template": "是否充分披露退保、收益波动及保障限制等风险？", "institution_remediation_template": "补充真实、完整的风险及可能损失说明。", "consumer_notice_template": "任何保险安排都应结合合同核对风险和可能损失。"

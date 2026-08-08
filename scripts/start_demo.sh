@@ -5,14 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 PYTHON="$ROOT_DIR/.venv/bin/python"
-ALEMBIC="$ROOT_DIR/.venv/bin/alembic"
 DEMO_PORT="${DEMO_PORT:-8000}"
 DEMO_DATABASE_NAME="${DEMO_DATABASE_NAME:-baoxiao_demo}"
 DEMO_DATABASE_URL="${DEMO_DATABASE_URL:-postgresql+psycopg://${USER}@localhost:5432/${DEMO_DATABASE_NAME}}"
-export DATABASE_URL="$DEMO_DATABASE_URL"
-export DATA_DIR="${DATA_DIR:-$ROOT_DIR/.demo-data}"
-export BAOXIAO_DEMO_RUNTIME=1
-export DEMO_DATABASE_NAME
 
 fail() {
   echo "[demo] $*" >&2
@@ -20,7 +15,6 @@ fail() {
 }
 
 [[ -x "$PYTHON" ]] || fail "Missing .venv. Run 'make install' first."
-[[ -x "$ALEMBIC" ]] || fail "Missing Alembic in .venv. Run 'make install' first."
 command -v psql >/dev/null || fail "PostgreSQL client 'psql' is required for the local Demo runtime."
 command -v pg_isready >/dev/null || fail "PostgreSQL readiness tool 'pg_isready' is required."
 
@@ -31,6 +25,20 @@ case "$DEMO_DATABASE_URL" in
   */"$DEMO_DATABASE_NAME"|*/"$DEMO_DATABASE_NAME"\?*) ;;
   *) fail "DEMO_DATABASE_URL must target the isolated database $DEMO_DATABASE_NAME." ;;
 esac
+
+if [[ "$DEMO_DATABASE_NAME" == "baoxiao_contest_final" ]]; then
+  echo "[demo] Final database requested; routing to the trusted final-demo launcher."
+  export FINAL_DATABASE_NAME="$DEMO_DATABASE_NAME"
+  export FINAL_DATABASE_URL="$DEMO_DATABASE_URL"
+  export FINAL_DEMO_PORT="$DEMO_PORT"
+  export SEMANTIC_SCREENING_ENABLED=false
+  exec "$ROOT_DIR/scripts/start_final_demo.sh"
+fi
+
+export DATABASE_URL="$DEMO_DATABASE_URL"
+export DATA_DIR="${DATA_DIR:-$ROOT_DIR/.demo-data}"
+export BAOXIAO_DEMO_RUNTIME=1
+export DEMO_DATABASE_NAME
 
 if ! pg_isready -h 127.0.0.1 -p 5432 -q; then
   if command -v brew >/dev/null && brew services start postgresql@16 >/dev/null 2>&1; then
@@ -52,7 +60,7 @@ if lsof -nP -iTCP:"$DEMO_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
 fi
 
 echo "[demo] Applying migrations to isolated $DEMO_DATABASE_NAME..."
-"$ALEMBIC" upgrade head
+"$PYTHON" -m alembic upgrade head
 echo "[demo] Preparing constructed contest fixture (never formal evidence)..."
 "$PYTHON" scripts/demo_seed.py
 echo "[demo] Running API and controlled-RAG preflight..."
