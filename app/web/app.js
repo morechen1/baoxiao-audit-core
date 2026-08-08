@@ -4,6 +4,7 @@ const demoCases = [
     number: "CASE 01",
     title: "高收益承诺宣传",
     category: "明显违规 / 高风险",
+    demoRole: "典型违规风险",
     riskLevel: "high",
     materialType: "advertisement",
     timestamp: "刚刚",
@@ -20,6 +21,7 @@ const demoCases = [
     number: "CASE 02",
     title: "合同要点说明",
     category: "合规 / 低风险",
+    demoRole: "低风险对照",
     riskLevel: "low",
     materialType: "product_introduction",
     timestamp: "今日 09:40",
@@ -32,6 +34,7 @@ const demoCases = [
     number: "CASE 03",
     title: "退保价值边界表述",
     category: "边界语义 / 高风险信号",
+    demoRole: "边界语义风险",
     riskLevel: "high",
     materialType: "sales_script",
     timestamp: "昨日 16:20",
@@ -61,12 +64,12 @@ const state = {
 };
 const viewTitles = { dashboard: "智能审核工作台", review: "新建智能审核", result: "审核结果中心", processing: "审核运行过程" };
 const stages = [
-  ["文本规范化", "构建材料指纹与可追溯偏移"],
-  ["确定性风险筛查", "运行版本化营销风险规则"],
-  ["可信知识检索", "仅使用准入的监管知识块"],
-  ["受控 AI 解释", "只解释既有风险信号"],
-  ["Citation 证据校验", "核验连续引文与证据边界"],
-  ["生成双端结果", "输出机构端与消费者端视图"],
+  ["材料解析", "构建材料指纹与可追溯偏移"],
+  ["风险筛查", "运行确定性营销风险规则"],
+  ["监管知识匹配", "只使用已准入的可信知识块"],
+  ["AI 受控解释", "只解释既有 finding 与证据"],
+  ["引用验证", "验证 Citation、Claim 与边界"],
+  ["审核结果", "输出机构端与消费者端视图"],
 ];
 
 const $ = (selector) => document.querySelector(selector);
@@ -78,6 +81,15 @@ function escapeHtml(value = "") {
 
 function riskLabel(level) { return ({ high: "高风险", medium: "中风险", low: "低风险" })[level] || "待核验"; }
 function riskClass(level) { return `risk-${level}`; }
+function displayCategory(value) {
+  return ({
+    regulatory_endorsement: "监管背书误导",
+    guaranteed_return: "保证收益或本金",
+    no_risk: "零风险或无损失",
+    surrender_value_misstatement: "退保 / 现金价值误述",
+    surrender_cash_value: "退保 / 现金价值误述",
+  })[value] || value;
+}
 
 function showView(name) {
   $$(".view").forEach((view) => view.classList.remove("active-view"));
@@ -97,18 +109,29 @@ function showToast(message, error = false) {
 
 function renderDashboard() {
   const totalFindings = demoCases.reduce((count, item) => count + item.findings.length, 0);
+  const highFindings = demoCases.reduce((count, item) => count + item.findings.filter((findingItem) => findingItem.severity === "high").length, 0);
+  const totalCitations = demoCases.reduce((count, item) => count + item.findings.reduce((findingCount, findingItem) => findingCount + findingItem.citations.length, 0), 0);
   const metrics = [
-    ["累计展示审核", "03", "构造赛事案例", "#41d9e7"],
-    ["识别风险信号", String(totalFindings), "可追溯规则命中", "#ffb86d"],
-    ["受控引用覆盖", "100%", "每条展示 finding", "#8d78ff"],
-    ["高风险待复核", "04", "优先处置提醒", "#ff5c73"],
+    ["可选演示案例", String(demoCases.length).padStart(2, "0"), "构造赛事案例", "#41d9e7"],
+    ["规则风险发现", String(totalFindings), "可追溯规则命中", "#ffb86d"],
+    ["可见引用证据", String(totalCitations), "按 finding 绑定", "#8d78ff"],
+    ["高风险待复核", String(highFindings), "优先处置提醒", "#ff5c73"],
   ];
   $("#metrics").innerHTML = metrics.map(([label, value, detail, color]) => `<article class="metric-card" style="--metric:${color}"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-detail"><b>●</b> ${detail}</div></article>`).join("");
-  $("#recent-cases").innerHTML = demoCases.map((item) => `<article class="recent-card" data-open-case="${item.id}"><header><span>${item.number}</span><span class="risk-pill ${riskClass(item.riskLevel)}">${riskLabel(item.riskLevel)}</span></header><h3>${item.title}</h3><p>${item.summary}</p><div class="recent-footer"><span>${item.timestamp}</span><span>${item.findings.length} 条风险信号 <b>→</b></span></div></article>`).join("");
+  $("#recent-cases").innerHTML = demoCases.map((item) => `<article class="recent-card" data-open-case="${item.id}"><header><span>${item.number}</span><span class="risk-pill ${riskClass(item.riskLevel)}">${riskLabel(item.riskLevel)}</span></header><span class="case-role">${item.demoRole}</span><h3>${item.title}</h3><p>${item.summary}</p><div class="recent-footer"><span>${item.timestamp}</span><span>${item.findings.length} 条风险信号 <b>→</b></span></div></article>`).join("");
+  $("#pipeline-flow").innerHTML = stages.map(([label, detail], index) => `<div class="pipeline-step"><span>${String(index + 1).padStart(2, "0")}</span><strong>${label}</strong><small>${detail}</small></div>${index < stages.length - 1 ? '<i class="pipeline-arrow" aria-hidden="true">→</i>' : ""}`).join("");
+  renderProviderContext();
 }
 
 function renderCaseSelector() {
-  $("#case-selector").innerHTML = demoCases.map((item) => `<article class="case-card" data-run-case="${item.id}"><header><span class="case-number">${item.number}</span><span class="risk-pill ${riskClass(item.riskLevel)}">${riskLabel(item.riskLevel)}</span></header><h3>${item.title}</h3><p>${item.rawText}</p><footer><span>构造展示数据 · ${item.materialType}</span><b>开始审查 →</b></footer></article>`).join("");
+  $("#case-selector").innerHTML = demoCases.map((item) => `<article class="case-card" data-run-case="${item.id}"><header><span class="case-number">${item.number}</span><span class="risk-pill ${riskClass(item.riskLevel)}">${riskLabel(item.riskLevel)}</span></header><span class="case-role">${item.demoRole}</span><h3>${item.title}</h3><p>${item.rawText}</p><footer><span>构造 Demo 数据 · ${item.materialType}</span><b>开始审查 →</b></footer></article>`).join("");
+}
+
+function renderProviderContext() {
+  const provider = state.provider;
+  const mode = provider.mode === "real_ai" ? "真实大模型" : "确定性演示模式";
+  const detail = provider.mode === "real_ai" ? "受控生成 · Citation 验证" : "Fixture · 稳定回归与备用演示";
+  $("#dashboard-provider").innerHTML = `<span>解释模式 <b class="provider-live">${escapeHtml(mode)}</b></span><span>当前 Provider <b>${escapeHtml(provider.model || "未配置")}</b></span><span>运行边界 <b>${escapeHtml(detail)}</b></span>`;
 }
 
 function renderStages(index = -1) {
@@ -127,7 +150,7 @@ function playDemo(caseItem) {
   state.current = { ...caseItem, mode: "构造预置案例 · 仅赛事演示，不进入正式证据库", status: "completed" };
   showView("processing");
   $("#processing-title").textContent = `正在审查「${caseItem.title}」`;
-  $("#processing-hint").textContent = "预置案例展示已冻结的处理链路；其数据明确标记为构造展示数据。";
+  $("#processing-hint").textContent = "演示回放展示已验证的处理结果，不表示逐阶段实时后台耗时；数据明确标记为构造展示数据。";
   renderStages(0);
   stages.forEach(([label, detail], index) => {
     state.processingTimers.push(window.setTimeout(() => {
@@ -150,10 +173,15 @@ function apiFinding(row, institutionArtifact, consumerArtifact, citations) {
   const citationsForFinding = (citations || []).filter((item) => item.finding_key === findingKey).map((item) => ({ key: item.citation_key, sourceKind: item.support_type, sourceTitle: item.source_title, quote: item.cited_quote, locator: formatLocator(item.source_locator), sourceUrl: item.source_url }));
   const institution = explanationText(institutionArtifact, findingKey, "institution");
   const consumer = explanationText(consumerArtifact, findingKey, "consumer");
-  return { id: findingKey, title: row.category, category: row.category, severity: row.severity, matchedText: row.matched_text, explanation: row.explanation, remediation: row.remediation_template || "请由合规人员依据完整材料复核。", question: row.review_question, evidenceStatus: row.evidence_status, institution: institution.text || row.explanation, institutionSource: institution.text ? "真实模型受控解释" : "基础报告文本（确定性筛查结果）", consumer: consumer.text || row.review_question, consumerSource: consumer.text ? "真实模型受控解释" : "基础报告文本（确定性筛查结果）", citations: citationsForFinding.length ? citationsForFinding : (row.evidence || []).map((item, evidenceIndex) => ({ key: `E${String(evidenceIndex + 1).padStart(3, "0")}`, sourceKind: item.support_type, sourceTitle: item.source?.title || "可信知识来源", quote: item.evidence_references?.[0]?.quote || "该证据引用由后端快照保存。", locator: formatLocator(item.source_locator), sourceUrl: item.source?.source_url || "" })) };
+  return { id: findingKey, title: displayCategory(row.category), category: row.category, severity: row.severity, matchedText: row.matched_text, explanation: row.explanation, remediation: row.remediation_template || "请由合规人员依据完整材料复核。", question: row.review_question, evidenceStatus: row.evidence_status, institution: institution.text || row.explanation, institutionSource: institution.text ? "真实模型受控解释" : "基础报告文本（确定性筛查结果）", consumer: consumer.text || row.review_question, consumerSource: consumer.text ? "真实模型受控解释" : "基础报告文本（确定性筛查结果）", citations: citationsForFinding.length ? citationsForFinding : (row.evidence || []).map((item, evidenceIndex) => ({ key: `E${String(evidenceIndex + 1).padStart(3, "0")}`, sourceKind: item.support_type, sourceTitle: item.source?.title || "可信知识来源", quote: item.evidence_references?.[0]?.quote || "该证据引用由后端快照保存。", locator: formatLocator(item.source_locator), sourceUrl: item.source?.source_url || "" })) };
 }
 
-function formatLocator(locator) { return locator && typeof locator === "object" ? Object.values(locator).filter(Boolean).join(" · ") || "已验证定位信息" : "已验证定位信息"; }
+function formatLocator(locator) {
+  if (!locator || typeof locator !== "object") return "已验证定位信息";
+  const preferred = ["article_number", "article", "section", "field_name", "page_number", "paragraph"];
+  const value = preferred.map((key) => locator[key]).find(Boolean);
+  return value ? `定位：${value}` : "已验证证据定位";
+}
 
 function explanationText(artifact, findingKey, audience) {
   if (!artifact?.validated_output) return { text: "" };
@@ -195,6 +223,7 @@ async function requestAudienceArtifacts(runId, create = createApiExplanation) {
 async function loadProviderStatus() {
   try { state.provider = await fetchJson("/api/v1/explanations/provider-status"); }
   catch (_error) { /* Preserve explicit deterministic fallback when the status endpoint is unavailable. */ }
+  if ($("#dashboard-provider")) renderProviderContext();
   return state.provider;
 }
 
@@ -209,13 +238,15 @@ async function runLiveReview(form) {
   $("#processing-hint").textContent = "在线模式只调用已有 API；若可信知识库未准备，系统会失败关闭。";
   renderStages(0);
   try {
-    $("#processing-copy").textContent = "正在调用 /api/v1/screenings 创建筛查任务。";
+    $("#processing-copy").textContent = "正在创建筛查任务，并锁定材料与规则输入。";
     const created = await fetchJson("/api/v1/screenings", { method: "POST", body: JSON.stringify({ title, material_type: $("#material-type").value, raw_text: rawText, source_label: "contest_demo_workspace" }) });
     renderStages(2);
-    $("#processing-copy").textContent = "正在读取机构端与消费者端报告。";
+    $("#processing-copy").textContent = "风险 finding 与可信知识证据已锁定，正在读取双端基础报告。";
     const [screening, institutionReport, consumerReport] = await Promise.all([fetchJson(created.report_endpoints.screening), fetchJson(created.report_endpoints.institution_report), fetchJson(created.report_endpoints.consumer_notice)]);
     renderStages(3);
-    $("#processing-copy").textContent = "正在请求受控解释与 Citation 校验。";
+    $("#processing-copy").textContent = state.provider.mode === "real_ai"
+      ? "正在生成受控合规解释：已锁定 finding 与证据，正在请求真实大模型；随后验证 Citation 与 Claim。"
+      : "正在生成确定性演示解释，并验证 Citation 与 Claim。";
     let institutionArtifact = null; let consumerArtifact = null;
     let explanationStatus = { ...state.provider, status: screening.findings.length ? "pending" : "not_required" };
     if (screening.findings.length) {
@@ -250,6 +281,7 @@ function renderResult() {
   const findings = result.findings || [];
   const high = findings.filter((item) => item.severity === "high").length;
   const medium = findings.filter((item) => item.severity === "medium").length;
+  const low = findings.filter((item) => item.severity === "low").length;
   const evidenceCount = findings.reduce((count, item) => count + item.citations.length, 0);
   $("#result-mode").textContent = result.mode;
   const boundaryNotice = result.mode.includes("隔离构造赛事数据")
@@ -267,21 +299,24 @@ function renderResult() {
       ? `${explanationStatus.label}（部分成功：${audienceText}）`
     : explanationStatus.status === "not_required" ? "未调用（0 条风险信号）"
       : `${explanationStatus.label}（${audienceText || "成功"}）${explanationStatus.model ? ` · ${explanationStatus.model}` : ""}`;
-  $("#result-content").innerHTML = `<div class="result-hero"><article class="result-summary"><span class="eyebrow">REVIEW RESULT / ${escapeHtml(result.number || "CASE")}</span><h1>${escapeHtml(result.title)}</h1><p>${escapeHtml(result.summary || "审核完成。")}</p><div class="result-kpis"><div><strong class="${riskClass(result.riskLevel)}">${riskLabel(result.riskLevel)}</strong><small>总体风险等级</small></div><div><strong>${findings.length}</strong><small>风险信号</small></div><div><strong>${evidenceCount}</strong><small>可见 Citation</small></div><div><strong>${result.status === "completed" ? "完成" : "已创建"}</strong><small>审核状态</small></div></div></article><aside class="result-status"><div><span class="eyebrow">MATERIAL PROFILE</span><h3>${escapeHtml(result.materialType || "文本材料")}</h3></div><div class="status-list"><span>材料指纹 <b>${result.id.includes("live") ? "已生成" : "演示快照"}</b></span><span>规则筛查 <b>确定性</b></span><span>AI解释模式 <b>${escapeHtml(providerText)}</b></span><span>证据校验 <b>${result.mode.startsWith("在线") ? "后端结果" : "展示完成"}</b></span><span>审计边界 <b>已保留</b></span></div></aside></div><div class="analysis-layout"><article class="findings-panel"><header class="panel-header"><div><span class="eyebrow">RISK FINDINGS</span><h2>风险详情与证据链</h2></div><div class="audience-toggle"><button class="active" data-audience="institution">机构端</button><button data-audience="consumer">消费者端</button></div></header><div id="finding-list">${findings.length ? findings.map(findingRow).join("") : `<div class="empty-result">未发现当前规则集中的风险信号。仍建议按既有人工审核流程确认材料版本与适用范围。</div>`}</div></article><aside class="detail-panel" id="detail-panel"><div class="detail-empty"><div><b>选择一条风险信号</b><br />查看“原文 → 规则 → 依据 → 受控解释”的完整链路。</div></div></aside></div>${result.rawText ? `<div class="notice"><b>材料原文：</b>${escapeHtml(result.rawText)}</div>` : ""}<div class="notice"><b>边界说明：</b>${boundaryNotice}</div>`;
+  const providerMode = explanationStatus.mode === "real_ai" ? "真实大模型" : explanationStatus.label || "确定性演示模式";
+  const providerModel = explanationStatus.model || (explanationStatus.mode === "real_ai" ? "DeepSeek V4 Flash" : "controlled-fixture-v2");
+  const lowRiskNotice = findings.length ? "" : `<div class="low-risk-banner"><span>✓</span><div><strong>未发现规则命中风险</strong><p>本次未触发大模型解释，以避免无依据生成；这是受控审核边界的一部分。</p></div></div>`;
+  $("#result-content").innerHTML = `<div class="result-hero"><article class="result-summary"><span class="eyebrow">AUDIT RESULT / ${escapeHtml(result.number || "CASE")}</span><h1>${escapeHtml(result.title)}</h1><p>${escapeHtml(result.summary || "审核完成。")}</p><div class="result-kpis"><div><strong class="${riskClass(result.riskLevel)}">${riskLabel(result.riskLevel)}</strong><small>综合风险等级</small></div><div><strong>${findings.length}</strong><small>Findings</small></div><div><strong>${high}</strong><small>高风险</small></div><div><strong>${medium}</strong><small>中风险</small></div><div><strong>${low}</strong><small>低风险</small></div><div><strong>${evidenceCount}</strong><small>Citation</small></div></div></article><aside class="result-status"><div><span class="eyebrow">CONTROLLED EXPLANATION</span><h3>${escapeHtml(providerMode)}</h3><p class="provider-model">${escapeHtml(providerModel)}</p></div><div class="status-list"><span>材料指纹 <b>${result.id.includes("live") ? "已生成" : "演示快照"}</b></span><span>确定性筛查 <b>已完成</b></span><span>AI 解释 <b>${escapeHtml(providerText)}</b></span><span>引用验证 <b>${findings.length && explanationStatus.status !== "failed" ? "通过 / 已保留" : "未触发"}</b></span><span>审核状态 <b>${result.status === "completed" ? "已完成" : "已创建"}</b></span></div></aside></div>${lowRiskNotice}<div class="analysis-layout"><article class="findings-panel"><header class="panel-header"><div><span class="eyebrow">RISK FINDINGS</span><h2>风险详情与证据链</h2><p class="panel-subtitle">确定性规则先锁定 finding，再绑定监管证据与受控 AI 解释。</p></div><div class="audience-toggle"><button class="active" data-audience="institution">机构合规审核解释</button><button data-audience="consumer">消费者风险提示</button></div></header><div id="finding-list">${findings.length ? findings.map(findingRow).join("") : `<div class="empty-result">未发现当前规则集中的风险信号。仍建议按既有人工审核流程确认材料版本与适用范围。</div>`}</div></article><aside class="detail-panel" id="detail-panel"><div class="detail-empty"><div><b>选择一条风险信号</b><br />查看“规则 → 监管证据 → 受控 AI”的完整链路。</div></div></aside></div>${result.rawText ? `<div class="notice"><b>材料原文：</b>${escapeHtml(result.rawText)}</div>` : ""}<div class="notice"><b>构造数据与审查边界：</b>${boundaryNotice}</div>`;
   $$("[data-audience]").forEach((button) => button.addEventListener("click", () => { state.audience = button.dataset.audience; $$("[data-audience]").forEach((item) => item.classList.toggle("active", item === button)); const selected = $(".finding-row.selected"); if (selected) renderDetail(Number(selected.dataset.findingIndex)); }));
   $$(".finding-row").forEach((row) => row.addEventListener("click", () => { $$(".finding-row").forEach((item) => item.classList.remove("selected")); row.classList.add("selected"); renderDetail(Number(row.dataset.findingIndex)); }));
   if (findings.length) { const first = $(".finding-row"); first.classList.add("selected"); renderDetail(0); }
 }
 
-function findingRow(item, index) { return `<article class="finding-row" data-finding-index="${index}"><span class="finding-index">${escapeHtml(item.id)}</span><div><h3>${escapeHtml(item.title)} <span class="risk-pill ${riskClass(item.severity)}">${riskLabel(item.severity)}</span></h3><p>命中原文：<span class="matched">“${escapeHtml(item.matchedText)}”</span> · ${escapeHtml(item.evidenceStatus)}</p></div><span class="finding-arrow">›</span></article>`; }
+function findingRow(item, index) { return `<article class="finding-row" data-finding-index="${index}"><span class="finding-index">${escapeHtml(item.id)}</span><div><div class="finding-heading"><h3>${escapeHtml(item.title)}</h3><span class="risk-pill ${riskClass(item.severity)}">${riskLabel(item.severity)}</span></div><p class="matched">命中原文：“${escapeHtml(item.matchedText)}”</p><div class="finding-meta"><span>规则说明已锁定</span><span>${escapeHtml(item.evidenceStatus)}</span><span>${item.citations.length} 条 Citation</span></div></div><span class="finding-arrow">查看 →</span></article>`; }
 
 function renderDetail(index) {
   const item = state.current.findings[index];
   const audienceText = state.audience === "institution" ? item.institution : item.consumer;
-  const audienceLabel = state.audience === "institution" ? "机构端受控解释" : "消费者端通俗说明";
+  const audienceLabel = state.audience === "institution" ? "机构合规审核解释" : "消费者风险提示";
   const audienceSource = (state.audience === "institution" ? item.institutionSource : item.consumerSource) || "确定性演示文本";
-  const citations = item.citations.length ? item.citations.map((citation) => `<article class="citation"><header><span>${escapeHtml(citation.key)}</span><span>${escapeHtml(citation.sourceKind || "证据")}</span></header><strong>${escapeHtml(citation.sourceTitle || "已验证来源")}</strong><div class="quote">“${escapeHtml(citation.quote)}”</div><p>${escapeHtml(citation.locator || "已验证定位信息")} · ${escapeHtml(citation.sourceUrl || "来源快照")}</p></article>`).join("") : `<p>该风险信号当前没有可用 Citation；系统按证据不足边界提示人工复核。</p>`;
-  $("#detail-panel").innerHTML = `<div class="detail-title"><div><span class="eyebrow">${escapeHtml(item.id)} / EVIDENCE TRACE</span><h2>${escapeHtml(item.title)}</h2><p>${escapeHtml(item.evidenceStatus)}</p></div><span class="risk-pill ${riskClass(item.severity)}">${riskLabel(item.severity)}</span></div><div class="detail-section"><h4>01 · 原文命中</h4><div class="quote">“${escapeHtml(item.matchedText)}”</div></div><div class="detail-section"><h4>02 · 确定性风险说明</h4><p>${escapeHtml(item.explanation)}</p></div><div class="detail-section"><h4>03 · ${audienceLabel}</h4><p><b>${escapeHtml(audienceSource)}</b></p><p>${escapeHtml(audienceText)}</p></div><div class="detail-section"><h4>04 · CITATION / 来源证据</h4>${citations}</div><div class="detail-section"><h4>05 · 人工复核与整改建议</h4><p><b>复核：</b>${escapeHtml(item.question)}</p><p><b>建议：</b>${escapeHtml(item.remediation)}</p></div>`;
+  const citations = item.citations.length ? item.citations.map((citation) => `<article class="citation"><header><span>${escapeHtml(citation.key)}</span><span>${escapeHtml(citation.sourceKind || "证据")}</span></header><strong>${escapeHtml(citation.sourceTitle || "已验证来源")}</strong><div class="quote">“${escapeHtml(citation.quote)}”</div><p>${escapeHtml(citation.locator || "已验证定位信息")} · 已验证来源快照</p></article>`).join("") : `<p>该风险信号当前没有可用 Citation；系统按证据不足边界提示人工复核。</p>`;
+  $("#detail-panel").innerHTML = `<div class="detail-title"><div><span class="eyebrow">${escapeHtml(item.id)} / CONTROLLED TRACE</span><h2>${escapeHtml(item.title)}</h2><p>证据状态：${escapeHtml(item.evidenceStatus)}</p></div><span class="risk-pill ${riskClass(item.severity)}">${riskLabel(item.severity)}</span></div><div class="detail-section trace-rule"><h4>A · 原始风险依据 / 确定性规则</h4><div class="quote">“${escapeHtml(item.matchedText)}”</div><p>${escapeHtml(item.explanation)}</p></div><div class="detail-section trace-evidence"><h4>B · 监管证据 / Citation 已绑定</h4>${citations}</div><div class="detail-section trace-model"><h4>C · AI 受控解释 / ${audienceLabel}</h4><p class="source-badge">${escapeHtml(audienceSource)}</p><p>${escapeHtml(audienceText)}</p></div><div class="detail-section"><h4>人工复核与整改建议</h4><p><b>复核：</b>${escapeHtml(item.question)}</p><p><b>建议：</b>${escapeHtml(item.remediation)}</p></div>`;
 }
 
 function bindEvents() {

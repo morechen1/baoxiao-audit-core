@@ -45,23 +45,28 @@
           <div class="hero-grid">
             <article class="hero-card panel-glass">
               <div class="hero-orbit"></div>
-              <span class="eyebrow">INSURANCE COMPLIANCE COPILOT</span>
-              <h1>让每一条营销表述<br /><em>都有证可循</em></h1>
-              <p>面向保险营销材料的确定性风险筛查、可信监管知识增强与受控 AI 双端解释工作台。</p>
+              <span class="eyebrow">INSURANCE MARKETING COMPLIANCE REVIEW</span>
+              <h1>保险营销材料<br /><em>智能合规审核</em></h1>
+              <p>以确定性规则锁定风险、以可信监管知识提供证据，并由受控 AI 生成可验证的双端解释。</p>
               <div class="hero-actions">
                 <button class="primary-button" id="hero-start">新建智能审核 <span>→</span></button>
                 <button class="quiet-button" id="hero-demo">播放高风险案例</button>
               </div>
               <div class="hero-meta"><span>规则命中可追溯</span><span>引用连续可验证</span><span>解释双端分层</span></div>
             </article>
-            <article class="score-card panel-glass">
-              <div class="score-head"><span>今日审核态势</span><span class="pulse">LIVE</span></div>
-              <div class="score-ring"><div><strong>98</strong><small>审查可信度</small></div></div>
-              <div class="score-list"><span>规则版本 <b>v1</b></span><span>解释输出 <b>受控</b></span><span>审计记录 <b>完整</b></span></div>
+            <article class="score-card panel-glass" id="dashboard-context">
+              <div class="score-head"><span>当前演示配置</span><span class="pulse">READY</span></div>
+              <div class="provider-orb"><span>AI</span></div>
+              <div class="score-list" id="dashboard-provider"></div>
             </article>
           </div>
 
           <div class="metric-grid" id="metrics"></div>
+
+          <section class="pipeline-card panel-glass" aria-label="审核技术链路">
+            <div class="pipeline-heading"><span class="eyebrow">AUDIT TECHNICAL CHAIN</span><h2>系统如何形成可复核结论</h2><p>这是结果形成的技术链路说明；展示状态与当前审核结果一致，不表示伪造的实时耗时。</p></div>
+            <div class="pipeline-flow" id="pipeline-flow"></div>
+          </section>
 
           <div class="section-heading"><div><span class="eyebrow">RECENT WORKSPACE</span><h2>最近审核任务</h2></div><button class="text-button" data-view-target="review">查看全部案例 →</button></div>
           <div class="recent-grid" id="recent-cases"></div>
