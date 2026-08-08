@@ -37,4 +37,4 @@ demo:
 	./scripts/start_demo.sh
 
 demo-smoke:
-	BAOXIAO_DEMO_RUNTIME=1 DATABASE_URL="$${DEMO_DATABASE_URL:-postgresql+psycopg://$${USER}@localhost:5432/baoxiao_demo}" DATA_DIR=.demo-data .venv/bin/python scripts/demo_smoke.py
+	BAOXIAO_DEMO_RUNTIME=1 DEMO_DATABASE_NAME="$${DEMO_DATABASE_NAME:-baoxiao_demo}" DATABASE_URL="$${DEMO_DATABASE_URL:-postgresql+psycopg://$${USER}@localhost:5432/$${DEMO_DATABASE_NAME:-baoxiao_demo}}" DATA_DIR=.demo-data .venv/bin/python scripts/demo_smoke.py

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from dataclasses import dataclass
 
 from fastapi.testclient import TestClient
 from sqlalchemy.engine import make_url
+
+DEFAULT_DEMO_DATABASE = "baoxiao_demo"
 
 
 @dataclass(frozen=True)
@@ -47,9 +50,12 @@ CASES = (
 def _require_isolated_runtime() -> None:
     if os.environ.get("BAOXIAO_DEMO_RUNTIME") != "1":
         raise SystemExit("Refusing demo smoke: set BAOXIAO_DEMO_RUNTIME=1.")
+    database_name = os.environ.get("DEMO_DATABASE_NAME", DEFAULT_DEMO_DATABASE)
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", database_name):
+        raise SystemExit("Refusing demo smoke: DEMO_DATABASE_NAME must be a PostgreSQL identifier.")
     url = make_url(os.environ.get("DATABASE_URL", ""))
-    if not url.drivername.startswith("postgresql") or url.database != "baoxiao_demo":
-        raise SystemExit("Refusing demo smoke: DATABASE_URL must target baoxiao_demo.")
+    if not url.drivername.startswith("postgresql") or url.database != database_name:
+        raise SystemExit(f"Refusing demo smoke: DATABASE_URL must target {database_name}.")
 
 
 def _json(response: object) -> dict[str, object]:

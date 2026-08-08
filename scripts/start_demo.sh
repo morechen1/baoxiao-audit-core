@@ -7,10 +7,12 @@ cd "$ROOT_DIR"
 PYTHON="$ROOT_DIR/.venv/bin/python"
 ALEMBIC="$ROOT_DIR/.venv/bin/alembic"
 DEMO_PORT="${DEMO_PORT:-8000}"
-DEMO_DATABASE_URL="${DEMO_DATABASE_URL:-postgresql+psycopg://${USER}@localhost:5432/baoxiao_demo}"
+DEMO_DATABASE_NAME="${DEMO_DATABASE_NAME:-baoxiao_demo}"
+DEMO_DATABASE_URL="${DEMO_DATABASE_URL:-postgresql+psycopg://${USER}@localhost:5432/${DEMO_DATABASE_NAME}}"
 export DATABASE_URL="$DEMO_DATABASE_URL"
 export DATA_DIR="${DATA_DIR:-$ROOT_DIR/.demo-data}"
 export BAOXIAO_DEMO_RUNTIME=1
+export DEMO_DATABASE_NAME
 
 fail() {
   echo "[demo] $*" >&2
@@ -22,9 +24,12 @@ fail() {
 command -v psql >/dev/null || fail "PostgreSQL client 'psql' is required for the local Demo runtime."
 command -v pg_isready >/dev/null || fail "PostgreSQL readiness tool 'pg_isready' is required."
 
+[[ "$DEMO_DATABASE_NAME" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] \
+  || fail "DEMO_DATABASE_NAME must be a PostgreSQL identifier."
+
 case "$DEMO_DATABASE_URL" in
-  */baoxiao_demo|*/baoxiao_demo\?*) ;;
-  *) fail "DEMO_DATABASE_URL must target the isolated database baoxiao_demo." ;;
+  */"$DEMO_DATABASE_NAME"|*/"$DEMO_DATABASE_NAME"\?*) ;;
+  *) fail "DEMO_DATABASE_URL must target the isolated database $DEMO_DATABASE_NAME." ;;
 esac
 
 if ! pg_isready -h 127.0.0.1 -p 5432 -q; then
@@ -37,16 +42,16 @@ if ! pg_isready -h 127.0.0.1 -p 5432 -q; then
 fi
 pg_isready -h 127.0.0.1 -p 5432 -q || fail "PostgreSQL is not ready on 127.0.0.1:5432. Start postgresql@16 and retry."
 
-if ! psql -h 127.0.0.1 -d postgres -Atqc "SELECT 1 FROM pg_database WHERE datname = 'baoxiao_demo'" | grep -qx "1"; then
-  echo "[demo] Creating isolated database baoxiao_demo..."
-  createdb -h 127.0.0.1 baoxiao_demo || fail "Could not create baoxiao_demo. Check your local PostgreSQL role."
+if ! psql -h 127.0.0.1 -d postgres -Atqc "SELECT 1 FROM pg_database WHERE datname = '$DEMO_DATABASE_NAME'" | grep -qx "1"; then
+  echo "[demo] Creating isolated database $DEMO_DATABASE_NAME..."
+  createdb -h 127.0.0.1 "$DEMO_DATABASE_NAME" || fail "Could not create $DEMO_DATABASE_NAME. Check your local PostgreSQL role."
 fi
 
 if lsof -nP -iTCP:"$DEMO_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
   fail "Port $DEMO_PORT is already in use. Set DEMO_PORT to another local port and retry."
 fi
 
-echo "[demo] Applying migrations to isolated baoxiao_demo..."
+echo "[demo] Applying migrations to isolated $DEMO_DATABASE_NAME..."
 "$ALEMBIC" upgrade head
 echo "[demo] Preparing constructed contest fixture (never formal evidence)..."
 "$PYTHON" scripts/demo_seed.py

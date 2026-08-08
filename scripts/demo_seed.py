@@ -1,15 +1,17 @@
 """Build the isolated, deterministic contest-demo knowledge fixture.
 
-This file deliberately refuses any database other than ``baoxiao_demo``.  It is
-not an import path for formal evidence and it never reads or restores formal
-data.  The fixture still walks the normal parse, validation, indexing and
-controlled-explanation paths so that the live Demo can exercise real APIs.
+This file deliberately refuses any database other than the explicit isolated
+Demo database (``baoxiao_demo`` by default). It is not an import path for formal
+evidence and it never reads or restores formal data. The fixture still walks the
+normal parse, validation, indexing and controlled-explanation paths so that the
+live Demo can exercise real APIs.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from datetime import UTC, datetime
 
@@ -33,7 +35,7 @@ from app.services.parsing import ParsingService
 from app.services.state_machine import StateMachineService
 from app.services.validation import ValidationService
 
-DEMO_DATABASE = "baoxiao_demo"
+DEFAULT_DEMO_DATABASE = "baoxiao_demo"
 DEMO_SOURCE_NAME = "构造赛事演示数据（非正式）"
 DEMO_URL = "https://contest-demo.invalid/knowledge/marketing-risk-reference.txt"
 DEMO_TITLE = "构造赛事演示：保险营销风险提示参考（非正式）"
@@ -48,6 +50,13 @@ class _DemoCollector(BaseCollector):
         raise NotImplementedError
 
 
+def _demo_database_name() -> str:
+    name = os.environ.get("DEMO_DATABASE_NAME", DEFAULT_DEMO_DATABASE)
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+        raise SystemExit("Refusing demo seed: DEMO_DATABASE_NAME must be a PostgreSQL identifier.")
+    return name
+
+
 def _require_isolated_runtime() -> None:
     if os.environ.get("BAOXIAO_DEMO_RUNTIME") != "1":
         raise SystemExit("Refusing demo seed: set BAOXIAO_DEMO_RUNTIME=1.")
@@ -56,9 +65,10 @@ def _require_isolated_runtime() -> None:
         url = make_url(settings.database_url)
     except Exception as exc:  # pragma: no cover - defensive operator message
         raise SystemExit("Refusing demo seed: DATABASE_URL is invalid.") from exc
-    if not url.drivername.startswith("postgresql") or url.database != DEMO_DATABASE:
+    database_name = _demo_database_name()
+    if not url.drivername.startswith("postgresql") or url.database != database_name:
         raise SystemExit(
-            f"Refusing demo seed: DATABASE_URL must target PostgreSQL database '{DEMO_DATABASE}'."
+            f"Refusing demo seed: DATABASE_URL must target PostgreSQL database '{database_name}'."
         )
 
 
@@ -195,7 +205,7 @@ def _seed(session: object) -> dict[str, object]:
             review_decision_id=decision.id,
             source_id=source.id,
             verified_occurrence_id=occurrence.id,
-            reason="Only for the isolated baoxiao_demo contest runtime; never formal evidence.",
+            reason="Only for the isolated contest Demo runtime; never formal evidence.",
         )
     )
     session.commit()
