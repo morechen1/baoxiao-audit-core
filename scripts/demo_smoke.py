@@ -24,8 +24,8 @@ CASES = (
         name="high-risk",
         title="高收益承诺宣传",
         material_type="advertisement",
-        raw_text="监管推荐本产品，保证年化收益8%，本金绝对安全，今天投保即可领取限量礼品。",
-        minimum_findings=2,
+        raw_text="监管推荐本产品，保证收益8%，本金绝对安全，今天投保即可领取限量礼品。",
+        minimum_findings=3,
     ),
     DemoCase(
         name="low-risk",
