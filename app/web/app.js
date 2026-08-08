@@ -47,7 +47,18 @@ function finding(id, title, severity, matchedText, explanation, remediation, que
   return { id, title, category: title, severity, matchedText, explanation, remediation, question, evidenceStatus, institution, consumer, citations: [{ key: citationKey, sourceKind, sourceTitle, quote, locator, sourceUrl: "构造展示数据，不对应真实公开来源", supportType: sourceKind }] };
 }
 
-const state = { current: null, audience: "institution", processingTimers: [] };
+const state = {
+  current: null,
+  audience: "institution",
+  processingTimers: [],
+  provider: {
+    provider: "deterministic_fixture",
+    mode: "deterministic_demo",
+    label: "确定性演示",
+    model: "controlled-fixture-v2",
+    ready: true,
+  },
+};
 const viewTitles = { dashboard: "智能审核工作台", review: "新建智能审核", result: "审核结果中心", processing: "审核运行过程" };
 const stages = [
   ["文本规范化", "构建材料指纹与可追溯偏移"],
@@ -134,35 +145,64 @@ async function fetchJson(path, options = {}) {
   return payload;
 }
 
-function apiFinding(row, index, institutionArtifact, consumerArtifact, citations) {
-  const citationsForFinding = (citations || []).filter((item) => item.finding_key === `F${String(index + 1).padStart(3, "0")}`).map((item) => ({ key: item.citation_key, sourceKind: item.support_type, sourceTitle: item.source_title, quote: item.cited_quote, locator: formatLocator(item.source_locator), sourceUrl: item.source_url }));
-  const institution = explanationText(institutionArtifact, index, "institution") || row.explanation;
-  const consumer = explanationText(consumerArtifact, index, "consumer") || row.review_question;
-  return { id: `F${String(index + 1).padStart(3, "0")}`, title: row.category, category: row.category, severity: row.severity, matchedText: row.matched_text, explanation: row.explanation, remediation: row.remediation_template || "请由合规人员依据完整材料复核。", question: row.review_question, evidenceStatus: row.evidence_status, institution, consumer, citations: citationsForFinding.length ? citationsForFinding : (row.evidence || []).map((item, evidenceIndex) => ({ key: `E${String(evidenceIndex + 1).padStart(3, "0")}`, sourceKind: item.support_type, sourceTitle: item.source?.title || "可信知识来源", quote: item.evidence_references?.[0]?.quote || "该证据引用由后端快照保存。", locator: formatLocator(item.source_locator), sourceUrl: item.source?.source_url || "" })) };
+function apiFinding(row, institutionArtifact, consumerArtifact, citations) {
+  const findingKey = row.finding_key;
+  const citationsForFinding = (citations || []).filter((item) => item.finding_key === findingKey).map((item) => ({ key: item.citation_key, sourceKind: item.support_type, sourceTitle: item.source_title, quote: item.cited_quote, locator: formatLocator(item.source_locator), sourceUrl: item.source_url }));
+  const institution = explanationText(institutionArtifact, findingKey, "institution");
+  const consumer = explanationText(consumerArtifact, findingKey, "consumer");
+  return { id: findingKey, title: row.category, category: row.category, severity: row.severity, matchedText: row.matched_text, explanation: row.explanation, remediation: row.remediation_template || "请由合规人员依据完整材料复核。", question: row.review_question, evidenceStatus: row.evidence_status, institution: institution.text || row.explanation, institutionSource: institution.text ? "真实模型受控解释" : "基础报告文本（确定性筛查结果）", consumer: consumer.text || row.review_question, consumerSource: consumer.text ? "真实模型受控解释" : "基础报告文本（确定性筛查结果）", citations: citationsForFinding.length ? citationsForFinding : (row.evidence || []).map((item, evidenceIndex) => ({ key: `E${String(evidenceIndex + 1).padStart(3, "0")}`, sourceKind: item.support_type, sourceTitle: item.source?.title || "可信知识来源", quote: item.evidence_references?.[0]?.quote || "该证据引用由后端快照保存。", locator: formatLocator(item.source_locator), sourceUrl: item.source?.source_url || "" })) };
 }
 
 function formatLocator(locator) { return locator && typeof locator === "object" ? Object.values(locator).filter(Boolean).join(" · ") || "已验证定位信息" : "已验证定位信息"; }
 
-function explanationText(artifact, index, audience) {
-  if (!artifact?.validated_output) return "";
+function explanationText(artifact, findingKey, audience) {
+  if (!artifact?.validated_output) return { text: "" };
   const output = artifact.validated_output;
   const rows = audience === "institution" ? output.finding_explanations : output.risk_explanations;
-  const row = rows?.[index];
-  if (!row) return "";
+  const row = rows?.find((item) => item.finding_key === findingKey);
+  if (!row) return { text: "" };
   const candidates = [row.explanation?.text, row.plain_language_explanation?.text, row.evidence_assessment?.text];
-  return candidates.find((value) => typeof value === "string" && value.trim()) || "";
+  return { text: candidates.find((value) => typeof value === "string" && value.trim()) || "" };
 }
 
 async function createApiExplanation(runId, audience) {
-  const created = await fetchJson(`/api/v1/screenings/${runId}/explanations`, { method: "POST", body: JSON.stringify({ audience, provider: "deterministic_fixture" }) });
-  if (created.status !== "completed") return null;
+  const created = await fetchJson(`/api/v1/screenings/${runId}/explanations`, { method: "POST", body: JSON.stringify({ audience, provider: state.provider.provider }) });
+  if (created.status !== "completed") throw new Error(`explanation_${created.status || "not_completed"}`);
   return fetchJson(created.artifact_endpoint);
+}
+
+async function requestAudienceArtifacts(runId, create = createApiExplanation) {
+  const audiences = ["institution", "consumer"];
+  const settled = await Promise.allSettled(audiences.map((audience) => create(runId, audience)));
+  const artifacts = {}; const audienceStatus = {};
+  settled.forEach((outcome, index) => {
+    const audience = audiences[index];
+    if (outcome.status === "fulfilled") {
+      artifacts[audience] = outcome.value;
+      audienceStatus[audience] = { status: "completed" };
+    } else {
+      audienceStatus[audience] = { status: "failed", error: outcome.reason?.message || "unknown_error" };
+    }
+  });
+  const completed = Object.values(audienceStatus).filter((item) => item.status === "completed").length;
+  return {
+    artifacts,
+    audiences: audienceStatus,
+    status: completed === 2 ? "completed" : completed === 1 ? "partial" : "failed",
+  };
+}
+
+async function loadProviderStatus() {
+  try { state.provider = await fetchJson("/api/v1/explanations/provider-status"); }
+  catch (_error) { /* Preserve explicit deterministic fallback when the status endpoint is unavailable. */ }
+  return state.provider;
 }
 
 async function runLiveReview(form) {
   const title = $("#material-title").value.trim();
   const rawText = $("#material-text").value.trim();
   if (!title || !rawText) { showToast("请填写材料标题和待审文本。", true); return; }
+  await loadProviderStatus();
   clearProcessingTimers();
   showView("processing");
   $("#processing-title").textContent = `正在提交「${title}」`;
@@ -177,15 +217,24 @@ async function runLiveReview(form) {
     renderStages(3);
     $("#processing-copy").textContent = "正在请求受控解释与 Citation 校验。";
     let institutionArtifact = null; let consumerArtifact = null;
+    let explanationStatus = { ...state.provider, status: screening.findings.length ? "pending" : "not_required" };
     if (screening.findings.length) {
-      try { [institutionArtifact, consumerArtifact] = await Promise.all([createApiExplanation(created.screening_run_id, "institution"), createApiExplanation(created.screening_run_id, "consumer")]); } catch (error) { showToast(`筛查已完成；受控解释不可用：${error.message}`, true); }
+      const audienceResult = await requestAudienceArtifacts(created.screening_run_id);
+      institutionArtifact = audienceResult.artifacts.institution || null;
+      consumerArtifact = audienceResult.artifacts.consumer || null;
+      explanationStatus = { ...state.provider, ...audienceResult };
+      if (explanationStatus.status !== "completed") {
+        const detail = Object.entries(explanationStatus.audiences).filter(([, item]) => item.status === "failed").map(([audience, item]) => `${audience}: ${item.error}`).join("；");
+        showToast(`筛查已完成；受控解释${explanationStatus.status === "partial" ? "部分成功" : "不可用"}：${detail}`, true);
+      }
     }
     let citations = [];
-    if (institutionArtifact) citations = await fetchJson(`/api/v1/explanations/${institutionArtifact.explanation_run_id}/citations`);
+    const citationArtifact = institutionArtifact || consumerArtifact;
+    if (citationArtifact) citations = await fetchJson(`/api/v1/explanations/${citationArtifact.explanation_run_id}/citations`);
     renderStages(6);
     const constructedRuntime = citations.some((item) => String(item.source_url || "").includes("contest-demo.invalid"));
     state.current = {
-      id: `live-${created.screening_run_id}`, number: "LIVE API", title, rawText, materialType: $("#material-type").value, riskLevel: screening.findings.some((row) => row.severity === "high") ? "high" : screening.findings.some((row) => row.severity === "medium") ? "medium" : "low", summary: institutionReport.disclaimer, findings: screening.findings.map((row, index) => apiFinding(row, index, institutionArtifact, consumerArtifact, citations)), mode: constructedRuntime ? "在线 API 审查 · 隔离构造赛事数据" : "在线 API 审查 · 当前后端结果", status: created.status, institutionReport, consumerReport, institutionArtifact, consumerArtifact,
+      id: `live-${created.screening_run_id}`, number: "LIVE API", title, rawText, materialType: $("#material-type").value, riskLevel: screening.findings.some((row) => row.severity === "high") ? "high" : screening.findings.some((row) => row.severity === "medium") ? "medium" : "low", summary: institutionReport.disclaimer, findings: screening.findings.map((row) => apiFinding(row, institutionArtifact, consumerArtifact, citations)), mode: constructedRuntime ? "在线 API 审查 · 隔离构造赛事数据" : "在线 API 审查 · 当前后端结果", status: created.status, institutionReport, consumerReport, institutionArtifact, consumerArtifact, explanationStatus,
     };
     renderResult();
     showView("result");
@@ -208,7 +257,17 @@ function renderResult() {
     : result.mode.startsWith("在线")
       ? "结果来自当前后端 API；系统输出为风险信号与证据辅助，不构成违法认定或最终法律意见。"
       : "该案例及引用均为构造展示数据，仅用于现场演示交互与能力边界；不代表真实监管材料、真实产品或正式可信证据。";
-  $("#result-content").innerHTML = `<div class="result-hero"><article class="result-summary"><span class="eyebrow">REVIEW RESULT / ${escapeHtml(result.number || "CASE")}</span><h1>${escapeHtml(result.title)}</h1><p>${escapeHtml(result.summary || "审核完成。")}</p><div class="result-kpis"><div><strong class="${riskClass(result.riskLevel)}">${riskLabel(result.riskLevel)}</strong><small>总体风险等级</small></div><div><strong>${findings.length}</strong><small>风险信号</small></div><div><strong>${evidenceCount}</strong><small>可见 Citation</small></div><div><strong>${result.status === "completed" ? "完成" : "已创建"}</strong><small>审核状态</small></div></div></article><aside class="result-status"><div><span class="eyebrow">MATERIAL PROFILE</span><h3>${escapeHtml(result.materialType || "文本材料")}</h3></div><div class="status-list"><span>材料指纹 <b>${result.id.includes("live") ? "已生成" : "演示快照"}</b></span><span>规则筛查 <b>确定性</b></span><span>证据校验 <b>${result.mode.startsWith("在线") ? "后端结果" : "展示完成"}</b></span><span>审计边界 <b>已保留</b></span></div></aside></div><div class="analysis-layout"><article class="findings-panel"><header class="panel-header"><div><span class="eyebrow">RISK FINDINGS</span><h2>风险详情与证据链</h2></div><div class="audience-toggle"><button class="active" data-audience="institution">机构端</button><button data-audience="consumer">消费者端</button></div></header><div id="finding-list">${findings.length ? findings.map(findingRow).join("") : `<div class="empty-result">未发现当前规则集中的风险信号。仍建议按既有人工审核流程确认材料版本与适用范围。</div>`}</div></article><aside class="detail-panel" id="detail-panel"><div class="detail-empty"><div><b>选择一条风险信号</b><br />查看“原文 → 规则 → 依据 → 受控解释”的完整链路。</div></div></aside></div>${result.rawText ? `<div class="notice"><b>材料原文：</b>${escapeHtml(result.rawText)}</div>` : ""}<div class="notice"><b>边界说明：</b>${boundaryNotice}</div>`;
+  const explanationStatus = result.explanationStatus || { label: "确定性演示", status: "completed" };
+  const audienceText = explanationStatus.audiences
+    ? Object.entries(explanationStatus.audiences).map(([audience, item]) => `${audience === "institution" ? "机构端" : "消费者端"}${item.status === "completed" ? "成功" : `失败：${item.error || "未知错误"}`}`).join("；")
+    : "";
+  const providerText = explanationStatus.status === "failed"
+    ? `${explanationStatus.label}（失败：${audienceText || "未知错误"}）`
+    : explanationStatus.status === "partial"
+      ? `${explanationStatus.label}（部分成功：${audienceText}）`
+    : explanationStatus.status === "not_required" ? "未调用（0 条风险信号）"
+      : `${explanationStatus.label}（${audienceText || "成功"}）${explanationStatus.model ? ` · ${explanationStatus.model}` : ""}`;
+  $("#result-content").innerHTML = `<div class="result-hero"><article class="result-summary"><span class="eyebrow">REVIEW RESULT / ${escapeHtml(result.number || "CASE")}</span><h1>${escapeHtml(result.title)}</h1><p>${escapeHtml(result.summary || "审核完成。")}</p><div class="result-kpis"><div><strong class="${riskClass(result.riskLevel)}">${riskLabel(result.riskLevel)}</strong><small>总体风险等级</small></div><div><strong>${findings.length}</strong><small>风险信号</small></div><div><strong>${evidenceCount}</strong><small>可见 Citation</small></div><div><strong>${result.status === "completed" ? "完成" : "已创建"}</strong><small>审核状态</small></div></div></article><aside class="result-status"><div><span class="eyebrow">MATERIAL PROFILE</span><h3>${escapeHtml(result.materialType || "文本材料")}</h3></div><div class="status-list"><span>材料指纹 <b>${result.id.includes("live") ? "已生成" : "演示快照"}</b></span><span>规则筛查 <b>确定性</b></span><span>AI解释模式 <b>${escapeHtml(providerText)}</b></span><span>证据校验 <b>${result.mode.startsWith("在线") ? "后端结果" : "展示完成"}</b></span><span>审计边界 <b>已保留</b></span></div></aside></div><div class="analysis-layout"><article class="findings-panel"><header class="panel-header"><div><span class="eyebrow">RISK FINDINGS</span><h2>风险详情与证据链</h2></div><div class="audience-toggle"><button class="active" data-audience="institution">机构端</button><button data-audience="consumer">消费者端</button></div></header><div id="finding-list">${findings.length ? findings.map(findingRow).join("") : `<div class="empty-result">未发现当前规则集中的风险信号。仍建议按既有人工审核流程确认材料版本与适用范围。</div>`}</div></article><aside class="detail-panel" id="detail-panel"><div class="detail-empty"><div><b>选择一条风险信号</b><br />查看“原文 → 规则 → 依据 → 受控解释”的完整链路。</div></div></aside></div>${result.rawText ? `<div class="notice"><b>材料原文：</b>${escapeHtml(result.rawText)}</div>` : ""}<div class="notice"><b>边界说明：</b>${boundaryNotice}</div>`;
   $$("[data-audience]").forEach((button) => button.addEventListener("click", () => { state.audience = button.dataset.audience; $$("[data-audience]").forEach((item) => item.classList.toggle("active", item === button)); const selected = $(".finding-row.selected"); if (selected) renderDetail(Number(selected.dataset.findingIndex)); }));
   $$(".finding-row").forEach((row) => row.addEventListener("click", () => { $$(".finding-row").forEach((item) => item.classList.remove("selected")); row.classList.add("selected"); renderDetail(Number(row.dataset.findingIndex)); }));
   if (findings.length) { const first = $(".finding-row"); first.classList.add("selected"); renderDetail(0); }
@@ -220,8 +279,9 @@ function renderDetail(index) {
   const item = state.current.findings[index];
   const audienceText = state.audience === "institution" ? item.institution : item.consumer;
   const audienceLabel = state.audience === "institution" ? "机构端受控解释" : "消费者端通俗说明";
+  const audienceSource = (state.audience === "institution" ? item.institutionSource : item.consumerSource) || "确定性演示文本";
   const citations = item.citations.length ? item.citations.map((citation) => `<article class="citation"><header><span>${escapeHtml(citation.key)}</span><span>${escapeHtml(citation.sourceKind || "证据")}</span></header><strong>${escapeHtml(citation.sourceTitle || "已验证来源")}</strong><div class="quote">“${escapeHtml(citation.quote)}”</div><p>${escapeHtml(citation.locator || "已验证定位信息")} · ${escapeHtml(citation.sourceUrl || "来源快照")}</p></article>`).join("") : `<p>该风险信号当前没有可用 Citation；系统按证据不足边界提示人工复核。</p>`;
-  $("#detail-panel").innerHTML = `<div class="detail-title"><div><span class="eyebrow">${escapeHtml(item.id)} / EVIDENCE TRACE</span><h2>${escapeHtml(item.title)}</h2><p>${escapeHtml(item.evidenceStatus)}</p></div><span class="risk-pill ${riskClass(item.severity)}">${riskLabel(item.severity)}</span></div><div class="detail-section"><h4>01 · 原文命中</h4><div class="quote">“${escapeHtml(item.matchedText)}”</div></div><div class="detail-section"><h4>02 · 确定性风险说明</h4><p>${escapeHtml(item.explanation)}</p></div><div class="detail-section"><h4>03 · ${audienceLabel}</h4><p>${escapeHtml(audienceText)}</p></div><div class="detail-section"><h4>04 · CITATION / 来源证据</h4>${citations}</div><div class="detail-section"><h4>05 · 人工复核与整改建议</h4><p><b>复核：</b>${escapeHtml(item.question)}</p><p><b>建议：</b>${escapeHtml(item.remediation)}</p></div>`;
+  $("#detail-panel").innerHTML = `<div class="detail-title"><div><span class="eyebrow">${escapeHtml(item.id)} / EVIDENCE TRACE</span><h2>${escapeHtml(item.title)}</h2><p>${escapeHtml(item.evidenceStatus)}</p></div><span class="risk-pill ${riskClass(item.severity)}">${riskLabel(item.severity)}</span></div><div class="detail-section"><h4>01 · 原文命中</h4><div class="quote">“${escapeHtml(item.matchedText)}”</div></div><div class="detail-section"><h4>02 · 确定性风险说明</h4><p>${escapeHtml(item.explanation)}</p></div><div class="detail-section"><h4>03 · ${audienceLabel}</h4><p><b>${escapeHtml(audienceSource)}</b></p><p>${escapeHtml(audienceText)}</p></div><div class="detail-section"><h4>04 · CITATION / 来源证据</h4>${citations}</div><div class="detail-section"><h4>05 · 人工复核与整改建议</h4><p><b>复核：</b>${escapeHtml(item.question)}</p><p><b>建议：</b>${escapeHtml(item.remediation)}</p></div>`;
 }
 
 function bindEvents() {
@@ -239,4 +299,4 @@ function bindEvents() {
   $("#live-review-form").addEventListener("submit", (event) => { event.preventDefault(); runLiveReview(event.currentTarget); });
 }
 
-renderDashboard(); renderCaseSelector(); bindEvents();
+renderDashboard(); renderCaseSelector(); bindEvents(); loadProviderStatus();

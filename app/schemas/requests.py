@@ -52,5 +52,5 @@ class ScreeningCreateRequest(BaseModel):
 
 class ExplanationCreateRequest(BaseModel):
     audience: Literal["institution", "consumer"]
-    provider: Literal["deterministic_fixture", "external"]
+    provider: Literal["deterministic_fixture", "openai_compatible", "external"]
     retry_of_id: int | None = Field(default=None, gt=0)

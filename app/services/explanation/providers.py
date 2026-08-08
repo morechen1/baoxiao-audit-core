@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from typing import Any, Protocol
 
+import httpx
+
+from app.core.config import Settings, get_settings
 from app.services.explanation.prompts import canonical_json_bytes, canonical_sha256
 from app.services.explanation.schemas import (
+    ConsumerExplanationV1,
     ExplanationProviderRequest,
     ExplanationProviderResponse,
+    InstitutionExplanationV1,
 )
 
 
@@ -35,6 +41,133 @@ class DisabledExternalProvider:
     def generate(self, request: ExplanationProviderRequest) -> ExplanationProviderResponse:
         del request
         raise ProviderGenerationError("explanation_provider_not_configured")
+
+
+class OpenAICompatibleProvider:
+    """Small OpenAI chat-completions adapter for the controlled explanation boundary."""
+
+    provider_name = "openai_compatible"
+    protocol = "openai_compatible_chat_completions_v1"
+
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        *,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self.settings = settings or get_settings()
+        self.transport = transport
+        self.provider_model = self.settings.llm_model or "not_configured"
+
+    @property
+    def safe_configuration(self) -> dict[str, object]:
+        return {
+            "enabled": self.settings.llm_enabled,
+            "protocol": self.protocol,
+            "model": self.provider_model,
+            "timeout_seconds": self.settings.llm_timeout_seconds,
+        }
+
+    def generate(self, request: ExplanationProviderRequest) -> ExplanationProviderResponse:
+        if not self._configured():
+            raise ProviderGenerationError("explanation_provider_not_configured")
+        try:
+            with httpx.Client(
+                timeout=self.settings.llm_timeout_seconds,
+                transport=self.transport,
+            ) as client:
+                response = client.post(
+                    self._endpoint(),
+                    headers={"Authorization": f"Bearer {self.settings.llm_api_key}"},
+                    json=self._request_payload(request),
+                )
+        except httpx.TimeoutException as exc:
+            raise ProviderGenerationError("explanation_provider_timeout") from exc
+        except httpx.RequestError as exc:
+            raise ProviderGenerationError("explanation_provider_network_error") from exc
+
+        if response.status_code == 429:
+            raise ProviderGenerationError("explanation_provider_rate_limited")
+        if response.is_error:
+            raise ProviderGenerationError("explanation_provider_http_error")
+        try:
+            payload = response.json()
+            content = payload["choices"][0]["message"]["content"]
+        except (IndexError, KeyError, TypeError, ValueError) as exc:
+            raise ProviderGenerationError("explanation_provider_invalid_response") from exc
+        if not isinstance(content, str) or not content.strip():
+            raise ProviderGenerationError("explanation_provider_invalid_response")
+        return ExplanationProviderResponse(raw_json=content)
+
+    def _configured(self) -> bool:
+        return (
+            self.settings.llm_enabled
+            and self.settings.llm_provider == self.provider_name
+            and bool(self.settings.llm_api_key)
+            and bool(self.settings.llm_model)
+            and self._is_https_url(self.settings.llm_base_url)
+        )
+
+    def _endpoint(self) -> str:
+        base_url = self.settings.llm_base_url.rstrip("/")
+        if base_url.endswith("/chat/completions"):
+            return base_url
+        return f"{base_url}/chat/completions"
+
+    @staticmethod
+    def _is_https_url(value: str) -> bool:
+        try:
+            url = httpx.URL(value)
+        except httpx.InvalidURL:
+            return False
+        return url.scheme == "https" and bool(url.host) and not bool(url.username or url.password)
+
+    def _request_payload(self, request: ExplanationProviderRequest) -> dict[str, object]:
+        schema = (
+            InstitutionExplanationV1.model_json_schema()
+            if request.audience == "institution"
+            else ConsumerExplanationV1.model_json_schema()
+        )
+        prompt_contract = request.prompt.model_dump(mode="json")
+        protocol_instruction = (
+            "只输出一个可解析的 JSON 对象，不要 Markdown、代码围栏或额外文字。"
+            "以下 authoritative_prompt_definition 是本次输出的权威契约，必须逐项遵守，"
+            "包括精确 disclaimer、allowed_claim_types、forbidden_claim_patterns、"
+            "uncertainty_instructions、insufficient_evidence_instructions 和"
+            "illustrative_product_disclaimer；不得自行补充、弱化或改写其中任何规则。\n"
+            "每个输出 finding row 必须且只能对应 context 的一个 finding_key；所有 claim 的"
+            "finding_keys 必须恰好等于其 row 的 finding_key。非 deterministic_template claim"
+            "必须引用该 finding 下的 citation_key；citation_key 必须符合契约格式，"
+            "cited_quote 必须逐字使用该 citation 的连续 allowed evidence quote，不能改写、"
+            "拼接、使用来源元数据或其他 finding 的证据。partially_supported 与"
+            "evidence_insufficient finding 必须严格执行契约中的不确定性指令；"
+            "若 evidence 的 context_scope 为 illustrative_not_material_specific，"
+            "必须在相关解释中逐字包含 illustrative_product_disclaimer。\n"
+            "输出还必须完全符合 output_json_schema。\n"
+            "authoritative_prompt_definition:\n"
+            + json.dumps(prompt_contract, ensure_ascii=False, separators=(",", ":"))
+            + "\noutput_json_schema:\n"
+            + json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
+        )
+        return {
+            "model": self.settings.llm_model,
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {
+                    "role": "system",
+                    "content": request.prompt.system_instruction + "\n" + protocol_instruction,
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        request.context.model_dump(mode="json"),
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                },
+            ],
+        }
 
 
 class DeterministicFixtureProvider:
@@ -389,6 +522,29 @@ def provider_configuration_sha256(provider: ExplanationProvider) -> str:
 def provider_from_name(name: str, scenario: str = "valid") -> ExplanationProvider:
     if name == "deterministic_fixture":
         return DeterministicFixtureProvider(scenario)
+    if name == "openai_compatible":
+        return OpenAICompatibleProvider()
     if name == "external":
         return DisabledExternalProvider()
     raise ProviderGenerationError("explanation_provider_not_configured")
+
+
+def configured_provider_status(settings: Settings | None = None) -> dict[str, object]:
+    configured = settings or get_settings()
+    provider_name = configured.llm_provider
+    if provider_name == "openai_compatible":
+        provider = OpenAICompatibleProvider(configured)
+        return {
+            "provider": provider.provider_name,
+            "mode": "real_ai",
+            "label": "真实大模型",
+            "model": provider.provider_model,
+            "ready": provider._configured(),
+        }
+    return {
+        "provider": "deterministic_fixture",
+        "mode": "deterministic_demo",
+        "label": "确定性演示",
+        "model": DeterministicFixtureProvider.provider_model,
+        "ready": True,
+    }

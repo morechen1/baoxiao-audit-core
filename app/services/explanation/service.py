@@ -59,6 +59,8 @@ class ControlledExplanationService:
     ) -> ExplanationRun:
         prompt = load_prompt(audience)
         built = self.context_builder.build(session, screening_run_id)
+        if not built.payload.findings:
+            raise ExplanationError("explanation_not_required")
         selected_provider = provider or self._provider(provider_name)
         if selected_provider.provider_name != provider_name:
             raise ExplanationError("explanation_provider_mismatch")

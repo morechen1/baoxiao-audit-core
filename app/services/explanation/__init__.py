@@ -8,6 +8,8 @@ from app.services.explanation.providers import (
     DeterministicFixtureProvider,
     DisabledExternalProvider,
     ExplanationProvider,
+    OpenAICompatibleProvider,
+    configured_provider_status,
 )
 from app.services.explanation.service import ControlledExplanationService
 from app.services.explanation.validators import (
@@ -26,7 +28,9 @@ __all__ = [
     "DisabledExternalProvider",
     "ExplanationCitationValidator",
     "ExplanationProvider",
+    "OpenAICompatibleProvider",
     "UnsupportedClaimDetectorV1",
+    "configured_provider_status",
     "load_prompt",
     "load_prompt_registry",
     "prompt_sha256",

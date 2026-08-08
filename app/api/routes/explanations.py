@@ -2,9 +2,14 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_db
-from app.services.explanation import ControlledExplanationService
+from app.services.explanation import ControlledExplanationService, configured_provider_status
 
 router = APIRouter(prefix="/api/v1/explanations", tags=["explanations"])
+
+
+@router.get("/provider-status")
+def get_provider_status() -> dict[str, object]:
+    return configured_provider_status()
 
 
 @router.get("/{run_id}")

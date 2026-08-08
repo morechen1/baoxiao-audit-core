@@ -51,7 +51,10 @@ class ScreeningReportService:
             "insufficient_evidence_count": run.insufficient_evidence_count,
             "run_payload_sha256": run.run_payload_sha256,
             "evidence_evaluation_summary": run.evidence_evaluation_summary_json,
-            "findings": [self._finding_row(finding) for finding in findings],
+            "findings": [
+                self._finding_row(finding, f"F{ordinal:03d}")
+                for ordinal, finding in enumerate(findings, start=1)
+            ],
         }
 
     def institution_report(self, session: Session, run_id: int) -> dict[str, Any]:
@@ -62,8 +65,8 @@ class ScreeningReportService:
             for finding in findings
         )
         rows = []
-        for finding in findings:
-            row = self._finding_row(finding)
+        for ordinal, finding in enumerate(findings, start=1):
+            row = self._finding_row(finding, f"F{ordinal:03d}")
             row["surrounding_context"] = material.raw_text[
                 max(0, finding.raw_start_offset - 40) : min(
                     len(material.raw_text), finding.raw_end_offset + 40
@@ -156,8 +159,9 @@ class ScreeningReportService:
         }
 
     @staticmethod
-    def _finding_row(finding: RiskFinding) -> dict[str, Any]:
+    def _finding_row(finding: RiskFinding, finding_key: str) -> dict[str, Any]:
         return {
+            "finding_key": finding_key,
             "finding_sha256": finding.finding_sha256,
             "rule_id": finding.rule_id,
             "rule_version": finding.rule_version,

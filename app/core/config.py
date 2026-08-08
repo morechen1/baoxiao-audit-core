@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -16,10 +17,11 @@ class Settings(BaseSettings):
     http_timeout_seconds: float = 20
     max_download_bytes: int = 50 * 1024 * 1024
     llm_enabled: bool = False
-    llm_provider: str = "mock"
+    llm_provider: Literal["deterministic_fixture", "openai_compatible"] = "deterministic_fixture"
     llm_base_url: str = ""
     llm_api_key: str = Field(default="", repr=False)
     llm_model: str = ""
+    llm_timeout_seconds: float = Field(default=30, gt=0, le=120)
     embedding_enabled: bool = False
     embedding_provider: str = "disabled"
     embedding_model: str = ""

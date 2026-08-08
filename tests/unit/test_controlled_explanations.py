@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
@@ -13,6 +14,7 @@ from typer.testing import CliRunner
 
 from app.api.dependencies import get_db
 from app.cli.main import app as cli_app
+from app.core.config import Settings
 from app.core.exceptions import ExplanationError
 from app.main import app as api_app
 from app.models import (
@@ -40,8 +42,11 @@ from app.services.explanation.prompts import (
 from app.services.explanation.providers import (
     DeterministicFixtureProvider,
     DisabledExternalProvider,
+    OpenAICompatibleProvider,
     ProviderGenerationError,
+    configured_provider_status,
     provider_configuration_sha256,
+    provider_from_name,
 )
 from app.services.explanation.schemas import (
     AllowedEvidenceSegment,
@@ -317,6 +322,158 @@ def test_disabled_external_provider_fails_with_public_code() -> None:
     )
     with pytest.raises(ProviderGenerationError, match="explanation_provider_not_configured"):
         DisabledExternalProvider().generate(request)
+
+
+def _openai_provider(
+    handler: Any | None = None,
+    *,
+    enabled: bool = True,
+    api_key: str = "test-real-provider-secret",
+    base_url: str = "https://llm.example.test/v1",
+) -> OpenAICompatibleProvider:
+    return OpenAICompatibleProvider(
+        Settings(
+            llm_enabled=enabled,
+            llm_provider="openai_compatible",
+            llm_base_url=base_url,
+            llm_api_key=api_key,
+            llm_model="contest-model",
+            llm_timeout_seconds=12,
+        ),
+        transport=httpx.MockTransport(handler) if handler is not None else None,
+    )
+
+
+def test_openai_compatible_provider_returns_structured_json() -> None:
+    prompt = load_prompt("institution")
+    request = ExplanationProviderRequest(
+        audience="institution", prompt=prompt, context=_built_context().payload
+    )
+    expected = DeterministicFixtureProvider().generate(request).raw_json
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        assert str(http_request.url) == "https://llm.example.test/v1/chat/completions"
+        assert http_request.headers["authorization"] == "Bearer test-real-provider-secret"
+        payload = json.loads(http_request.content)
+        assert payload["model"] == "contest-model"
+        assert payload["temperature"] == 0
+        assert payload["response_format"] == {"type": "json_object"}
+        assert payload["messages"][0]["role"] == "system"
+        assert "authoritative_prompt_definition" in payload["messages"][0]["content"]
+        contract = json.dumps(
+            prompt.model_dump(mode="json"), ensure_ascii=False, separators=(",", ":")
+        )
+        assert contract in payload["messages"][0]["content"]
+        assert json.loads(payload["messages"][1]["content"])["findings"][0]["finding_key"] == "F001"
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": expected}}]},
+            request=http_request,
+        )
+
+    provider = _openai_provider(handler)
+    assert provider.generate(request).raw_json == expected
+    assert provider.safe_configuration == {
+        "enabled": True,
+        "protocol": "openai_compatible_chat_completions_v1",
+        "model": "contest-model",
+        "timeout_seconds": 12,
+    }
+
+
+def test_openai_provider_prompt_contract_is_derived_from_prompt_definition() -> None:
+    prompt = load_prompt("consumer").model_copy(
+        update={
+            "system_instruction": "只按本次受控解释契约输出，不得遗漏任何固定要求或引用边界。",
+            "allowed_claim_types": ("contract_claim",),
+            "forbidden_claim_patterns": ("禁止的契约词",),
+            "required_disclaimer": "本次精确免责声明必须逐字保留。",
+            "citation_format": "contract citation format",
+            "uncertainty_instructions": "本次部分支持必须使用契约不确定性说明。",
+            "insufficient_evidence_instructions": "本次证据不足不得作为确定事实。",
+            "illustrative_product_disclaimer": "本次示例产品声明必须逐字保留。",
+        }
+    )
+    request = ExplanationProviderRequest(
+        audience="consumer", prompt=prompt, context=_built_context().payload
+    )
+    payload = _openai_provider()._request_payload(request)
+    system = str(payload["messages"][0]["content"])
+    authoritative = json.dumps(
+        prompt.model_dump(mode="json"), ensure_ascii=False, separators=(",", ":")
+    )
+    assert authoritative in system
+    for value in (
+        prompt.required_disclaimer,
+        prompt.allowed_claim_types[0],
+        prompt.forbidden_claim_patterns[0],
+        prompt.citation_format,
+        prompt.uncertainty_instructions,
+        prompt.insufficient_evidence_instructions,
+        prompt.illustrative_product_disclaimer,
+    ):
+        assert value in system
+    assert "finding_keys 必须恰好等于其 row 的 finding_key" in system
+    assert "连续 allowed evidence quote" in system
+
+
+def test_openai_compatible_provider_unconfigured_fails_closed() -> None:
+    request = ExplanationProviderRequest(
+        audience="consumer", prompt=load_prompt("consumer"), context=_built_context().payload
+    )
+    with pytest.raises(ProviderGenerationError, match="explanation_provider_not_configured"):
+        _openai_provider(enabled=False).generate(request)
+    with pytest.raises(ProviderGenerationError, match="explanation_provider_not_configured"):
+        _openai_provider(base_url="http://llm.example.test/v1").generate(request)
+
+
+@pytest.mark.parametrize(
+    ("handler", "error_code"),
+    [
+        (
+            lambda request: (_ for _ in ()).throw(httpx.ReadTimeout("timeout", request=request)),
+            "explanation_provider_timeout",
+        ),
+        (
+            lambda request: (_ for _ in ()).throw(httpx.ConnectError("network", request=request)),
+            "explanation_provider_network_error",
+        ),
+        (lambda request: httpx.Response(429, request=request), "explanation_provider_rate_limited"),
+        (lambda request: httpx.Response(503, request=request), "explanation_provider_http_error"),
+        (
+            lambda request: httpx.Response(200, json={"choices": []}, request=request),
+            "explanation_provider_invalid_response",
+        ),
+    ],
+)
+def test_openai_compatible_provider_maps_transport_and_envelope_failures(
+    handler: Any, error_code: str
+) -> None:
+    request = ExplanationProviderRequest(
+        audience="consumer", prompt=load_prompt("consumer"), context=_built_context().payload
+    )
+    with pytest.raises(ProviderGenerationError, match=error_code):
+        _openai_provider(handler).generate(request)
+
+
+def test_openai_compatible_provider_status_never_includes_secret() -> None:
+    settings = Settings(
+        llm_enabled=True,
+        llm_provider="openai_compatible",
+        llm_base_url="https://llm.example.test/v1",
+        llm_api_key="test-real-provider-secret",
+        llm_model="contest-model",
+    )
+    payload = configured_provider_status(settings)
+    assert payload == {
+        "provider": "openai_compatible",
+        "mode": "real_ai",
+        "label": "真实大模型",
+        "model": "contest-model",
+        "ready": True,
+    }
+    assert "secret" not in json.dumps(payload).lower()
+    assert isinstance(provider_from_name("deterministic_fixture"), DeterministicFixtureProvider)
 
 
 @pytest.mark.parametrize(
@@ -796,6 +953,122 @@ def test_provider_failure_persists_failed_run_without_secret_or_artifact(
     run = session.query(ExplanationRun).one()
     assert run.status == "failed"
     assert run.provider_configuration_json == {"enabled": False}
+    assert session.query(ExplanationArtifact).count() == 0
+
+
+@pytest.mark.parametrize(
+    ("fixture_scenario", "error_code", "validation_status"),
+    [
+        ("empty", "explanation_output_invalid_schema", "rejected_invalid_schema"),
+        ("unknown_citation", "explanation_unknown_citation_key", "rejected_invalid_citation"),
+    ],
+)
+def test_openai_provider_output_still_uses_existing_strict_validator(
+    session: Any,
+    monkeypatch: Any,
+    fixture_scenario: str,
+    error_code: str,
+    validation_status: str,
+) -> None:
+    screening_id, built = _persist_screening_graph(session)
+    service = ControlledExplanationService()
+    monkeypatch.setattr(service.context_builder, "build", lambda *_args: built)
+    request = ExplanationProviderRequest(
+        audience="institution", prompt=load_prompt("institution"), context=built.payload
+    )
+    raw_json = (
+        json.dumps({"disclaimer": request.prompt.required_disclaimer}, ensure_ascii=False)
+        if fixture_scenario == "empty"
+        else DeterministicFixtureProvider(fixture_scenario).generate(request).raw_json
+    )
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": raw_json}}]},
+            request=http_request,
+        )
+
+    with pytest.raises(ExplanationError, match=error_code):
+        service.create(
+            session,
+            screening_run_id=screening_id,
+            audience="institution",
+            provider_name="openai_compatible",
+            provider=_openai_provider(handler),
+        )
+    run = session.query(ExplanationRun).one()
+    assert (run.status, run.validation_status) == ("rejected", validation_status)
+    assert session.query(ExplanationArtifact).count() == 0
+
+
+def test_openai_provider_secret_never_persists_in_run_or_artifact(
+    session: Any, monkeypatch: Any
+) -> None:
+    screening_id, built = _persist_screening_graph(session)
+    service = ControlledExplanationService()
+    monkeypatch.setattr(service.context_builder, "build", lambda *_args: built)
+    request = ExplanationProviderRequest(
+        audience="institution", prompt=load_prompt("institution"), context=built.payload
+    )
+    raw_json = DeterministicFixtureProvider().generate(request).raw_json
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": raw_json}}]},
+            request=http_request,
+        )
+
+    run = service.create(
+        session,
+        screening_run_id=screening_id,
+        audience="institution",
+        provider_name="openai_compatible",
+        provider=_openai_provider(handler),
+    )
+    stored = json.dumps(
+        {
+            "run": run.provider_configuration_json,
+            "artifact": service.artifact(session, run.id),
+        },
+        ensure_ascii=False,
+    )
+    assert "test-real-provider-secret" not in stored
+    assert "https://llm.example.test" not in stored
+
+
+def test_zero_finding_context_does_not_call_provider_or_create_artifact(
+    session: Any, monkeypatch: Any
+) -> None:
+    screening_id, built = _persist_screening_graph(session)
+    empty_context = built.payload.model_copy(update={"findings": []})
+    empty_built = BuiltContext(
+        empty_context,
+        canonical_sha256(empty_context.model_dump(mode="json")),
+        {},
+    )
+    service = ControlledExplanationService()
+    monkeypatch.setattr(service.context_builder, "build", lambda *_args: empty_built)
+    provider = DeterministicFixtureProvider()
+    calls = 0
+
+    def should_not_generate(_: ExplanationProviderRequest) -> Any:
+        nonlocal calls
+        calls += 1
+        raise AssertionError("zero-finding explanation must not call a provider")
+
+    monkeypatch.setattr(provider, "generate", should_not_generate)
+    with pytest.raises(ExplanationError, match="explanation_not_required"):
+        service.create(
+            session,
+            screening_run_id=screening_id,
+            audience="institution",
+            provider_name="deterministic_fixture",
+            provider=provider,
+        )
+    assert calls == 0
+    assert session.query(ExplanationRun).count() == 0
     assert session.query(ExplanationArtifact).count() == 0
 
 

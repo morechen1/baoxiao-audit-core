@@ -33,8 +33,15 @@ quote，再将每个 finding 的证据从四条降为两条、最后降为一条
 
 - `DeterministicFixtureProvider`：离线测试、CI 和验收；
 - `DisabledExternalProvider`：稳定返回 `explanation_provider_not_configured`。
+- `OpenAICompatibleProvider`：录制视频的可选真实解释模式。仅在 `LLM_ENABLED=true`、
+  `LLM_PROVIDER=openai_compatible`、HTTPS endpoint、API key 和 model 均已配置时发起
+  chat-completions JSON-object 请求；模型原始 JSON 直接交给下游 validator，不修复 Citation、
+  不增加 finding，也不自动回退到 Fixture。
 
-没有绑定商业模型、外部网络、Embedding 或向量数据库，也不保存完整供应商原始响应。
+安全 Provider 配置快照只保存 enabled、protocol、model 和 timeout；API key 与 endpoint 不进入
+`ExplanationRun`、Artifact、日志或快照，也不保存完整供应商原始响应。网络、timeout、HTTP、
+rate-limit 和 response-envelope 错误均记为 `failed`；模型 JSON 未通过 Schema 或 Citation
+门禁则记为 `rejected`。没有 Embedding 或向量数据库。
 
 ## 输出与引用门禁
 

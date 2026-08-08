@@ -18,7 +18,9 @@ Insurance marketing compliance-review and consumer-protection Demo. The target i
 
 Immutable collection and parsing → deterministic validation → human review/authenticity → trusted knowledge admission and deterministic `pg_trgm` retrieval → deterministic screening and institution/consumer reports → controlled-RAG explanation of existing findings only.
 
-External LLM, OCR, embedding/vector retrieval, automatic legal conclusions, and production authentication are not current baseline capabilities.
+受控的 OpenAI-compatible LLM 解释可作为初赛录制视频的正式模式；它只能解释既有 finding，
+输出仍须通过现有 Schema、Citation 和安全门禁。Fixture 保持默认测试/CI/开发/备用演示模式。
+OCR、embedding/vector retrieval、自动法律结论和生产认证仍不属于当前基线能力。
 
 ## Claude Baseline Delta
 
