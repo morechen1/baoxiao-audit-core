@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     llm_api_key: str = Field(default="", repr=False)
     llm_model: str = ""
     llm_timeout_seconds: float = Field(default=30, gt=0, le=120)
+    semantic_screening_enabled: bool = False
     embedding_enabled: bool = False
     embedding_provider: str = "disabled"
     embedding_model: str = ""

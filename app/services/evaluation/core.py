@@ -19,7 +19,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
-from app.services.screening import DeterministicScreeningService, load_ruleset
+from app.services.screening import HybridScreeningService, load_ruleset
 
 MANIFEST_SCHEMA_VERSION = "evaluation_manifest_v1"
 REPORT_SCHEMA_VERSION = "evaluation_report_v1"
@@ -367,11 +367,11 @@ class EvaluationRunner:
     def __init__(
         self,
         settings: Settings | None = None,
-        service_factory: Callable[[], DeterministicScreeningService] | None = None,
+        service_factory: Callable[[], Any] | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.service_factory = service_factory or (
-            lambda: DeterministicScreeningService(settings=self.settings)
+            lambda: HybridScreeningService(settings=self.settings)
         )
         self.ruleset = load_ruleset()
 

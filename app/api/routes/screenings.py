@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.api.dependencies import get_db
 from app.schemas.requests import ExplanationCreateRequest, ScreeningCreateRequest
 from app.services.explanation import ControlledExplanationService
-from app.services.screening import DeterministicScreeningService
+from app.services.screening import HybridScreeningService
 
 router = APIRouter(prefix="/api/v1/screenings", tags=["screenings"])
 
@@ -14,7 +14,7 @@ def create_screening(
     request: ScreeningCreateRequest,
     session: Session = Depends(get_db),
 ) -> dict[str, object]:
-    service = DeterministicScreeningService()
+    service = HybridScreeningService()
     run = service.run(
         session,
         title=request.title,
@@ -41,7 +41,7 @@ def get_screening(
     run_id: int,
     session: Session = Depends(get_db),
 ) -> dict[str, object]:
-    return DeterministicScreeningService().show(session, run_id)
+    return HybridScreeningService().show(session, run_id)
 
 
 @router.get("/{run_id}/institution-report")
@@ -49,7 +49,7 @@ def get_institution_report(
     run_id: int,
     session: Session = Depends(get_db),
 ) -> dict[str, object]:
-    return DeterministicScreeningService().institution_report(session, run_id)
+    return HybridScreeningService().institution_report(session, run_id)
 
 
 @router.get("/{run_id}/consumer-notice")
@@ -57,7 +57,7 @@ def get_consumer_notice(
     run_id: int,
     session: Session = Depends(get_db),
 ) -> dict[str, object]:
-    return DeterministicScreeningService().consumer_notice(session, run_id)
+    return HybridScreeningService().consumer_notice(session, run_id)
 
 
 @router.post("/{run_id}/explanations")
