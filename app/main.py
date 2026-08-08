@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import (
     explanations_router,
+    evaluations_router,
     health_router,
     knowledge_router,
     screenings_router,
@@ -24,6 +25,7 @@ app = FastAPI(
 )
 app.include_router(health_router)
 app.include_router(explanations_router)
+app.include_router(evaluations_router)
 app.include_router(sources_router)
 app.include_router(workflow_router)
 app.include_router(knowledge_router)

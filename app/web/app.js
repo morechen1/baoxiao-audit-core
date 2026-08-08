@@ -62,7 +62,7 @@ const state = {
     ready: true,
   },
 };
-const viewTitles = { dashboard: "智能审核工作台", review: "新建智能审核", result: "审核结果中心", processing: "审核运行过程" };
+const viewTitles = { dashboard: "智能审核工作台", review: "新建智能审核", result: "审核结果中心", processing: "审核运行过程", evaluation: "系统验证" };
 const stages = [
   ["材料解析", "构建材料指纹与可追溯偏移"],
   ["风险筛查", "运行确定性营销风险规则"],
@@ -105,6 +105,29 @@ function showToast(message, error = false) {
   toast.className = `toast show${error ? " error" : ""}`;
   window.clearTimeout(showToast.timer);
   showToast.timer = window.setTimeout(() => toast.classList.remove("show"), 4500);
+}
+
+function formatEvaluationMetric(value) { return typeof value === "number" ? `${(value * 100).toFixed(1)}%` : "N/A"; }
+function evaluationCard(title, status, body, tone = "") { return `<article class="evaluation-card ${tone}"><header><span class="eyebrow">${title}</span><b class="evaluation-status ${status}">${escapeHtml(status)}</b></header>${body}</article>`; }
+function renderEvaluationCenter(payload) {
+  const constructed = payload.constructed || {}; const external = payload.external || {}; const safety = payload.controlled_rag_safety || {};
+  const cm = constructed.report?.metrics;
+  const constructedBody = constructed.status === "COMPLETED" && cm
+    ? `<h2>构造覆盖验证</h2><div class="evaluation-metrics"><span><b>${cm.sample_count}</b>样本</span><span><b>${formatEvaluationMetric(cm.micro_precision)}</b>Micro P</span><span><b>${formatEvaluationMetric(cm.micro_recall)}</b>Micro R</span><span><b>${formatEvaluationMetric(cm.micro_f1)}</b>Micro F1</span><span><b>${formatEvaluationMetric(cm.macro_f1)}</b>Macro F1</span><span><b>${formatEvaluationMetric(cm.exact_set_match)}</b>Exact-set</span></div>`
+    : `<h2>构造覆盖验证</h2><p>正式 SEALED manifest 与报告尚未就绪。不会显示示例准确率。</p><small>当前 manifest：${escapeHtml(constructed.manifest?.status || "NOT READY")}</small>`;
+  const er = external.report;
+  const externalBody = external.status === "COMPLETED" && er?.external_metrics
+    ? `<h2>监管公开案例外部验证</h2><div class="evaluation-metrics"><span><b>${er.independent_in_scope_count}</b>独立 in-scope</span><span><b>${formatEvaluationMetric(er.external_metrics.micro_f1)}</b>Micro F1</span><span><b>${formatEvaluationMetric(er.external_metrics.exact_set_match)}</b>Exact-set</span></div><small>${escapeHtml(er.independence_label || "")}</small>`
+    : `<h2>监管公开案例外部验证</h2><p>${external.status === "INSUFFICIENT" ? "INSUFFICIENT — exploratory only：独立 in-scope 少于 30。" : "正式公开案例 manifest 与独立报告尚未就绪。"}</p><small>最低门槛：30 个未暴露 in-scope 案例；当前不发布外部 headline 指标。</small>`;
+  const safetyReport = safety.report;
+  const safetyBody = safety.status === "COMPLETED" && safetyReport
+    ? `<h2>Controlled-RAG 安全门禁验证</h2><div class="evaluation-metrics"><span><b>${safetyReport.constructed_valid_executed}</b>Valid samples</span><span><b>${safetyReport.constructed_valid_passed}</b>Valid accepted</span><span><b>${safetyReport.constructed_invalid_executed}</b>Invalid samples</span><span><b>${safetyReport.constructed_invalid_blocked}</b>Invalid blocked</span></div>`
+    : `<h2>Controlled-RAG 安全门禁验证</h2><div class="evaluation-metrics"><span><b>${safety.valid_samples || "N/A"}</b>Valid corpus</span><span><b>${safety.invalid_samples || "N/A"}</b>Invalid corpus</span></div><p>真实 acceptance 报告尚未载入：NOT READY。</p>`;
+  $("#evaluation-center").innerHTML = `${evaluationCard("A · CONSTRUCTED", constructed.status || "NOT_READY", constructedBody, "cyan")}${evaluationCard("B · EXTERNAL", external.status || "NOT_READY", externalBody, "amber")}${evaluationCard("C · SAFETY GATE", safety.status || "NOT_READY", safetyBody, "violet")}<p class="evaluation-disclaimer">${escapeHtml(safety.notice || "业务识别性能 ≠ 大模型生成安全门禁。")}</p>`;
+}
+async function loadEvaluationCenter() {
+  try { renderEvaluationCenter(await fetchJson("/api/v1/evaluations/latest")); }
+  catch (error) { $("#evaluation-center").innerHTML = evaluationCard("EVALUATION CENTER", "NOT_READY", `<h2>评测状态不可用</h2><p>${escapeHtml(error.message)}</p>`); }
 }
 
 function renderDashboard() {
@@ -320,7 +343,7 @@ function renderDetail(index) {
 }
 
 function bindEvents() {
-  $$("[data-view-target]").forEach((button) => button.addEventListener("click", () => showView(button.dataset.viewTarget)));
+  $$("[data-view-target]").forEach((button) => button.addEventListener("click", () => { showView(button.dataset.viewTarget); if (button.dataset.viewTarget === "evaluation") loadEvaluationCenter(); }));
   $("#hero-start").addEventListener("click", () => showView("review"));
   $("#hero-demo").addEventListener("click", () => playDemo(demoCases[0]));
   document.addEventListener("click", (event) => {
@@ -334,4 +357,4 @@ function bindEvents() {
   $("#live-review-form").addEventListener("submit", (event) => { event.preventDefault(); runLiveReview(event.currentTarget); });
 }
 
-renderDashboard(); renderCaseSelector(); bindEvents(); loadProviderStatus();
+renderDashboard(); renderCaseSelector(); bindEvents(); loadProviderStatus(); loadEvaluationCenter();

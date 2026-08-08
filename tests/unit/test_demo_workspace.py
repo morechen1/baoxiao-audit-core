@@ -34,7 +34,8 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 (async () => {
 let source = fs.readFileSync(process.argv[1], "utf8");
-const bootstrap = "renderDashboard(); renderCaseSelector(); bindEvents(); loadProviderStatus();";
+const bootstrap = "renderDashboard(); renderCaseSelector(); bindEvents(); "
+  + "loadProviderStatus(); loadEvaluationCenter();";
 source = source.replace(bootstrap, "");
 source += "\nglobalThis.__m3Fix = { apiFinding, requestAudienceArtifacts };";
 const sandbox = { console, Promise, Object, String, Array, Error, globalThis: null };

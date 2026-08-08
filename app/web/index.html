@@ -21,6 +21,7 @@
           <button class="nav-item active" data-view-target="dashboard"><span>◈</span>智能审核工作台</button>
           <button class="nav-item" data-view-target="review"><span>＋</span>新建智能审核</button>
           <button class="nav-item" data-view-target="result"><span>◇</span>审核结果中心</button>
+          <button class="nav-item" data-view-target="evaluation"><span>▦</span>系统验证</button>
         </nav>
         <div class="sidebar-bottom">
           <div class="trust-card">
@@ -104,6 +105,12 @@
         <section id="result" class="view">
           <div class="result-topline"><button class="back-button" data-view-target="dashboard">← 返回工作台</button><span id="result-mode" class="demo-badge"></span></div>
           <div id="result-content"></div>
+        </section>
+
+        <section id="evaluation" class="view">
+          <div class="page-intro"><span class="eyebrow">EVALUATION CENTER</span><h1>系统验证中心</h1><p>业务识别性能、公开案例外部验证与受控 RAG 安全门禁相互独立展示。</p></div>
+          <div class="evaluation-note"><b>评测边界</b><span>Precision / Recall / F1 仅评估确定性筛查的 rule_id；生成安全门禁不等同于真实模型总体安全率。</span></div>
+          <div id="evaluation-center" class="evaluation-grid"><div class="evaluation-loading">正在读取评测状态…</div></div>
         </section>
       </section>
     </main>
