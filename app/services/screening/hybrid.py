@@ -3,13 +3,17 @@
 
 from __future__ import annotations
 
-from typing import Any
+import hashlib
+import json
+from collections.abc import Sequence
+from typing import Any, Protocol, cast
 
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.models import ScreeningRun
 from app.services.screening.semantic import (
+    SEMANTIC_SCREENING_VERSION,
     SemanticScreeningError,
     TrustedRAGSemanticScreeningService,
 )
@@ -33,6 +37,8 @@ class HybridScreeningService:
         run = self.deterministic.run(session, **kwargs)
         if not self.settings.semantic_screening_enabled:
             return run
+        deterministic_payload_hash = run.run_payload_sha256
+        deterministic_finding_hashes = {item.finding_sha256 for item in run.findings}
         try:
             added = self.semantic.enrich(session, run)
         except SemanticScreeningError:
@@ -43,9 +49,15 @@ class HybridScreeningService:
         if not added:
             return run
         run.finding_count = len(run.findings)
+        semantic_findings = [
+            item for item in run.findings if item.finding_sha256 not in deterministic_finding_hashes
+        ]
+        run.run_payload_sha256 = _semantic_run_payload_hash(
+            deterministic_payload_hash, semantic_findings
+        )
         summary = dict(run.evidence_evaluation_summary_json or {})
         summary["semantic_screening"] = {
-            "version": "trusted_rag_semantic_screening_v1",
+            "version": SEMANTIC_SCREENING_VERSION,
             "added": added,
         }
         run.evidence_evaluation_summary_json = summary
@@ -60,3 +72,42 @@ class HybridScreeningService:
 
     def consumer_notice(self, session: Session, run_id: int) -> dict[str, object]:
         return self.deterministic.consumer_notice(session, run_id)
+
+
+class _PayloadFinding(Protocol):
+    finding_sha256: str
+    rule_id: str
+    raw_start_offset: int
+    raw_end_offset: int
+    evidence_status: str
+
+
+def _semantic_run_payload_hash(
+    base_payload_hash: str | None, findings: Sequence[_PayloadFinding]
+) -> str:
+    """Bind semantic supplements into the completed run's integrity payload deterministically."""
+    semantic_projection = sorted(
+        (
+            {
+                "finding_sha256": item.finding_sha256,
+                "rule_id": item.rule_id,
+                "raw_start_offset": item.raw_start_offset,
+                "raw_end_offset": item.raw_end_offset,
+                "evidence_status": item.evidence_status,
+            }
+            for item in findings
+        ),
+        key=lambda value: (
+            str(value["finding_sha256"]),
+            str(value["rule_id"]),
+            cast(int, value["raw_start_offset"]),
+        ),
+    )
+    payload = {
+        "base_deterministic_run_payload_sha256": base_payload_hash,
+        "semantic_screening_version": SEMANTIC_SCREENING_VERSION,
+        "semantic_findings": semantic_projection,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()

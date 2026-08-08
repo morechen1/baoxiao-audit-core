@@ -17,6 +17,7 @@ from app.core.config import Settings, get_settings
 from app.models import (
     FindingEvidenceLink,
     KnowledgeChunk,
+    MaterialSegment,
     RiskFinding,
     ScreeningRun,
     SourceDocument,
@@ -46,7 +47,12 @@ SEMANTIC_TAXONOMY = frozenset(
 
 
 class SemanticScreeningError(Exception):
-    pass
+    """A fail-closed semantic error with safe, machine-readable diagnostics."""
+
+    def __init__(self, code: str, *, diagnostic: dict[str, object] | None = None) -> None:
+        super().__init__(code)
+        self.code = code
+        self.diagnostic = diagnostic or {}
 
 
 class _StrictModel(BaseModel):
@@ -56,11 +62,8 @@ class _StrictModel(BaseModel):
 class SemanticCandidate(_StrictModel):
     rule_id: str
     matched_text: str = Field(min_length=1, max_length=500)
-    start_offset: int = Field(ge=0)
-    end_offset: int = Field(gt=0)
     citation_key: str = Field(pattern=r"^S[0-9]{3}$")
     cited_quote: str = Field(min_length=1, max_length=600)
-    evidence_assessment: str = Field(min_length=1, max_length=1000)
     confidence: Literal["high", "medium", "low"]
     uncertainty: Literal["none", "limited", "uncertain"]
     claim_polarity: Literal[
@@ -79,6 +82,16 @@ class SemanticCitation:
     quote: str
     retrieval_rank: int
     retrieval_score: float
+
+
+@dataclass(frozen=True)
+class ResolvedSemanticCandidate:
+    """Provider output after the system has resolved its only permitted source span."""
+
+    candidate: SemanticCandidate
+    start_offset: int
+    end_offset: int
+    segment: MaterialSegment
 
 
 class SemanticScreeningProvider(Protocol):
@@ -107,30 +120,31 @@ class OpenAICompatibleSemanticScreeningProvider:
             and _is_https_url(self.settings.llm_base_url)
         ):
             raise SemanticScreeningError("semantic_provider_not_configured")
-        payload = {
+        messages: list[dict[str, str]] = [
+            {
+                "role": "system",
+                "content": "Return ONLY a valid JSON object matching the required schema. Do not return Markdown or any text outside the JSON object. Each candidate must contain only the schema fields: never provide offsets or extra fields. 你只进行保险营销文本的受控风险分类。仅返回不被既有确定性筛查覆盖的补充风险。仅可使用给定 taxonomy、原文精确片段和 Citation。matched_text 必须逐字复制营销原文，并且仅在该片段在原文中唯一出现时输出；只可复制给定 citation_key 和 cited_quote。只识别肯定性的营销主张；否定、风险提示、禁止性说明、法规引用和对错误宣传的批判必须输出空 candidates。不得创造类别、证据、引用或改写 quoted text。仅 high confidence 且 uncertainty=none 的候选可被接受。",
+            },
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "marketing_text": raw_text,
+                        "taxonomy": taxonomy,
+                        "allowed_citations": citations,
+                        "output_schema": SemanticScreeningOutput.model_json_schema(),
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ]
+        payload: dict[str, object] = {
             "model": self.settings.llm_model,
             "temperature": 0,
             "thinking": {"type": "disabled"},
             "max_tokens": 4096,
             "response_format": {"type": "json_object"},
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "你只进行保险营销文本的受控风险分类。仅可使用给定 taxonomy、原文精确片段和 Citation。只识别肯定性的营销主张；否定、风险提示、禁止性说明、法规引用和对错误宣传的批判必须输出空 candidates。不得创造类别、证据、引用或改写 quoted text。仅 high confidence 且 uncertainty=none 的候选可被接受。",
-                },
-                {
-                    "role": "user",
-                    "content": json.dumps(
-                        {
-                            "marketing_text": raw_text,
-                            "taxonomy": taxonomy,
-                            "allowed_citations": citations,
-                            "output_schema": SemanticScreeningOutput.model_json_schema(),
-                        },
-                        ensure_ascii=False,
-                    ),
-                },
-            ],
+            "messages": messages,
         }
         base_url = self.settings.llm_base_url.rstrip("/")
         endpoint = (
@@ -152,7 +166,19 @@ class OpenAICompatibleSemanticScreeningProvider:
         if response.status_code == 429:
             raise SemanticScreeningError("semantic_provider_rate_limited")
         if response.is_error:
-            raise SemanticScreeningError("semantic_provider_http_error")
+            try:
+                error = response.json().get("error", {})
+            except (TypeError, ValueError):
+                error = {}
+            message = str(error.get("message", ""))[:300]
+            raise SemanticScreeningError(
+                "semantic_provider_http_error:"
+                f"status={response.status_code};type={error.get('type')};"
+                f"code={error.get('code')};message={message};"
+                f"endpoint={endpoint};model={self.settings.llm_model};"
+                f"request_bytes={len(json.dumps(payload, ensure_ascii=False).encode())};"
+                f"message_chars={sum(len(item['content']) for item in messages)}"
+            )
         try:
             raw = response.json()["choices"][0]["message"]["content"]
         except (IndexError, KeyError, TypeError, ValueError) as exc:
@@ -173,34 +199,70 @@ class SemanticOutputValidator:
         raw_text: str,
         citations: dict[str, SemanticCitation],
         deterministic: set[tuple[str, int, int]],
-    ) -> list[SemanticCandidate]:
+        segments: list[MaterialSegment],
+    ) -> list[ResolvedSemanticCandidate]:
         try:
             output = SemanticScreeningOutput.model_validate_json(raw_json)
         except ValidationError as exc:
             raise SemanticScreeningError("semantic_output_schema_invalid") from exc
-        accepted: list[SemanticCandidate] = []
+        accepted: list[ResolvedSemanticCandidate] = []
         identities = set(deterministic)
-        for candidate in output.candidates:
-            identity = (candidate.rule_id, candidate.start_offset, candidate.end_offset)
+        for index, candidate in enumerate(output.candidates):
+            diagnostic = _candidate_diagnostic(index, candidate, raw_text)
+            occurrences = _literal_occurrences(raw_text, candidate.matched_text)
+            diagnostic["literal_occurrence_count"] = len(occurrences)
+            if not occurrences:
+                raise SemanticScreeningError("matched_text_not_found", diagnostic=diagnostic)
+            if len(occurrences) != 1:
+                raise SemanticScreeningError("matched_text_ambiguous", diagnostic=diagnostic)
+            start_offset = occurrences[0]
+            end_offset = start_offset + len(candidate.matched_text)
+            diagnostic.update(
+                {"resolved_start_offset": start_offset, "resolved_end_offset": end_offset}
+            )
+            # Python str indices are authoritative for both resolution and persistence.
+            if raw_text[start_offset:end_offset] != candidate.matched_text:
+                raise SemanticScreeningError("matched_text_not_found", diagnostic=diagnostic)
+            contained_segments = [
+                segment
+                for segment in segments
+                if segment.raw_start_offset <= start_offset and end_offset <= segment.raw_end_offset
+            ]
+            diagnostic["segment_containment_count"] = len(contained_segments)
+            if not contained_segments:
+                raise SemanticScreeningError("span_segment_not_found", diagnostic=diagnostic)
+            if len(contained_segments) != 1:
+                raise SemanticScreeningError("span_segment_ambiguous", diagnostic=diagnostic)
+
+            identity = (candidate.rule_id, start_offset, end_offset)
             citation = citations.get(candidate.citation_key)
-            if (
-                candidate.rule_id not in SEMANTIC_TAXONOMY
-                or candidate.rule_id not in self.rules
-                or candidate.claim_polarity != "affirmative_marketing_claim"
-                or candidate.confidence != "high"
-                or candidate.uncertainty != "none"
-                or candidate.end_offset > len(raw_text)
-                or raw_text[candidate.start_offset : candidate.end_offset] != candidate.matched_text
-                or not _affirmative_marketing_context(
-                    raw_text, candidate.start_offset, candidate.end_offset
-                )
-                or citation is None
-                or candidate.cited_quote != citation.quote
-                or identity in identities
-            ):
-                raise SemanticScreeningError("semantic_output_validation_rejected")
+            if candidate.rule_id not in SEMANTIC_TAXONOMY or candidate.rule_id not in self.rules:
+                raise SemanticScreeningError("taxonomy_rejected", diagnostic=diagnostic)
+            if citation is None:
+                raise SemanticScreeningError("citation_key_invalid", diagnostic=diagnostic)
+            if candidate.cited_quote != citation.quote:
+                raise SemanticScreeningError("citation_quote_invalid", diagnostic=diagnostic)
+            if candidate.confidence != "high":
+                raise SemanticScreeningError("confidence_rejected", diagnostic=diagnostic)
+            if candidate.uncertainty != "none":
+                raise SemanticScreeningError("uncertainty_rejected", diagnostic=diagnostic)
+            if candidate.claim_polarity != "affirmative_marketing_claim":
+                raise SemanticScreeningError("polarity_rejected", diagnostic=diagnostic)
+            if not _affirmative_marketing_context(raw_text, start_offset, end_offset):
+                raise SemanticScreeningError("non_affirmative_context", diagnostic=diagnostic)
+            if identity in deterministic:
+                raise SemanticScreeningError("deterministic_duplicate", diagnostic=diagnostic)
+            if identity in identities:
+                raise SemanticScreeningError("semantic_duplicate", diagnostic=diagnostic)
             identities.add(identity)
-            accepted.append(candidate)
+            accepted.append(
+                ResolvedSemanticCandidate(
+                    candidate=candidate,
+                    start_offset=start_offset,
+                    end_offset=end_offset,
+                    segment=contained_segments[0],
+                )
+            )
         return accepted
 
 
@@ -239,42 +301,34 @@ class TrustedRAGSemanticScreeningService:
                 for item in citations.values()
             ],
         )
+        segments = sorted(run.material.segments, key=lambda item: item.ordinal)
         accepted = SemanticOutputValidator(self.rules).validate(
             raw_json=raw,
             raw_text=run.material.raw_text,
             citations=citations,
             deterministic=deterministic,
+            segments=segments,
         )
         if not accepted:
             return 0
-        segments = sorted(run.material.segments, key=lambda item: item.ordinal)
-        for candidate in accepted:
+        persisted = 0
+        for resolved in accepted:
+            candidate = resolved.candidate
             rule = self.rules[candidate.rule_id]
-            segment = next(
-                (
-                    item
-                    for item in segments
-                    if item.raw_start_offset <= candidate.start_offset
-                    and candidate.end_offset <= item.raw_end_offset
-                ),
-                None,
-            )
-            if segment is None:
-                continue
             citation = citations[candidate.citation_key]
             normalized = normalize_marketing_text(candidate.matched_text).text
             snapshot = rule.model_dump(mode="json")
             finding = RiskFinding(
                 screening_run_id=run.id,
-                segment_id=segment.id,
+                segment_id=resolved.segment.id,
                 rule_id=rule.rule_id,
                 rule_version=rule.version,
                 category=rule.category,
                 severity=rule.severity,
                 signal_strength=rule.signal_strength,
                 matched_text=candidate.matched_text,
-                raw_start_offset=candidate.start_offset,
-                raw_end_offset=candidate.end_offset,
+                raw_start_offset=resolved.start_offset,
+                raw_end_offset=resolved.end_offset,
                 normalized_match=normalized,
                 explanation=rule.explanation_template,
                 review_question=rule.review_question_template,
@@ -288,8 +342,8 @@ class TrustedRAGSemanticScreeningService:
                         "version": SEMANTIC_SCREENING_VERSION,
                         "run": run.id,
                         "rule": rule.rule_id,
-                        "start": candidate.start_offset,
-                        "end": candidate.end_offset,
+                        "start": resolved.start_offset,
+                        "end": resolved.end_offset,
                         "citation": citation.chunk.chunk_identity_sha256,
                     }
                 ),
@@ -331,8 +385,9 @@ class TrustedRAGSemanticScreeningService:
                     context_scope="not_applicable",
                 )
             )
-        session.flush()
-        return len(accepted)
+            session.flush()
+            persisted += 1
+        return persisted
 
     def _trusted_citations(self, session: Session, raw_text: str) -> dict[str, SemanticCitation]:
         # Constructed contest fixtures are valid for the isolated Demo but never for semantic screening.
@@ -392,6 +447,31 @@ def _sha(value: object) -> str:
     return hashlib.sha256(
         json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+
+
+def _literal_occurrences(text: str, matched_text: str) -> list[int]:
+    """Return every literal occurrence, including overlaps, using Python str indices."""
+    occurrences: list[int] = []
+    start = 0
+    while True:
+        index = text.find(matched_text, start)
+        if index < 0:
+            return occurrences
+        occurrences.append(index)
+        start = index + 1
+
+
+def _candidate_diagnostic(
+    index: int, candidate: SemanticCandidate, raw_text: str
+) -> dict[str, object]:
+    """Keep rejection diagnostics useful without retaining provider or source text."""
+    return {
+        "candidate_index": index,
+        "rule_id": candidate.rule_id,
+        "citation_key": candidate.citation_key,
+        "raw_text_sha256": hashlib.sha256(raw_text.encode()).hexdigest(),
+        "matched_text_sha256": hashlib.sha256(candidate.matched_text.encode()).hexdigest(),
+    }
 
 
 def _is_https_url(value: str) -> bool:
