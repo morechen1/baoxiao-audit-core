@@ -1,5 +1,8 @@
+from pathlib import Path
+
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import (
     explanations_router,
@@ -25,6 +28,15 @@ app.include_router(sources_router)
 app.include_router(workflow_router)
 app.include_router(knowledge_router)
 app.include_router(screenings_router)
+
+WEB_DIR = Path(__file__).resolve().parent / "web"
+app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+
+
+@app.get("/", include_in_schema=False)
+async def demo_workspace() -> FileResponse:
+    """Serve the zero-dependency contest demonstration workspace."""
+    return FileResponse(WEB_DIR / "index.html")
 
 
 @app.exception_handler(BaoxiaoError)

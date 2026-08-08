@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#071427" />
+    <title>保销智审｜保险营销合规智能审查</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+    <main class="shell">
+      <aside class="sidebar" aria-label="主导航">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+          <div><strong>保销智审</strong><small>BAOXIAO INTELLIGENCE</small></div>
+        </div>
+        <nav class="nav-list">
+          <button class="nav-item active" data-view-target="dashboard"><span>◈</span>智能审核工作台</button>
+          <button class="nav-item" data-view-target="review"><span>＋</span>新建智能审核</button>
+          <button class="nav-item" data-view-target="result"><span>◇</span>审核结果中心</button>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="trust-card">
+            <span class="eyebrow">可信审查引擎</span>
+            <strong>Evidence-first</strong>
+            <p>确定性规则 · 可信知识 · 受控解释</p>
+          </div>
+          <div class="system-status"><i></i>演示工作台已就绪</div>
+        </div>
+      </aside>
+
+      <section class="main-panel">
+        <header class="topbar">
+          <div class="crumb"><span>赛事演示</span><b>/</b><strong id="view-title">智能审核工作台</strong></div>
+          <div class="top-actions">
+            <span class="top-chip"><i></i>可信链路已加载</span>
+            <button class="avatar" title="赛事演示账户">评</button>
+          </div>
+        </header>
+
+        <section id="dashboard" class="view active-view">
+          <div class="hero-grid">
+            <article class="hero-card panel-glass">
+              <div class="hero-orbit"></div>
+              <span class="eyebrow">INSURANCE COMPLIANCE COPILOT</span>
+              <h1>让每一条营销表述<br /><em>都有证可循</em></h1>
+              <p>面向保险营销材料的确定性风险筛查、可信监管知识增强与受控 AI 双端解释工作台。</p>
+              <div class="hero-actions">
+                <button class="primary-button" id="hero-start">新建智能审核 <span>→</span></button>
+                <button class="quiet-button" id="hero-demo">播放高风险案例</button>
+              </div>
+              <div class="hero-meta"><span>规则命中可追溯</span><span>引用连续可验证</span><span>解释双端分层</span></div>
+            </article>
+            <article class="score-card panel-glass">
+              <div class="score-head"><span>今日审核态势</span><span class="pulse">LIVE</span></div>
+              <div class="score-ring"><div><strong>98</strong><small>审查可信度</small></div></div>
+              <div class="score-list"><span>规则版本 <b>v1</b></span><span>解释输出 <b>受控</b></span><span>审计记录 <b>完整</b></span></div>
+            </article>
+          </div>
+
+          <div class="metric-grid" id="metrics"></div>
+
+          <div class="section-heading"><div><span class="eyebrow">RECENT WORKSPACE</span><h2>最近审核任务</h2></div><button class="text-button" data-view-target="review">查看全部案例 →</button></div>
+          <div class="recent-grid" id="recent-cases"></div>
+
+          <div class="section-heading compact"><div><span class="eyebrow">TRUSTED BY DESIGN</span><h2>系统能力概览</h2></div></div>
+          <div class="capability-grid">
+            <article><span class="cap-icon cyan">⌁</span><h3>确定性风险筛查</h3><p>规则、命中原文与偏移量固定，风险信号可重复复核。</p></article>
+            <article><span class="cap-icon violet">◫</span><h3>可信知识增强</h3><p>只使用经审核、可验证来源与索引闸门准入的知识块。</p></article>
+            <article><span class="cap-icon amber">◎</span><h3>受控 AI 解释</h3><p>AI 只解释既有 finding；每个 claim 都需绑定可见 Citation。</p></article>
+            <article><span class="cap-icon lime">↗</span><h3>双端结果呈现</h3><p>同一事实分别面向机构合规与消费者权益保护进行说明。</p></article>
+          </div>
+        </section>
+
+        <section id="review" class="view">
+          <div class="page-intro"><span class="eyebrow">CREATE REVIEW</span><h1>新建智能审核</h1><p>选择稳定的赛事演示案例，或将文本材料提交至已有的筛查 API。</p></div>
+          <div class="mode-note"><span>◈</span><div><strong>现场演示建议：预置案例</strong><p>预置案例为明确标注的构造展示数据，不写入正式证据库；“在线审查”直接调用当前后端 API。</p></div></div>
+          <div class="case-selector" id="case-selector"></div>
+          <div class="or-separator"><span>或</span></div>
+          <div class="submission-grid">
+            <form class="material-form panel-glass" id="live-review-form">
+              <div class="form-title"><div><span class="eyebrow">LIVE API MODE</span><h2>提交文本材料</h2></div><span class="api-dot">API</span></div>
+              <label>材料标题<input id="material-title" maxlength="300" value="现场演示材料" /></label>
+              <div class="split-fields"><label>材料类型<select id="material-type"><option value="advertisement">宣传广告</option><option value="sales_script">销售话术</option><option value="social_media">社交媒体</option><option value="product_introduction">产品介绍</option><option value="other">其他文本</option></select></label><label class="file-label">导入 TXT<input id="file-input" type="file" accept="text/plain,.txt" /><span>选择文本文件</span></label></div>
+              <label>待审材料<textarea id="material-text" rows="8" placeholder="粘贴保险营销文本；将直接提交至 /api/v1/screenings。"></textarea></label>
+              <div class="form-footer"><small>仅支持文本材料；不上传或处理图片、OCR、Embedding。</small><button class="primary-button" type="submit">启动在线审核 <span>→</span></button></div>
+            </form>
+            <aside class="process-preview panel-glass"><span class="eyebrow">REVIEW CHAIN</span><h2>全流程可验证</h2><ol><li><b>01</b><span>文本规范化与材料指纹</span></li><li><b>02</b><span>确定性风险信号筛查</span></li><li><b>03</b><span>可信监管知识检索</span></li><li><b>04</b><span>受控 AI 解释编排</span></li><li><b>05</b><span>Citation 与证据边界校验</span></li><li><b>06</b><span>机构 / 消费者双端结果</span></li></ol></aside>
+          </div>
+        </section>
+
+        <section id="processing" class="view processing-view">
+          <div class="processing-card panel-glass"><div class="processing-pulse"><span></span><span></span><span></span></div><span class="eyebrow">REVIEW IN PROGRESS</span><h1 id="processing-title">正在建立审查链路</h1><p id="processing-copy">正在准备材料指纹与确定性规则上下文。</p><div class="stage-list" id="stage-list"></div><div class="process-progress"><i id="process-progress-bar"></i></div><small id="processing-hint">每一步均对应现有系统的受控处理边界。</small></div>
+        </section>
+
+        <section id="result" class="view">
+          <div class="result-topline"><button class="back-button" data-view-target="dashboard">← 返回工作台</button><span id="result-mode" class="demo-badge"></span></div>
+          <div id="result-content"></div>
+        </section>
+      </section>
+    </main>
+    <div id="toast" class="toast" role="status"></div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
