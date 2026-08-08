@@ -1,4 +1,4 @@
-.PHONY: install format lint typecheck test up down migrate seed review-demo demo demo-smoke
+.PHONY: install format lint typecheck test up down migrate seed review-demo demo demo-smoke final-demo final-demo-smoke
 
 install:
 	python3.12 -m venv .venv
@@ -38,3 +38,9 @@ demo:
 
 demo-smoke:
 	BAOXIAO_DEMO_RUNTIME=1 DEMO_DATABASE_NAME="$${DEMO_DATABASE_NAME:-baoxiao_demo}" DATABASE_URL="$${DEMO_DATABASE_URL:-postgresql+psycopg://$${USER}@localhost:5432/$${DEMO_DATABASE_NAME:-baoxiao_demo}}" DATA_DIR=.demo-data .venv/bin/python scripts/demo_smoke.py
+
+final-demo:
+	./scripts/start_final_demo.sh
+
+final-demo-smoke:
+	BAOXIAO_FINAL_RUNTIME=1 FINAL_DATABASE_NAME=baoxiao_contest_final DATABASE_URL="$${FINAL_DATABASE_URL:-postgresql+psycopg://$${USER}@localhost:5432/baoxiao_contest_final}" DATA_DIR=.final-demo-data SEMANTIC_SCREENING_ENABLED=false .venv/bin/python scripts/final_demo_smoke.py --skip-explanations

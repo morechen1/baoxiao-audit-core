@@ -5,8 +5,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import (
-    explanations_router,
     evaluations_router,
+    explanations_router,
     health_router,
     knowledge_router,
     screenings_router,

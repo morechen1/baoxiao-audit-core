@@ -173,20 +173,11 @@ function renderStages(index = -1) {
 
 function clearProcessingTimers() { state.processingTimers.forEach(window.clearTimeout); state.processingTimers = []; }
 
-function playDemo(caseItem) {
-  clearProcessingTimers();
-  state.current = { ...caseItem, mode: "构造预置案例 · 仅赛事演示，不进入正式证据库", status: "completed" };
-  showView("processing");
-  $("#processing-title").textContent = `正在审查「${caseItem.title}」`;
-  $("#processing-hint").textContent = "演示回放展示已验证的处理结果，不表示逐阶段实时后台耗时；数据明确标记为构造展示数据。";
-  renderStages(0);
-  stages.forEach(([label, detail], index) => {
-    state.processingTimers.push(window.setTimeout(() => {
-      renderStages(index + 1);
-      $("#processing-copy").textContent = `${label}：${detail}`;
-      if (index === stages.length - 1) state.processingTimers.push(window.setTimeout(() => { renderResult(); showView("result"); }, 520));
-    }, 430 * (index + 1)));
-  });
+async function playDemo(caseItem) {
+  $("#material-title").value = caseItem.title;
+  $("#material-type").value = caseItem.materialType;
+  $("#material-text").value = caseItem.rawText;
+  await runLiveReview();
 }
 
 async function fetchJson(path, options = {}) {

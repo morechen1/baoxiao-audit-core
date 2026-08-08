@@ -167,11 +167,14 @@ def current_records(structured: Path, post: Path) -> dict[str, list[dict[str, An
 
 def migrate(settings: Settings) -> dict[str, Any]:
     parsed_url = make_url(settings.database_url)
+    allowed_databases = {"baoxiao_semantic_dev", "baoxiao_contest_final"}
     if (
         parsed_url.get_backend_name() != "postgresql"
-        or parsed_url.database != "baoxiao_semantic_dev"
+        or parsed_url.database not in allowed_databases
     ):
-        raise ValueError("requires isolated baoxiao_semantic_dev database")
+        raise ValueError(
+            "requires isolated baoxiao_semantic_dev or baoxiao_contest_final database"
+        )
     engine = create_engine(settings.database_url, pool_pre_ping=True)
     factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     with tempfile.TemporaryDirectory(prefix="m7-rematerialization-") as temp:
