@@ -121,6 +121,29 @@ def test_runner_deduplicates_rule_ids_and_marks_batch_invalid_on_failure() -> No
     assert invalid["metrics"] is None
 
 
+def test_provisional_runner_does_not_bypass_formal_sealed_gate() -> None:
+    draft = manifest(
+        cases=[
+            {
+                "case_id": "C1",
+                "material_type": "sales_script",
+                "text": "保证收益",
+                "expected_rule_ids": ["guaranteed_return"],
+            }
+        ]
+    )
+    draft["content_sha256"] = "candidate-only"
+    runner = EvaluationRunner(
+        Settings(database_url="sqlite:///evaluation-test.db"),
+        service_factory=lambda: FakeScreening(),
+    )
+    report = runner.run_constructed_provisional(object(), draft)
+    assert report["status"] == "PROVISIONAL"
+    assert report["provisional"] is True
+    with pytest.raises(ManifestError, match="not_sealed"):
+        runner.run_constructed(object(), draft)
+
+
 def test_external_threshold_and_exposure_exclusion() -> None:
     cases = [
         {
@@ -148,6 +171,43 @@ def test_external_threshold_and_exposure_exclusion() -> None:
     assert report["independent_in_scope_count"] == 29
     assert report["metrics"] is None
     assert report["per_case"][0]["contamination_status"] == "exposed"
+
+
+def test_external_provisional_keeps_out_of_scope_rows_and_is_not_formal() -> None:
+    draft = manifest(
+        "external",
+        [
+            {
+                "case_id": "O1",
+                "material_type": "sales_script",
+                "relevant_excerpt": "保证收益",
+                "expected_rule_ids": ["guaranteed_return"],
+                "scope_status": "in_scope",
+                "canonical_url": "https://official.example/1",
+            },
+            {
+                "case_id": "O2",
+                "material_type": "other",
+                "relevant_excerpt": "不纳入评测范围",
+                "expected_rule_ids": [],
+                "scope_status": "out_of_scope",
+                "canonical_url": "https://official.example/2",
+            },
+        ],
+    )
+    draft["content_sha256"] = "candidate-only"
+    runner = EvaluationRunner(
+        Settings(database_url="sqlite:///evaluation-test.db"),
+        service_factory=lambda: FakeScreening(),
+    )
+    report = runner.run_external_provisional(
+        object(), draft, ExposureAuditor({"coverage_status": "disclosed_partial", "records": []})
+    )
+    assert report["status"] == "PROVISIONAL"
+    assert report["provisional"] is True
+    assert report["in_scope_count"] == 1
+    assert report["out_of_scope_count"] == 1
+    assert report["sample_counts"]["total"] == 2
 
 
 def test_atomic_report_read_detects_sha_drift(tmp_path: Path) -> None:

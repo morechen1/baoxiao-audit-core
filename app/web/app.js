@@ -109,16 +109,21 @@ function showToast(message, error = false) {
 
 function formatEvaluationMetric(value) { return typeof value === "number" ? `${(value * 100).toFixed(1)}%` : "N/A"; }
 function evaluationCard(title, status, body, tone = "") { return `<article class="evaluation-card ${tone}"><header><span class="eyebrow">${title}</span><b class="evaluation-status ${status}">${escapeHtml(status)}</b></header>${body}</article>`; }
+function provisionalEvaluation(report, external = false) {
+  const metrics = external ? report?.external_metrics : report?.metrics;
+  if (!report?.provisional || !metrics) return "";
+  return `<div class="evaluation-note"><b>PROVISIONAL / 待最终封存</b><span>${metrics.sample_count} 样本 · Micro F1 ${formatEvaluationMetric(metrics.micro_f1)} · Exact-set ${formatEvaluationMetric(metrics.exact_set_match)}。仅用于内部检查，不是正式 headline。</span></div>`;
+}
 function renderEvaluationCenter(payload) {
   const constructed = payload.constructed || {}; const external = payload.external || {}; const safety = payload.controlled_rag_safety || {};
   const cm = constructed.report?.metrics;
   const constructedBody = constructed.status === "COMPLETED" && cm
     ? `<h2>构造覆盖验证</h2><div class="evaluation-metrics"><span><b>${cm.sample_count}</b>样本</span><span><b>${formatEvaluationMetric(cm.micro_precision)}</b>Micro P</span><span><b>${formatEvaluationMetric(cm.micro_recall)}</b>Micro R</span><span><b>${formatEvaluationMetric(cm.micro_f1)}</b>Micro F1</span><span><b>${formatEvaluationMetric(cm.macro_f1)}</b>Macro F1</span><span><b>${formatEvaluationMetric(cm.exact_set_match)}</b>Exact-set</span></div>`
-    : `<h2>构造覆盖验证</h2><p>正式 SEALED manifest 与报告尚未就绪。不会显示示例准确率。</p><small>当前 manifest：${escapeHtml(constructed.manifest?.status || "NOT READY")}</small>`;
+    : `<h2>构造覆盖验证</h2><p>正式 SEALED manifest 与报告尚未就绪。不会显示正式 headline。</p><small>当前 manifest：${escapeHtml(constructed.manifest?.status || "NOT READY")}</small>${provisionalEvaluation(constructed.provisional)}`;
   const er = external.report;
   const externalBody = external.status === "COMPLETED" && er?.external_metrics
     ? `<h2>监管公开案例外部验证</h2><div class="evaluation-metrics"><span><b>${er.independent_in_scope_count}</b>独立 in-scope</span><span><b>${formatEvaluationMetric(er.external_metrics.micro_f1)}</b>Micro F1</span><span><b>${formatEvaluationMetric(er.external_metrics.exact_set_match)}</b>Exact-set</span></div><small>${escapeHtml(er.independence_label || "")}</small>`
-    : `<h2>监管公开案例外部验证</h2><p>${external.status === "INSUFFICIENT" ? "INSUFFICIENT — exploratory only：独立 in-scope 少于 30。" : "正式公开案例 manifest 与独立报告尚未就绪。"}</p><small>最低门槛：30 个未暴露 in-scope 案例；当前不发布外部 headline 指标。</small>`;
+    : `<h2>监管公开案例外部验证</h2><p>${external.status === "INSUFFICIENT" ? "INSUFFICIENT — exploratory only：独立 in-scope 少于 30。" : "正式公开案例 manifest 与独立报告尚未就绪。"}</p><small>最低门槛：30 个未暴露 in-scope 案例；当前不发布外部 headline 指标。</small>${provisionalEvaluation(external.provisional, true)}`;
   const safetyReport = safety.report;
   const safetyBody = safety.status === "COMPLETED" && safetyReport
     ? `<h2>Controlled-RAG 安全门禁验证</h2><div class="evaluation-metrics"><span><b>${safetyReport.constructed_valid_executed}</b>Valid samples</span><span><b>${safetyReport.constructed_valid_passed}</b>Valid accepted</span><span><b>${safetyReport.constructed_invalid_executed}</b>Invalid samples</span><span><b>${safetyReport.constructed_invalid_blocked}</b>Invalid blocked</span></div>`

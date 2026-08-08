@@ -19,6 +19,7 @@ from app.services.evaluation import (
     ReportStore,
     load_manifest,
 )
+from app.services.evaluation.core import canonical_sha256
 
 router = APIRouter(prefix="/api/v1/evaluations", tags=["evaluations"])
 _ROOT = Path(__file__).resolve().parents[3]
@@ -34,7 +35,11 @@ def _store() -> ReportStore:
 
 
 def _safety_state() -> dict[str, Any]:
-    fixture = json.loads((_ROOT / "tests" / "fixtures" / "controlled_rag_eval_v1" / "responses.json").read_text(encoding="utf-8"))
+    fixture = json.loads(
+        (_ROOT / "tests" / "fixtures" / "controlled_rag_eval_v1" / "responses.json").read_text(
+            encoding="utf-8"
+        )
+    )
     samples = fixture["samples"]
     report = _store().read("controlled_rag_acceptance")
     return {
@@ -50,12 +55,41 @@ def _safety_state() -> dict[str, Any]:
 def _latest_track(track: str) -> dict[str, Any]:
     manifest = _manifest(track)
     report = _store().read(track, manifest=manifest if manifest.get("status") == "SEALED" else None)
-    return {"manifest": {"version": manifest["version"], "status": manifest["status"], "content_sha256": manifest.get("content_sha256"), "case_count": len(manifest["cases"])}, "status": report.get("status") if report else "NOT_READY", "report": report}
+    provisional_path = (
+        _ARTIFACTS
+        / "provisional"
+        / f"m6{'b_constructed_provisional_v1' if track == 'constructed' else 'c_external_provisional_v2'}.json"
+    )
+    provisional: dict[str, Any] | None = None
+    if provisional_path.exists():
+        try:
+            candidate = json.loads(provisional_path.read_text(encoding="utf-8"))
+            digest = candidate.pop("report_sha256", None)
+            if candidate.get("provisional") is True and digest == canonical_sha256(candidate):
+                candidate["report_sha256"] = digest
+                provisional = candidate
+        except (OSError, json.JSONDecodeError):
+            provisional = None
+    return {
+        "manifest": {
+            "version": manifest["version"],
+            "status": manifest["status"],
+            "content_sha256": manifest.get("content_sha256"),
+            "case_count": len(manifest["cases"]),
+        },
+        "status": report.get("status") if report else "NOT_READY",
+        "report": report,
+        "provisional": provisional,
+    }
 
 
 @router.get("/latest")
 def latest_evaluations() -> dict[str, Any]:
-    return {"constructed": _latest_track("constructed"), "external": _latest_track("external"), "controlled_rag_safety": _safety_state()}
+    return {
+        "constructed": _latest_track("constructed"),
+        "external": _latest_track("external"),
+        "controlled_rag_safety": _safety_state(),
+    }
 
 
 def _run(track: str, session: Session) -> dict[str, Any]:
@@ -70,8 +104,13 @@ def _run(track: str, session: Session) -> dict[str, Any]:
         if track == "constructed":
             report = runner.run_constructed(session, manifest)
         else:
-            inventory = json.loads((_ARTIFACTS / "exposure_inventory_v1.json").read_text(encoding="utf-8"))
-            report = runner.run_external(session, manifest, ExposureAuditor(inventory, _ROOT))
+            inventory = json.loads(
+                (_ARTIFACTS / "exposure_inventory_v1.json").read_text(encoding="utf-8")
+            )
+            # Candidate and sealed manifests live under this project. Scanning their own
+            # URLs would turn every evaluated row into a false "exposed" match; the
+            # versioned exposure inventory remains the authoritative exact audit source.
+            report = runner.run_external(session, manifest, ExposureAuditor(inventory))
         path = _store().write(track, report)
         return {"status": report["status"], "report_path": path.name, "report": report}
     finally:

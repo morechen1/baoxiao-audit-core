@@ -390,6 +390,20 @@ class EvaluationRunner:
             raise ManifestError("evaluation_manifest_track_mismatch")
         return self._run(session, manifest, headline_cases=manifest["cases"], exposure=None)
 
+    def run_constructed_provisional(
+        self, session: Session, manifest: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Run a candidate dataset without making it eligible for formal headlines."""
+        validate_manifest(manifest, require_sealed=False)
+        if manifest["track"] != "constructed":
+            raise ManifestError("evaluation_manifest_track_mismatch")
+        report = self._run(session, manifest, headline_cases=manifest["cases"], exposure=None)
+        report["provisional"] = True
+        report["status"] = (
+            "PROVISIONAL" if report["status"] == "COMPLETED" else "PROVISIONAL_INVALID"
+        )
+        return report
+
     def run_external(
         self, session: Session, manifest: dict[str, Any], auditor: ExposureAuditor
     ) -> dict[str, Any]:
@@ -423,6 +437,37 @@ class EvaluationRunner:
             "Independent"
             if auditor.coverage_status == "complete"
             else "INDEPENDENCE NOT FULLY VERIFIED"
+        )
+        return report
+
+    def run_external_provisional(
+        self, session: Session, manifest: dict[str, Any], auditor: ExposureAuditor
+    ) -> dict[str, Any]:
+        """Evaluate candidate external rows while preserving the formal SEALED gate."""
+        validate_manifest(manifest, require_sealed=False)
+        if manifest["track"] != "external":
+            raise ManifestError("evaluation_manifest_track_mismatch")
+        report = self._run(session, manifest, headline_cases=[], exposure=auditor)
+        eligible = [row for row in report["per_case"] if row.get("eligible_for_headline")]
+        report["in_scope_count"] = sum(
+            row.get("scope_status") == "in_scope" for row in report["per_case"]
+        )
+        report["out_of_scope_count"] = len(report["per_case"]) - report["in_scope_count"]
+        report["independent_in_scope_count"] = len(eligible)
+        labels = {rule.rule_id for rule in self.ruleset.rules}
+        report["external_metrics"] = (
+            compute_metrics(eligible, label_universe=labels)
+            if report["status"] == "COMPLETED"
+            else None
+        )
+        report["provisional"] = True
+        report["status"] = (
+            "PROVISIONAL" if report["status"] == "COMPLETED" else "PROVISIONAL_INVALID"
+        )
+        report["independence_label"] = (
+            "相对于已披露 exposure inventory 未发现污染"
+            if auditor.coverage_status == "complete"
+            else "相对于已披露 exposure inventory 未发现污染（覆盖范围：disclosed_partial）"
         )
         return report
 
