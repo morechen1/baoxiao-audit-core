@@ -14,6 +14,161 @@ from app.services.explanation.schemas import (
     ExplanationProviderResponse,
     InstitutionExplanationV1,
 )
+from app.services.explanation.validators import DETERMINISTIC_TEMPLATE_TEXT
+
+
+def _template_claim(text: str, finding_keys: list[str]) -> dict[str, object]:
+    return {
+        "claim_type": "deterministic_template",
+        "text": text,
+        "finding_keys": finding_keys,
+        "citations": [],
+    }
+
+
+def _citation_pairs(finding: Any) -> list[dict[str, str]]:
+    evidence = finding.evidence
+    return [
+        {"citation_key": item.citation_key, "cited_quote": item.quote}
+        for item in evidence
+    ]
+
+
+def _validator_template(prefix: str) -> str:
+    return next(value for value in DETERMINISTIC_TEMPLATE_TEXT if value.startswith(prefix))
+
+
+def _uncertainty_phrase(instructions: str) -> str:
+    start = instructions.find("“")
+    end = instructions.find("”", start + 1)
+    return instructions[start + 1 : end] if start >= 0 and end > start else instructions
+
+
+def _dynamic_text(
+    request: ExplanationProviderRequest,
+    finding: Any,
+    field_name: str,
+) -> str:
+    parts = [f"<<MODEL_GENERATED_{field_name}_{finding.finding_key}>>"]
+    if finding.evidence_status == "partially_supported":
+        parts.append(_uncertainty_phrase(request.prompt.uncertainty_instructions))
+    if any(
+        item.context_scope == "illustrative_not_material_specific"
+        for item in finding.evidence
+    ):
+        parts.append(request.prompt.illustrative_product_disclaimer)
+    return "".join(parts)
+
+
+def _grounded_skeleton_claim(
+    claim_type: str,
+    request: ExplanationProviderRequest,
+    finding: Any,
+    field_name: str,
+    citations: list[dict[str, str]],
+) -> dict[str, object]:
+    if claim_type not in request.prompt.allowed_claim_types:
+        claim_type = request.prompt.allowed_claim_types[0]
+    return {
+        "claim_type": claim_type,
+        "text": _dynamic_text(request, finding, field_name),
+        "finding_keys": [finding.finding_key],
+        "citations": citations,
+    }
+
+
+def copy_safe_output_skeleton(request: ExplanationProviderRequest) -> dict[str, object]:
+    """Build request-specific immutable output values for the model to copy verbatim."""
+
+    finding_keys = [item.finding_key for item in request.context.findings]
+    insufficient_template = _validator_template("当前证据不足以作出结论")
+    if request.audience == "institution":
+        rows: list[dict[str, object]] = []
+        for finding in request.context.findings:
+            citations = _citation_pairs(finding)
+            if finding.evidence_status == "evidence_insufficient":
+                explanation = _template_claim(insufficient_template, [finding.finding_key])
+                assessment = _template_claim(insufficient_template, [finding.finding_key])
+            else:
+                explanation = _grounded_skeleton_claim(
+                    "deterministic_finding_explanation",
+                    request,
+                    finding,
+                    "EXPLANATION",
+                    citations[:1],
+                )
+                assessment = _grounded_skeleton_claim(
+                    "evidence_assessment",
+                    request,
+                    finding,
+                    "EVIDENCE_ASSESSMENT",
+                    citations,
+                )
+            rows.append(
+                {
+                    "finding_key": finding.finding_key,
+                    "explanation": explanation,
+                    "why_it_matters": _template_claim(
+                        finding.deterministic_explanation, [finding.finding_key]
+                    ),
+                    "evidence_assessment": assessment,
+                    "review_actions": [
+                        _template_claim(finding.review_question, [finding.finding_key])
+                    ],
+                }
+            )
+        return {
+            "schema_version": request.prompt.output_schema_version,
+            "executive_summary": _template_claim(
+                _validator_template("以下内容仅解释"), finding_keys
+            ),
+            "finding_explanations": rows,
+            "cross_finding_observations": [],
+            "manual_review_priorities": [
+                _template_claim(item.review_question, [item.finding_key])
+                for item in request.context.findings
+            ],
+            "disclaimer": request.prompt.required_disclaimer,
+        }
+
+    rows = []
+    all_citations: list[dict[str, str]] = []
+    for finding in request.context.findings:
+        citations = _citation_pairs(finding)
+        all_citations.extend(citations)
+        explanation = (
+            _template_claim(insufficient_template, [finding.finding_key])
+            if finding.evidence_status == "evidence_insufficient"
+            else _grounded_skeleton_claim(
+                "plain_language_finding_explanation",
+                request,
+                finding,
+                "PLAIN_LANGUAGE_EXPLANATION",
+                citations,
+            )
+        )
+        rows.append(
+            {
+                "finding_key": finding.finding_key,
+                "plain_language_explanation": explanation,
+                "what_to_check": [
+                    _template_claim(finding.review_question, [finding.finding_key])
+                ],
+            }
+        )
+    return {
+        "schema_version": request.prompt.output_schema_version,
+        "overall_notice": _template_claim(
+            _validator_template("这是对既有风险筛查结果"), finding_keys
+        ),
+        "risk_explanations": rows,
+        "questions_to_ask": [
+            _template_claim(item.review_question, [item.finding_key])
+            for item in request.context.findings
+        ],
+        "evidence_links": all_citations,
+        "disclaimer": request.prompt.required_disclaimer,
+    }
 
 
 class ProviderGenerationError(Exception):
@@ -129,6 +284,7 @@ class OpenAICompatibleProvider:
             else ConsumerExplanationV1.model_json_schema()
         )
         prompt_contract = request.prompt.model_dump(mode="json")
+        skeleton = copy_safe_output_skeleton(request)
         protocol_instruction = (
             "只输出一个可解析的 JSON 对象，不要 Markdown、代码围栏或额外文字。"
             "以下 authoritative_prompt_definition 是本次输出的权威契约，必须逐项遵守，"
@@ -148,11 +304,18 @@ class OpenAICompatibleProvider:
             "必须逐字复用 uncertainty_instructions 中的一个不确定性表达，不能只作概括性说明；"
             "若 evidence 的 context_scope 为 illustrative_not_material_specific，"
             "必须在相关解释中逐字包含 illustrative_product_disclaimer。\n"
+            "以下 copy_safe_output_skeleton 是本次 request 专属的完整 JSON 骨架。"
+            "其中除 <<MODEL_GENERATED_*>> 占位符外，所有值均为 system-owned immutable values，"
+            "必须逐字复制，不得改写、增删、重排、替换或新建。只替换占位符为受证据支持的中文解释，"
+            "并保留占位符后已有的 uncertainty 或 illustrative_product_disclaimer 原文。"
+            "所有 citation 对象只能从 skeleton 原样复制；不要重新摘录 quote。\n"
             "输出还必须完全符合 output_json_schema。\n"
             "authoritative_prompt_definition:\n"
             + json.dumps(prompt_contract, ensure_ascii=False, separators=(",", ":"))
             + "\noutput_json_schema:\n"
             + json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
+            + "\ncopy_safe_output_skeleton:\n"
+            + json.dumps(skeleton, ensure_ascii=False, separators=(",", ":"))
         )
         return {
             "model": self.settings.llm_model,

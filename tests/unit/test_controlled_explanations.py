@@ -45,6 +45,7 @@ from app.services.explanation.providers import (
     OpenAICompatibleProvider,
     ProviderGenerationError,
     configured_provider_status,
+    copy_safe_output_skeleton,
     provider_configuration_sha256,
     provider_from_name,
 )
@@ -381,6 +382,57 @@ def test_openai_compatible_provider_returns_structured_json() -> None:
         "model": "contest-model",
         "timeout_seconds": 12,
     }
+
+
+@pytest.mark.parametrize("audience", ["institution", "consumer"])
+def test_copy_safe_output_skeleton_is_request_specific_and_copy_safe(audience: str) -> None:
+    prompt = load_prompt(audience)
+    request = ExplanationProviderRequest(
+        audience=audience, prompt=prompt, context=_built_context().payload
+    )
+
+    skeleton = copy_safe_output_skeleton(request)
+    serialized = json.dumps(skeleton, ensure_ascii=False, separators=(",", ":"))
+    payload = _openai_provider()._request_payload(request)
+    system = str(payload["messages"][0]["content"])
+
+    assert skeleton["schema_version"] == prompt.output_schema_version
+    assert skeleton["disclaimer"] == prompt.required_disclaimer
+    assert serialized in system
+    assert "copy_safe_output_skeleton" in system
+    assert "F001" in serialized and "F002" in serialized
+    assert "E001" in serialized and "E002" in serialized
+    assert "不得利用监管机构名义对保险产品作引人误解的宣传" in serialized
+    assert prompt.illustrative_product_disclaimer in serialized
+    assert "需要进一步核验" in serialized
+    assert "finding_id" not in serialized
+    assert "test-real-provider-secret" not in serialized
+
+    if audience == "institution":
+        rows = cast(list[dict[str, Any]], skeleton["finding_explanations"])
+        assert rows[0]["finding_key"] == "F001"
+        assert rows[0]["why_it_matters"]["text"] == "该表达可能造成监管背书误解。"
+        assert rows[0]["review_actions"][0]["text"] == "是否存在监管背书暗示？"
+        assert rows[0]["explanation"]["citations"] == [
+            {
+                "citation_key": "E001",
+                "cited_quote": "不得利用监管机构名义对保险产品作引人误解的宣传",
+            }
+        ]
+    else:
+        rows = cast(list[dict[str, Any]], skeleton["risk_explanations"])
+        assert rows[0]["finding_key"] == "F001"
+        assert rows[0]["what_to_check"][0]["text"] == "是否存在监管背书暗示？"
+        assert skeleton["questions_to_ask"][0]["text"] == "是否存在监管背书暗示？"
+        assert rows[0]["plain_language_explanation"]["citations"] == [
+            {
+                "citation_key": "E001",
+                "cited_quote": "不得利用监管机构名义对保险产品作引人误解的宣传",
+            }
+        ]
+
+    fixture = DeterministicFixtureProvider().generate(request)
+    assert json.loads(fixture.raw_json)["disclaimer"] == prompt.required_disclaimer
 
 
 def test_openai_provider_prompt_contract_is_derived_from_prompt_definition() -> None:
