@@ -137,10 +137,15 @@ class OpenAICompatibleProvider:
             "illustrative_product_disclaimer；不得自行补充、弱化或改写其中任何规则。\n"
             "每个输出 finding row 必须且只能对应 context 的一个 finding_key；所有 claim 的"
             "finding_keys 必须恰好等于其 row 的 finding_key。非 deterministic_template claim"
-            "必须引用该 finding 下的 citation_key；citation_key 必须符合契约格式，"
-            "cited_quote 必须逐字使用该 citation 的连续 allowed evidence quote，不能改写、"
+            "必须引用该 finding 下的 citation_key；该约束适用于所有输出字段，包括摘要、"
+            "review_actions、what_to_check 与 questions_to_ask；没有 citation 的 claim 必须是"
+            "deterministic_template，且只能逐字使用 context finding 已给出的确定性文本。"
+            "citation_key 必须符合契约格式，cited_quote 必须从同一 citation_key 的 evidence quote"
+            "字段逐字复制为其连续片段，不能改写、"
             "拼接、使用来源元数据或其他 finding 的证据。partially_supported 与"
             "evidence_insufficient finding 必须严格执行契约中的不确定性指令；"
+            "对 partially_supported finding 的每个非 deterministic_template claim，"
+            "必须逐字复用 uncertainty_instructions 中的一个不确定性表达，不能只作概括性说明；"
             "若 evidence 的 context_scope 为 illustrative_not_material_specific，"
             "必须在相关解释中逐字包含 illustrative_product_disclaimer。\n"
             "输出还必须完全符合 output_json_schema。\n"
@@ -152,6 +157,8 @@ class OpenAICompatibleProvider:
         return {
             "model": self.settings.llm_model,
             "temperature": 0,
+            "thinking": {"type": "disabled"},
+            "max_tokens": 8192,
             "response_format": {"type": "json_object"},
             "messages": [
                 {

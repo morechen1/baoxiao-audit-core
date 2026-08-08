@@ -357,6 +357,8 @@ def test_openai_compatible_provider_returns_structured_json() -> None:
         payload = json.loads(http_request.content)
         assert payload["model"] == "contest-model"
         assert payload["temperature"] == 0
+        assert payload["thinking"] == {"type": "disabled"}
+        assert payload["max_tokens"] == 8192
         assert payload["response_format"] == {"type": "json_object"}
         assert payload["messages"][0]["role"] == "system"
         assert "authoritative_prompt_definition" in payload["messages"][0]["content"]
@@ -414,7 +416,10 @@ def test_openai_provider_prompt_contract_is_derived_from_prompt_definition() -> 
     ):
         assert value in system
     assert "finding_keys 必须恰好等于其 row 的 finding_key" in system
-    assert "连续 allowed evidence quote" in system
+    assert "该约束适用于所有输出字段" in system
+    assert "cited_quote 必须从同一 citation_key 的 evidence quote字段逐字复制" in system
+    assert "字段逐字复制为其连续片段" in system
+    assert "逐字复用 uncertainty_instructions" in system
 
 
 def test_openai_compatible_provider_unconfigured_fails_closed() -> None:
