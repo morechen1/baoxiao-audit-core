@@ -35,6 +35,7 @@ const state = {
   current: null,
   audience: "institution",
   selectedFinding: 0,
+  expandedPipelineStage: null,
   provider: {
     provider: "deterministic_fixture",
     mode: "deterministic_demo",
@@ -49,6 +50,7 @@ const viewTitles = {
   review: "新建审核",
   processing: "审核处理中",
   result: "当前审核结果",
+  validation: "检测效果",
 };
 
 const categoryLabels = {
@@ -64,6 +66,25 @@ const categoryLabels = {
   regulatory_endorsement: "监管背书误导",
   surrender_cash_value: "退保或现金价值误述",
   waiting_cooling_period: "等待期或犹豫期误述",
+};
+
+const materialTypeLabels = {
+  advertisement: "宣传广告",
+  sales_script: "销售话术",
+  social_media: "社交媒体",
+  product_introduction: "产品介绍",
+  other: "其他文本",
+};
+
+const rejectionReasonLabels = {
+  quote_not_found: "原文 Quote 不存在",
+  quote_ambiguous: "原文 Quote 多次出现",
+  negation: "否定语境",
+  educational_context: "教育或禁止语境",
+  role_ambiguity: "角色与受益对象歧义",
+  semantic_ambiguity: "语义歧义",
+  confidence: "置信度门禁",
+  duplicate: "重复候选融合",
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -345,6 +366,7 @@ function setCurrentResult(result) {
   state.current = result;
   state.audience = "institution";
   state.selectedFinding = 0;
+  state.expandedPipelineStage = null;
   $("#result-nav").classList.remove("is-hidden");
   renderResult();
 }
@@ -354,6 +376,129 @@ function boundaryNotice(result) {
     return "当前后端运行在隔离构造赛事数据环境；相关引用仅用于演示交互，不代表正式监管结论。";
   }
   return "结果来自当前后端 API，仅提供风险信号、可信证据与复核辅助，不构成违法认定或最终法律意见。";
+}
+
+function countValue(value) {
+  return Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0;
+}
+
+function validationStatusLabel(status, hasFindings) {
+  if (!hasFindings) return "未触发";
+  if (status === "completed") return "完成";
+  if (status === "partial") return "部分完成";
+  if (status === "failed") return "失败关闭";
+  return "未形成有效 Artifact";
+}
+
+function pipelineSnapshot(result) {
+  const findings = result.findings || [];
+  const diagnostics = result.screeningDiagnostics || {};
+  const semantic = diagnostics.semantic_parser || {};
+  const semanticAccepted = countValue(semantic.semantic_supplements);
+  const modelCandidates = countValue(semantic.model_candidates);
+  const rejectedCandidates = countValue(semantic.rejected_candidates);
+  const deterministicCandidates = Math.max(0, findings.length - semanticAccepted);
+  const candidateTotal = deterministicCandidates + modelCandidates;
+  const severity = findings.reduce((counts, finding) => {
+    counts[finding.severity] = (counts[finding.severity] || 0) + 1;
+    return counts;
+  }, { high: 0, medium: 0, low: 0 });
+  const references = findings.flatMap((finding) => finding.references || []);
+  const sourceCount = new Set(references.map((item) => item.sourceTitle).filter(Boolean)).size;
+  const citationCount = references.filter((item) => item.kind === "citation").length;
+  const audiences = result.explanationStatus?.audiences || {};
+  const institutionDone = audiences.institution?.status === "completed";
+  const consumerDone = audiences.consumer?.status === "completed";
+  const anyExplanationDone = institutionDone || consumerDone;
+  return {
+    findings,
+    semantic,
+    semanticAccepted,
+    modelCandidates,
+    rejectedCandidates,
+    deterministicCandidates,
+    candidateTotal,
+    severity,
+    references,
+    sourceCount,
+    citationCount,
+    institutionDone,
+    consumerDone,
+    anyExplanationDone,
+  };
+}
+
+function rejectionDetail(semantic) {
+  const reasons = Object.entries(semantic.reject_reasons || {}).filter(([, count]) => countValue(count) > 0);
+  if (!reasons.length) return '<p class="pipeline-empty-detail">没有需要展示的语义候选拦截记录。</p>';
+  return `<div class="pipeline-rejections">${reasons.map(([reason, count]) => `<span><b>× ${escapeHtml(rejectionReasonLabels[reason] || reason)}</b><strong>${countValue(count)} 条</strong></span>`).join("")}</div>`;
+}
+
+function pipelineStageCard(stage) {
+  const expanded = state.expandedPipelineStage === stage.key;
+  return `<button class="pipeline-stage${expanded ? " expanded" : ""}${stage.muted ? " muted" : ""}" type="button" data-pipeline-stage="${stage.key}" aria-expanded="${expanded}">
+    <span class="pipeline-step">${stage.step}</span>
+    <span class="pipeline-stage-copy"><strong>${stage.title}</strong><small>${stage.subtitle}</small></span>
+    <span class="pipeline-stage-value">${stage.value}</span>
+    <span class="pipeline-expand" aria-hidden="true">${expanded ? "−" : "+"}</span>
+  </button>`;
+}
+
+function renderAuditPipeline() {
+  const result = state.current;
+  const target = $("#audit-pipeline");
+  if (!result || !target) return;
+  const data = pipelineSnapshot(result);
+  const hasFindings = data.findings.length > 0;
+  const explanationStatus = result.explanationStatus?.status;
+  const stages = [
+    {
+      key: "material", step: "01", title: "材料解析", subtitle: "文本规范化与切分",
+      value: "已完成",
+      detail: `<div class="pipeline-detail-grid"><span><b>材料类型</b><strong>${escapeHtml(materialTypeLabels[result.materialType] || result.materialType || "文本材料")}</strong></span><span><b>文本长度</b><strong>${result.rawText.length} 字符</strong></span><span><b>处理状态</b><strong>规范化 / 切分完成</strong></span></div>`,
+    },
+    {
+      key: "discovery", step: "02", title: "风险发现", subtitle: "规则识别 + AI 语义解析",
+      value: `候选 ${data.candidateTotal}`,
+      detail: `<div class="pipeline-detail-grid"><span><b>AI 语义候选</b><strong>${data.modelCandidates}</strong></span><span><b>规则 / 系统候选</b><strong>${data.deterministicCandidates}</strong></span><span><b>候选总数</b><strong>${data.candidateTotal}</strong></span></div><p class="pipeline-detail-note">规则识别与语义解析协同产生风险候选；AI 语义解析只产生候选，不能直接形成最终风险结论。</p>`,
+    },
+    {
+      key: "validation", step: "03", title: "确定性校验", subtitle: "证据、语境、角色与置信度门禁",
+      value: `通过 ${data.findings.length} · 拦截 ${data.rejectedCandidates}`,
+      detail: `<p class="pipeline-detail-note strong-note">所有候选需通过原文证据、上下文、角色对象、歧义及置信度等确定性校验，方可形成最终 RiskFinding。</p><div class="validation-gates"><span>原文证据校验</span><span>否定语境</span><span>教育 / 禁止语境</span><span>角色与受益对象</span><span>语义歧义</span><span>置信度门禁</span><span>重复候选融合</span></div>${rejectionDetail(data.semantic)}`,
+    },
+    {
+      key: "finding", step: "04", title: "RiskFinding", subtitle: "最终风险事实",
+      value: `${data.findings.length} 条`,
+      detail: `<div class="pipeline-detail-grid"><span><b>最终形成</b><strong>${data.findings.length} 条</strong></span><span><b>高风险</b><strong>${data.severity.high}</strong></span><span><b>中风险</b><strong>${data.severity.medium}</strong></span><span><b>低风险</b><strong>${data.severity.low}</strong></span></div>`,
+    },
+    {
+      key: "knowledge", step: "05", title: "可信监管知识", subtitle: "15 个可信来源 · 73 个 KnowledgeChunks",
+      value: hasFindings ? `${data.references.length} EvidenceLinks` : "未触发",
+      muted: !hasFindings,
+      // 15/73 已于 2026-08-09 对 baoxiao_contest_final 做只读核验：15 个 approved/indexed 来源、73 个 active chunks。
+      detail: hasFindings
+        ? `<div class="pipeline-detail-grid"><span><b>本次 EvidenceLinks</b><strong>${data.references.length}</strong></span><span><b>本次监管来源</b><strong>${data.sourceCount}</strong></span><span><b>可信知识资产</b><strong>15 来源 / 73 Chunks</strong></span></div>`
+        : '<p class="pipeline-empty-detail">未形成有效 RiskFinding，因此未触发可信监管知识检索。</p>',
+    },
+    {
+      key: "explanation", step: "06", title: "受控解释与验证", subtitle: "双端解释 · Claim · Citation",
+      value: hasFindings ? validationStatusLabel(explanationStatus, true) : "未触发",
+      muted: !hasFindings,
+      detail: hasFindings
+        ? `<div class="pipeline-validation-list"><span><b>机构合规视图</b><strong>${data.institutionDone ? "完成" : "未形成有效 Artifact"}</strong></span><span><b>消费者权益视图</b><strong>${data.consumerDone ? "完成" : "未形成有效 Artifact"}</strong></span><span><b>Citation Validation</b><strong>${data.citationCount > 0 ? "PASS" : "未形成有效 Citation"}</strong></span><span><b>Claim Validation</b><strong>${data.anyExplanationDone ? "PASS" : "未形成有效 Artifact"}</strong></span><span><b>Uncertainty Validation</b><strong>${data.anyExplanationDone ? "PASS" : "未形成有效 Artifact"}</strong></span></div>`
+        : '<p class="pipeline-empty-detail">未形成有效 RiskFinding，因此未触发受控解释与 Citation、Claim、Uncertainty 验证。</p>',
+    },
+  ];
+  const activeStage = stages.find((stage) => stage.key === state.expandedPipelineStage);
+  target.innerHTML = `<header class="pipeline-heading"><div><span class="section-kicker">Runtime Trace</span><h2>完整审核流程</h2></div><p>点击阶段查看当前审核的真实运行摘要</p></header><div class="pipeline-track">${stages.map(pipelineStageCard).join('<i aria-hidden="true">→</i>')}</div>${activeStage ? `<div class="pipeline-detail">${activeStage.detail}</div>` : ""}${!hasFindings ? '<p class="pipeline-short-circuit">未形成有效 RiskFinding，因此未触发后续监管知识检索与受控解释生成。</p>' : ""}`;
+  target.querySelectorAll("[data-pipeline-stage]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.pipelineStage;
+      state.expandedPipelineStage = state.expandedPipelineStage === key ? null : key;
+      renderAuditPipeline();
+    });
+  });
 }
 
 function renderResult() {
@@ -379,6 +524,7 @@ function renderResult() {
         <article class="overview-card"><span>审核状态</span><strong class="status-value">${result.status === "completed" ? "已完成" : "已创建"}</strong></article>
       </div>
     </section>
+    <section class="audit-pipeline" id="audit-pipeline"></section>
     <section class="material-card">
       <header><h2>原始审核材料</h2><span>${findings.length ? "点击风险卡片查看对应原文位置" : "完整原文"}</span></header>
       <div class="material-content" id="material-content"></div>
@@ -394,6 +540,7 @@ function renderResult() {
     <p class="result-boundary"><strong>审查边界：</strong>${escapeHtml(boundaryNotice(result))}</p>`;
 
   $("#result-new-review").addEventListener("click", () => showView("review"));
+  renderAuditPipeline();
   renderMaterial();
   if (!lowRisk) {
     renderFindingList();

@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f7faf8" />
     <title>保销智审｜保险营销智能合规审核</title>
-    <link rel="icon" href="/static/favicon.svg?v=final-frontend-20260809" type="image/svg+xml" />
-    <link rel="stylesheet" href="/static/styles.css?v=final-frontend-20260809" />
+    <link rel="icon" href="/static/favicon.svg?v=pipeline-validation-20260809" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/styles.css?v=pipeline-validation-20260809" />
   </head>
   <body>
     <main class="app-shell">
@@ -27,6 +27,9 @@
           </button>
           <button class="nav-item is-hidden" id="result-nav" data-view-target="result">
             <span class="nav-icon" aria-hidden="true">✓</span><span>当前审核结果</span>
+          </button>
+          <button class="nav-item" data-view-target="validation">
+            <span class="nav-icon" aria-hidden="true">◎</span><span>检测效果</span>
           </button>
         </nav>
 
@@ -160,6 +163,79 @@
           </article>
         </section>
 
+        <section id="validation" class="view validation-view">
+          <header class="validation-heading">
+            <div>
+              <span class="section-kicker">小规模冻结样本开发验证</span>
+              <h1>检测效果</h1>
+              <p>最终系统小规模冻结样本验证</p>
+            </div>
+            <div class="validation-scope" aria-label="验证范围">
+              <span><strong>36</strong>条冻结开发诊断样本</span>
+              <span><strong>12</strong>类风险类型</span>
+              <span><strong>39</strong>个唯一语义解析案例</span>
+            </div>
+          </header>
+
+          <p class="validation-intro">以下结果用于验证当前风险发现与确定性校验链路的有效性。样本为冻结的开发诊断集，不作为正式独立 Benchmark。</p>
+
+          <section class="validation-metrics" aria-label="核心验证指标">
+            <article><span>目标风险召回率</span><strong>95.83%</strong><small>Positive target-rule recall</small></article>
+            <article><span>正样本命中</span><strong>23 / 24</strong><small>冻结正样本目标规则</small></article>
+            <article><span>负样本误报率</span><strong>16.67%</strong><small>2 / 12 negative cases</small></article>
+            <article><span>Quote 完整性</span><strong>100%</strong><small>原文精确引用</small></article>
+            <article><span>总 Provider Calls</span><strong>42</strong><small>Parser 40 + Explanation 2</small></article>
+          </section>
+
+          <div class="validation-grid">
+            <section class="validation-panel coverage-panel">
+              <header><div><span class="section-kicker">当前最终系统</span><h2>12 类风险覆盖</h2></div><p>11 类 2/2，虚假促销或奖品宣传 1/2</p></header>
+              <div class="coverage-grid">
+                <article><span>绝对化或最高级表述</span><small>absolute_or_superlative_claim</small><strong>2/2</strong></article>
+                <article><span>免责事项隐瞒或弱化</span><small>concealment_or_minimization_of_exclusions</small><strong>2/2</strong></article>
+                <article><span>合同外利益承诺</span><small>extra_contractual_benefit</small><strong>2/2</strong></article>
+                <article class="coverage-partial"><span>虚假促销或奖品宣传</span><small>false_promotion_or_prize</small><strong>1/2</strong></article>
+                <article><span>收益或本金保证</span><small>guaranteed_return_or_principal</small><strong>2/2</strong></article>
+                <article><span>不当比较或排名</span><small>improper_comparison_or_ranking</small><strong>2/2</strong></article>
+                <article><span>利率或收益误导</span><small>misleading_interest_or_yield</small><strong>2/2</strong></article>
+                <article><span>零风险或无损失</span><small>no_risk_or_no_loss</small><strong>2/2</strong></article>
+                <article><span>产品性质混淆</span><small>product_nature_confusion</small><strong>2/2</strong></article>
+                <article><span>监管背书误导</span><small>regulatory_endorsement</small><strong>2/2</strong></article>
+                <article><span>退保或现金价值误述</span><small>surrender_or_cash_value_misstatement</small><strong>2/2</strong></article>
+                <article><span>等待期或犹豫期误述</span><small>waiting_or_cooling_period_misstatement</small><strong>2/2</strong></article>
+              </div>
+            </section>
+
+            <div class="validation-side">
+              <section class="validation-panel safety-panel">
+                <header><div><span class="section-kicker">受控边界</span><h2>受控生成与证据安全</h2></div></header>
+                <div class="safety-list">
+                  <span><b>原文 Quote 完整性</b><strong>100%</strong></span>
+                  <span><b>接受的幻觉 Quote</b><strong>0</strong></span>
+                  <span><b>USER-002 角色歧义</b><strong>成功拦截</strong></span>
+                  <span><b>Semantic-only Finding 进入可信 RAG</b><strong>PASS</strong></span>
+                  <span><b>Citation / Claim / Uncertainty</b><strong>PASS</strong></span>
+                </div>
+              </section>
+
+              <section class="validation-panel calls-panel">
+                <header><div><span class="section-kicker">调用成本</span><h2>验证调用规模</h2></div></header>
+                <div class="call-grid">
+                  <span><strong>36</strong><small>冻结诊断案例</small></span>
+                  <span><strong>3</strong><small>用户诊断案例</small></span>
+                  <span><strong>39</strong><small>唯一 Parser 文本</small></span>
+                  <span><strong>40</strong><small>Parser Calls</small></span>
+                  <span><strong>2</strong><small>Explanation Calls</small></span>
+                  <span><strong>42</strong><small>总 Provider Calls</small></span>
+                </div>
+                <p>调用统计仅对应本次 Semantic Parser MVP 验证，不代表单次业务审核固定调用量。</p>
+              </section>
+            </div>
+          </div>
+
+          <p class="validation-disclaimer">本页结果来自冻结的小规模开发诊断样本，用于验证系统功能链路与语义识别有效性，不等同于独立第三方测试或生产环境总体准确率。</p>
+        </section>
+
         <section id="result" class="view">
           <div class="result-topbar">
             <button class="back-button" data-view-target="dashboard">← 返回工作台</button>
@@ -171,6 +247,6 @@
     </main>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script src="/static/app.js?v=final-frontend-20260809"></script>
+    <script src="/static/app.js?v=pipeline-validation-20260809"></script>
   </body>
 </html>
