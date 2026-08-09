@@ -423,13 +423,12 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .validation-panel h2 { margin: 4px 0 0; font-size: 17px; }
 .validation-panel header > p { margin: 0; color: var(--muted); font-size: 10px; }
 .coverage-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
-.coverage-grid article { position: relative; min-width: 0; min-height: 64px; padding: 9px 37px 9px 9px; border: 1px solid #e2ebe6; border-radius: 9px; background: #f9fcfa; }
-.coverage-grid article::after { content: ""; position: absolute; left: 9px; right: 9px; bottom: 6px; height: 3px; border-radius: 3px; background: var(--green); }
-.coverage-grid article.coverage-partial::after { right: 50%; background: var(--warning); }
+.coverage-grid article { min-width: 0; min-height: 82px; padding: 9px; border: 1px solid #e2ebe6; border-radius: 9px; background: #f9fcfa; }
 .coverage-grid span { display: block; font-size: 11px; font-weight: 700; line-height: 1.35; }
 .coverage-grid small { display: block; margin-top: 3px; color: var(--subtle); font-size: 8px; line-height: 1.2; overflow-wrap: anywhere; }
-.coverage-grid strong { position: absolute; right: 8px; top: 9px; color: var(--green-dark); font-size: 11px; }
-.coverage-partial strong { color: #b96720; }
+.coverage-grid article > div { display: flex; align-items: center; gap: 7px; margin-top: 9px; padding-top: 7px; border-top: 1px solid #e4eee8; white-space: nowrap; }
+.coverage-grid b { color: var(--green-dark); font-size: 9px; font-weight: 700; }
+.coverage-grid em { margin-left: auto; color: var(--subtle); font-size: 8px; font-style: normal; }
 .validation-side { display: grid; grid-template-rows: auto 1fr; gap: 12px; }
 .safety-list { display: grid; gap: 5px; }
 .safety-list span { padding: 6px 8px; display: flex; justify-content: space-between; align-items: center; gap: 12px; border-radius: 7px; background: #f7faf8; font-size: 10px; }

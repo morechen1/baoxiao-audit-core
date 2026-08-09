@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#f7faf8" />
     <title>保销智审｜保险营销智能合规审核</title>
     <link rel="icon" href="/static/favicon.svg?v=pipeline-validation-20260809" type="image/svg+xml" />
-    <link rel="stylesheet" href="/static/styles.css?v=pipeline-validation-20260809" />
+    <link rel="stylesheet" href="/static/styles.css?v=extended-validation-20260809" />
   </head>
   <body>
     <main class="app-shell">
@@ -166,43 +166,44 @@
         <section id="validation" class="view validation-view">
           <header class="validation-heading">
             <div>
-              <span class="section-kicker">小规模冻结样本开发验证</span>
+              <span class="section-kicker">扩展冻结验证集</span>
               <h1>检测效果</h1>
-              <p>最终系统小规模冻结样本验证</p>
+              <p>系统冻结后的一次性多标签验证结果</p>
             </div>
             <div class="validation-scope" aria-label="验证范围">
-              <span><strong>36</strong>条冻结开发诊断样本</span>
+              <span><strong>156</strong>条冻结验证样本</span>
               <span><strong>12</strong>类风险类型</span>
-              <span><strong>39</strong>个唯一语义解析案例</span>
+              <span><strong>120</strong>条正向风险案例</span>
+              <span><strong>36</strong>条负向控制案例</span>
             </div>
           </header>
 
-          <p class="validation-intro">以下结果用于验证当前风险发现与确定性校验链路的有效性。样本为冻结的开发诊断集，不作为正式独立 Benchmark。</p>
+          <p class="validation-intro">以下结果来自系统冻结后一次性执行的 156 条扩展验证样本，用于评估当前风险发现、确定性校验与可信证据链的表现。该验证集为项目内部构建并冻结，不等同于独立第三方 Benchmark。</p>
 
           <section class="validation-metrics" aria-label="核心验证指标">
-            <article><span>目标风险召回率</span><strong>95.83%</strong><small>Positive target-rule recall</small></article>
-            <article><span>正样本命中</span><strong>23 / 24</strong><small>冻结正样本目标规则</small></article>
-            <article><span>负样本误报率</span><strong>16.67%</strong><small>2 / 12 negative cases</small></article>
-            <article><span>Quote 完整性</span><strong>100%</strong><small>原文精确引用</small></article>
-            <article><span>总 Provider Calls</span><strong>42</strong><small>Parser 40 + Explanation 2</small></article>
+            <article><span>Micro Precision</span><strong>79.50%</strong><small>128 TP / 33 FP</small></article>
+            <article><span>Micro Recall</span><strong>88.89%</strong><small>128 TP / 16 FN</small></article>
+            <article><span>Micro F1</span><strong>83.93%</strong><small>多标签综合表现</small></article>
+            <article><span>Exact-set Accuracy</span><strong>73.08%</strong><small>整组标签完全一致</small></article>
+            <article><span>负样本误报率</span><strong>16.67%</strong><small>6 / 36 negative cases</small></article>
           </section>
 
           <div class="validation-grid">
             <section class="validation-panel coverage-panel">
-              <header><div><span class="section-kicker">当前最终系统</span><h2>12 类风险覆盖</h2></div><p>11 类 2/2，虚假促销或奖品宣传 1/2</p></header>
+              <header><div><span class="section-kicker">当前最终系统</span><h2>12 类风险指标</h2></div><p>P / R / F1 · Support</p></header>
               <div class="coverage-grid">
-                <article><span>绝对化或最高级表述</span><small>absolute_or_superlative_claim</small><strong>2/2</strong></article>
-                <article><span>免责事项隐瞒或弱化</span><small>concealment_or_minimization_of_exclusions</small><strong>2/2</strong></article>
-                <article><span>合同外利益承诺</span><small>extra_contractual_benefit</small><strong>2/2</strong></article>
-                <article class="coverage-partial"><span>虚假促销或奖品宣传</span><small>false_promotion_or_prize</small><strong>1/2</strong></article>
-                <article><span>收益或本金保证</span><small>guaranteed_return_or_principal</small><strong>2/2</strong></article>
-                <article><span>不当比较或排名</span><small>improper_comparison_or_ranking</small><strong>2/2</strong></article>
-                <article><span>利率或收益误导</span><small>misleading_interest_or_yield</small><strong>2/2</strong></article>
-                <article><span>零风险或无损失</span><small>no_risk_or_no_loss</small><strong>2/2</strong></article>
-                <article><span>产品性质混淆</span><small>product_nature_confusion</small><strong>2/2</strong></article>
-                <article><span>监管背书误导</span><small>regulatory_endorsement</small><strong>2/2</strong></article>
-                <article><span>退保或现金价值误述</span><small>surrender_or_cash_value_misstatement</small><strong>2/2</strong></article>
-                <article><span>等待期或犹豫期误述</span><small>waiting_or_cooling_period_misstatement</small><strong>2/2</strong></article>
+                <article><span>绝对化或最高级表述</span><small>absolute_or_superlative_claim</small><div><b>P 78.6%</b><b>R 91.7%</b><b>F1 84.6%</b><em>n=12</em></div></article>
+                <article><span>免责事项隐瞒或弱化</span><small>concealment_or_minimization_of_exclusions</small><div><b>P 83.3%</b><b>R 90.9%</b><b>F1 87.0%</b><em>n=11</em></div></article>
+                <article><span>合同外利益承诺</span><small>extra_contractual_benefit</small><div><b>P 80.0%</b><b>R 100%</b><b>F1 88.9%</b><em>n=12</em></div></article>
+                <article><span>虚假促销或奖品宣传</span><small>false_promotion_or_prize</small><div><b>P 100%</b><b>R 63.6%</b><b>F1 77.8%</b><em>n=11</em></div></article>
+                <article><span>收益或本金保证</span><small>guaranteed_return_or_principal</small><div><b>P 52.2%</b><b>R 92.3%</b><b>F1 66.7%</b><em>n=13</em></div></article>
+                <article><span>不当比较或排名</span><small>improper_comparison_or_ranking</small><div><b>P 100%</b><b>R 100%</b><b>F1 100%</b><em>n=12</em></div></article>
+                <article><span>利率或收益误导</span><small>misleading_interest_or_yield</small><div><b>P 70.0%</b><b>R 63.6%</b><b>F1 66.7%</b><em>n=11</em></div></article>
+                <article><span>零风险或无损失</span><small>no_risk_or_no_loss</small><div><b>P 61.9%</b><b>R 92.9%</b><b>F1 74.3%</b><em>n=14</em></div></article>
+                <article><span>产品性质混淆</span><small>product_nature_confusion</small><div><b>P 91.7%</b><b>R 91.7%</b><b>F1 91.7%</b><em>n=12</em></div></article>
+                <article><span>监管背书误导</span><small>regulatory_endorsement</small><div><b>P 92.3%</b><b>R 92.3%</b><b>F1 92.3%</b><em>n=13</em></div></article>
+                <article><span>退保或现金价值误述</span><small>surrender_or_cash_value_misstatement</small><div><b>P 91.7%</b><b>R 91.7%</b><b>F1 91.7%</b><em>n=12</em></div></article>
+                <article><span>等待期或犹豫期误述</span><small>waiting_or_cooling_period_misstatement</small><div><b>P 100%</b><b>R 90.9%</b><b>F1 95.2%</b><em>n=11</em></div></article>
               </div>
             </section>
 
@@ -212,28 +213,30 @@
                 <div class="safety-list">
                   <span><b>原文 Quote 完整性</b><strong>100%</strong></span>
                   <span><b>接受的幻觉 Quote</b><strong>0</strong></span>
-                  <span><b>USER-002 角色歧义</b><strong>成功拦截</strong></span>
-                  <span><b>Semantic-only Finding 进入可信 RAG</b><strong>PASS</strong></span>
-                  <span><b>Citation / Claim / Uncertainty</b><strong>PASS</strong></span>
+                  <span><b>角色歧义候选拦截</b><strong>2</strong></span>
+                  <span><b>EvidenceLink 抽检</b><strong>6 / 6</strong></span>
+                  <span><b>Citation Validation</b><strong>6 / 6</strong></span>
+                  <span><b>Claim Validation</b><strong>6 / 6</strong></span>
+                  <span><b>Uncertainty Validation</b><strong>6 / 6</strong></span>
                 </div>
               </section>
 
               <section class="validation-panel calls-panel">
                 <header><div><span class="section-kicker">调用成本</span><h2>验证调用规模</h2></div></header>
                 <div class="call-grid">
-                  <span><strong>36</strong><small>冻结诊断案例</small></span>
-                  <span><strong>3</strong><small>用户诊断案例</small></span>
-                  <span><strong>39</strong><small>唯一 Parser 文本</small></span>
-                  <span><strong>40</strong><small>Parser Calls</small></span>
-                  <span><strong>2</strong><small>Explanation Calls</small></span>
-                  <span><strong>42</strong><small>总 Provider Calls</small></span>
+                  <span><strong>156</strong><small>Validation Cases</small></span>
+                  <span><strong>156</strong><small>Parser Calls</small></span>
+                  <span><strong>0</strong><small>Retries</small></span>
+                  <span><strong>6</strong><small>RAG Smoke Cases</small></span>
+                  <span><strong>12</strong><small>Explanation Calls</small></span>
+                  <span><strong>168</strong><small>总 Provider Calls</small></span>
                 </div>
-                <p>调用统计仅对应本次 Semantic Parser MVP 验证，不代表单次业务审核固定调用量。</p>
+                <p>调用量为本次扩展冻结验证的实际统计，不代表单次业务审核固定调用次数。</p>
               </section>
             </div>
           </div>
 
-          <p class="validation-disclaimer">本页结果来自冻结的小规模开发诊断样本，用于验证系统功能链路与语义识别有效性，不等同于独立第三方测试或生产环境总体准确率。</p>
+          <p class="validation-disclaimer">本页采用项目内部冻结验证标签（AI 辅助构建，未宣称人工逐条 Ground Truth）。结果仅对应本次冻结系统、冻结数据与一次性执行，不等同于独立第三方测试或生产环境总体准确率。</p>
         </section>
 
         <section id="result" class="view">
@@ -247,6 +250,6 @@
     </main>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script src="/static/app.js?v=pipeline-validation-20260809"></script>
+    <script src="/static/app.js?v=extended-validation-20260809"></script>
   </body>
 </html>
