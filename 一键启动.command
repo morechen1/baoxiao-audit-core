@@ -47,7 +47,15 @@ cleanup_pid_file() {
     rm -f "$PID_FILE"
   fi
 }
-trap cleanup_pid_file EXIT
+finish() {
+  local status=$?
+  cleanup_pid_file
+  if [[ "$status" -ne 0 && -t 0 ]]; then
+    echo
+    read -r -p "启动未完成。请查看上方错误，按回车键关闭窗口……" _ || true
+  fi
+}
+trap finish EXIT
 
 echo "正在准备依赖、数据库与可信知识，请稍候……"
 for _ in $(seq 1 600); do

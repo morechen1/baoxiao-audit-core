@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import os
 import subprocess
+from hashlib import sha256
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from scripts.rebind_trusted_asset_paths import resolve_asset_paths
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -61,3 +67,31 @@ def test_release_contains_complete_trusted_restore_assets() -> None:
     archives = ROOT / "knowledge_archives"
     assert len(list(archives.glob("*.zip"))) == 5
     assert (archives / "SHA256SUMS").is_file()
+
+
+def test_release_asset_rebinding_requires_exact_content_hashes(tmp_path: Path) -> None:
+    raw = b"trusted raw"
+    parsed = b'{"schema_version":"1.1"}'
+    raw_sha = sha256(raw).hexdigest()
+    parsed_sha = sha256(parsed).hexdigest()
+    raw_dir = tmp_path / "raw"
+    parsed_dir = tmp_path / "parsed_artifacts"
+    raw_dir.mkdir()
+    parsed_dir.mkdir()
+    raw_path = raw_dir / f"{raw_sha}.json"
+    parsed_path = parsed_dir / f"{raw_sha}-{parsed_sha}.json"
+    raw_path.write_bytes(raw)
+    parsed_path.write_bytes(parsed)
+    document = SimpleNamespace(sha256=raw_sha, parsed_artifact_sha256=parsed_sha)
+
+    assert resolve_asset_paths(document, tmp_path) == (raw_path.resolve(), parsed_path.resolve())
+
+    raw_path.write_bytes(b"tampered")
+    with pytest.raises(ValueError, match="raw asset identity mismatch"):
+        resolve_asset_paths(document, tmp_path)
+
+
+def test_existing_complete_database_runs_safe_path_rebinding() -> None:
+    launcher = (ROOT / "scripts/start_final_demo.sh").read_text(encoding="utf-8")
+    assert "scripts/rebind_trusted_asset_paths.py" in launcher
+    assert 'elif [[ "$document_count" != "15" ]]' in launcher

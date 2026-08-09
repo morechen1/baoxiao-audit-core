@@ -52,6 +52,11 @@ if [[ "$document_count" == "0" ]]; then
     --data-dir "$DATA_DIR"
 elif [[ "$document_count" != "15" ]]; then
   fail "Expected 15 SourceDocuments, found $document_count; refusing automatic repair."
+else
+  echo "[final-demo] Verifying trusted asset paths for the current release location..."
+  "$PYTHON" scripts/rebind_trusted_asset_paths.py \
+    --database-url "$FINAL_DATABASE_URL" \
+    --data-dir "$DATA_DIR"
 fi
 
 echo "[final-demo] Verifying 73-chunk runtime and three deterministic cases..."
