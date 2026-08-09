@@ -1,0 +1,1982 @@
+[
+  {
+    "case_id": "FEV-S-01-01",
+    "text": "这是市场上唯一能同时照顾三代家庭保障需求的保险方案。",
+    "expected_rules": [
+      "absolute_or_superlative_claim"
+    ],
+    "primary_rule": "absolute_or_superlative_claim",
+    "case_type": "single_positive",
+    "stratum": "explicit",
+    "rationale": "文本以explicit表达呈现absolute_or_superlative_claim风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-01-02",
+    "text": "这份保障方案是家庭资产安排的最佳选择。",
+    "expected_rules": [
+      "absolute_or_superlative_claim"
+    ],
+    "primary_rule": "absolute_or_superlative_claim",
+    "case_type": "single_positive",
+    "stratum": "explicit",
+    "rationale": "文本以explicit表达呈现absolute_or_superlative_claim风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-01-03",
+    "text": "无论家庭情况怎样，选择这款产品总是最合适。",
+    "expected_rules": [
+      "absolute_or_superlative_claim"
+    ],
+    "primary_rule": "absolute_or_superlative_claim",
+    "case_type": "single_positive",
+    "stratum": "paraphrase",
+    "rationale": "文本以paraphrase表达呈现absolute_or_superlative_claim风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-01-04",
+    "text": "宣传材料把这份方案描述成所有家庭都适用的最周全保障。",
+    "expected_rules": [
+      "absolute_or_superlative_claim"
+    ],
+    "primary_rule": "absolute_or_superlative_claim",
+    "case_type": "single_positive",
+    "stratum": "paraphrase",
+    "rationale": "文本以paraphrase表达呈现absolute_or_superlative_claim风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-01-05",
+    "text": "我敢说这就是最省心的保障安排，挑它不会错。",
+    "expected_rules": [
+      "absolute_or_superlative_claim"
+    ],
+    "primary_rule": "absolute_or_superlative_claim",
+    "case_type": "single_positive",
+    "stratum": "colloquial",
+    "rationale": "文本以colloquial表达呈现absolute_or_superlative_claim风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-01-06",
+    "text": "这份保障肯定能把你们家的需求全照顾到。",
+    "expected_rules": [
+      "absolute_or_superlative_claim"
+    ],
+    "primary_rule": "absolute_or_superlative_claim",
+    "case_type": "single_positive",
+    "stratum": "colloquial",
+    "rationale": "文本以colloquial表达呈现absolute_or_superlative_claim风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-01-07",
+    "text": "产品介绍将其称为没有替代选项的家庭保障选择。",
+    "expected_rules": [
+      "absolute_or_superlative_claim"
+    ],
+    "primary_rule": "absolute_or_superlative_claim",
+    "case_type": "single_positive",
+    "stratum": "light_implicit",
+    "rationale": "文本以light_implicit表达呈现absolute_or_superlative_claim风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-01-08",
+    "text": "海报把该方案定位成适用于人生任何阶段的终极保障。",
+    "expected_rules": [
+      "absolute_or_superlative_claim"
+    ],
+    "primary_rule": "absolute_or_superlative_claim",
+    "case_type": "single_positive",
+    "stratum": "light_implicit",
+    "rationale": "文本以light_implicit表达呈现absolute_or_superlative_claim风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-02-01",
+    "text": "销售时无需向客户说明责任免除，先把保障利益讲清即可。",
+    "expected_rules": [
+      "concealment_or_minimization_of_exclusions"
+    ],
+    "primary_rule": "concealment_or_minimization_of_exclusions",
+    "case_type": "single_positive",
+    "stratum": "explicit",
+    "rationale": "文本以explicit表达呈现concealment_or_minimization_of_exclusions风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-02-02",
+    "text": "健康告知中的既往症影响可以略去不谈，以免客户放弃投保。",
+    "expected_rules": [
+      "concealment_or_minimization_of_exclusions"
+    ],
+    "primary_rule": "concealment_or_minimization_of_exclusions",
+    "case_type": "single_positive",
+    "stratum": "explicit",
+    "rationale": "文本以explicit表达呈现concealment_or_minimization_of_exclusions风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-02-03",
+    "text": "介绍产品时把免责部分放到最后一页，口头沟通不必提及。",
+    "expected_rules": [
+      "concealment_or_minimization_of_exclusions"
+    ],
+    "primary_rule": "concealment_or_minimization_of_exclusions",
+    "case_type": "single_positive",
+    "stratum": "paraphrase",
+    "rationale": "文本以paraphrase表达呈现concealment_or_minimization_of_exclusions风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-02-04",
+    "text": "客户问到不保事项时，只需强调保障范围，避免展开限制条件。",
+    "expected_rules": [
+      "concealment_or_minimization_of_exclusions"
+    ],
+    "primary_rule": "concealment_or_minimization_of_exclusions",
+    "case_type": "single_positive",
+    "stratum": "paraphrase",
+    "rationale": "文本以paraphrase表达呈现concealment_or_minimization_of_exclusions风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-02-05",
+    "text": "免赔和除外那些细节先别跟客户说，省得他犹豫。",
+    "expected_rules": [
+      "concealment_or_minimization_of_exclusions"
+    ],
+    "primary_rule": "concealment_or_minimization_of_exclusions",
+    "case_type": "single_positive",
+    "stratum": "colloquial",
+    "rationale": "文本以colloquial表达呈现concealment_or_minimization_of_exclusions风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-02-06",
+    "text": "健康告知就轻描淡写带过，重点把能赔的讲漂亮。",
+    "expected_rules": [
+      "concealment_or_minimization_of_exclusions"
+    ],
+    "primary_rule": "concealment_or_minimization_of_exclusions",
+    "case_type": "single_positive",
+    "stratum": "colloquial",
+    "rationale": "文本以colloquial表达呈现concealment_or_minimization_of_exclusions风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-02-07",
+    "text": "宣传页完整列出保障责任，却有意省略同一疾病的除外条件。",
+    "expected_rules": [
+      "concealment_or_minimization_of_exclusions"
+    ],
+    "primary_rule": "concealment_or_minimization_of_exclusions",
+    "case_type": "single_positive",
+    "stratum": "light_implicit",
+    "rationale": "文本以light_implicit表达呈现concealment_or_minimization_of_exclusions风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-02-08",
+    "text": "销售说明把责任免除缩成难以阅读的小字，并称其无需关注。",
+    "expected_rules": [
+      "concealment_or_minimization_of_exclusions"
+    ],
+    "primary_rule": "concealment_or_minimization_of_exclusions",
+    "case_type": "single_positive",
+    "stratum": "light_implicit",
+    "rationale": "文本以light_implicit表达呈现concealment_or_minimization_of_exclusions风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-03-01",
+    "text": "现在投保，我个人再返还你两千元现金，合同里不体现。",
+    "expected_rules": [
+      "extra_contractual_benefit"
+    ],
+    "primary_rule": "extra_contractual_benefit",
+    "case_type": "single_positive",
+    "stratum": "explicit",
+    "rationale": "文本以explicit表达呈现extra_contractual_benefit风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-03-02",
+    "text": "签单后由销售团队额外赠送一年家政服务，不写入保险合同。",
+    "expected_rules": [
+      "extra_contractual_benefit"
+    ],
+    "primary_rule": "extra_contractual_benefit",
+    "case_type": "single_positive",
+    "stratum": "explicit",
+    "rationale": "文本以explicit表达呈现extra_contractual_benefit风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-03-03",
+    "text": "达到约定保费后，客户可从业务员处领取合同之外的购物卡。",
+    "expected_rules": [
+      "extra_contractual_benefit"
+    ],
+    "primary_rule": "extra_contractual_benefit",
+    "case_type": "single_positive",
+    "stratum": "paraphrase",
+    "rationale": "文本以paraphrase表达呈现extra_contractual_benefit风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-03-04",
+    "text": "完成投保即可享受公司另行提供、保单未约定的体检套餐。",
+    "expected_rules": [
+      "extra_contractual_benefit"
+    ],
+    "primary_rule": "extra_contractual_benefit",
+    "case_type": "single_positive",
+    "stratum": "paraphrase",
+    "rationale": "文本以paraphrase表达呈现extra_contractual_benefit风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-03-05",
+    "text": "你今天把单签了，我私下给你包个大红包。",
+    "expected_rules": [
+      "extra_contractual_benefit"
+    ],
+    "primary_rule": "extra_contractual_benefit",
+    "case_type": "single_positive",
+    "stratum": "colloquial",
+    "rationale": "文本以colloquial表达呈现extra_contractual_benefit风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-03-06",
+    "text": "保费交完我再送你一台平板，这个不走合同。",
+    "expected_rules": [
+      "extra_contractual_benefit"
+    ],
+    "primary_rule": "extra_contractual_benefit",
+    "case_type": "single_positive",
+    "stratum": "colloquial",
+    "rationale": "文本以colloquial表达呈现extra_contractual_benefit风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-03-07",
+    "text": "营销方案把未载入条款的会员权益作为促成投保的附加回馈。",
+    "expected_rules": [
+      "extra_contractual_benefit"
+    ],
+    "primary_rule": "extra_contractual_benefit",
+    "case_type": "single_positive",
+    "stratum": "light_implicit",
+    "rationale": "文本以light_implicit表达呈现extra_contractual_benefit风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-03-08",
+    "text": "销售人员以保单外的机场接送服务吸引客户尽快投保。",
+    "expected_rules": [
+      "extra_contractual_benefit"
+    ],
+    "primary_rule": "extra_contractual_benefit",
+    "case_type": "single_positive",
+    "stratum": "light_implicit",
+    "rationale": "文本以light_implicit表达呈现extra_contractual_benefit风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-04-01",
+    "text": "投保本产品即可参加豪车抽奖，奖品数量和活动规则暂不公开。",
+    "expected_rules": [
+      "false_promotion_or_prize"
+    ],
+    "primary_rule": "false_promotion_or_prize",
+    "case_type": "single_positive",
+    "stratum": "explicit",
+    "rationale": "文本以explicit表达呈现false_promotion_or_prize风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-04-02",
+    "text": "限时投保赠送境外双人游，活动细则稍后另行通知。",
+    "expected_rules": [
+      "false_promotion_or_prize"
+    ],
+    "primary_rule": "false_promotion_or_prize",
+    "case_type": "single_positive",
+    "stratum": "explicit",
+    "rationale": "文本以explicit表达呈现false_promotion_or_prize风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-04-03",
+    "text": "缴费后自动获得幸运大奖资格，奖项安排不在宣传页说明。",
+    "expected_rules": [
+      "false_promotion_or_prize"
+    ],
+    "primary_rule": "false_promotion_or_prize",
+    "case_type": "single_positive",
+    "stratum": "paraphrase",
+    "rationale": "文本以paraphrase表达呈现false_promotion_or_prize风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-04-04",
+    "text": "今日签单可进入神秘奖池，具体奖品由销售人员另行告知。",
+    "expected_rules": [
+      "false_promotion_or_prize"
+    ],
+    "primary_rule": "false_promotion_or_prize",
+    "case_type": "single_positive",
+    "stratum": "paraphrase",
+    "rationale": "文本以paraphrase表达呈现false_promotion_or_prize风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-04-05",
+    "text": "现在买就能抽豪车，规则先不用管。",
+    "expected_rules": [
+      "false_promotion_or_prize"
+    ],
+    "primary_rule": "false_promotion_or_prize",
+    "case_type": "single_positive",
+    "stratum": "colloquial",
+    "rationale": "文本以colloquial表达呈现false_promotion_or_prize风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-04-06",
+    "text": "把保单办了就送你一个大奖机会，奖品之后再说。",
+    "expected_rules": [
+      "false_promotion_or_prize"
+    ],
+    "primary_rule": "false_promotion_or_prize",
+    "case_type": "single_positive",
+    "stratum": "colloquial",
+    "rationale": "文本以colloquial表达呈现false_promotion_or_prize风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-04-07",
+    "text": "营销页面用倒计时和稀缺名额推动投保，却没有披露促销期限与规则。",
+    "expected_rules": [
+      "false_promotion_or_prize"
+    ],
+    "primary_rule": "false_promotion_or_prize",
+    "case_type": "single_positive",
+    "stratum": "light_implicit",
+    "rationale": "文本以light_implicit表达呈现false_promotion_or_prize风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-04-08",
+    "text": "宣传将普通积分兑换包装成限量大奖活动，引导客户立即签约。",
+    "expected_rules": [
+      "false_promotion_or_prize"
+    ],
+    "primary_rule": "false_promotion_or_prize",
+    "case_type": "single_positive",
+    "stratum": "light_implicit",
+    "rationale": "文本以light_implicit表达呈现false_promotion_or_prize风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-05-01",
+    "text": "本产品承诺每年按固定收益率结算，并在期满返还全部本金。",
+    "expected_rules": [
+      "guaranteed_return_or_principal"
+    ],
+    "primary_rule": "guaranteed_return_or_principal",
+    "case_type": "single_positive",
+    "stratum": "explicit",
+    "rationale": "文本以explicit表达呈现guaranteed_return_or_principal风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-05-02",
+    "text": "宣传口径把本金返还和年度收益列为确定给付。",
+    "expected_rules": [
+      "guaranteed_return_or_principal"
+    ],
+    "primary_rule": "guaranteed_return_or_principal",
+    "case_type": "single_positive",
+    "stratum": "explicit",
+    "rationale": "文本以explicit表达呈现guaranteed_return_or_principal风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-05-03",
+    "text": "销售人员表示未来收益已经锁定，客户按期领取即可。",
+    "expected_rules": [
+      "guaranteed_return_or_principal"
+    ],
+    "primary_rule": "guaranteed_return_or_principal",
+    "case_type": "single_positive",
+    "stratum": "paraphrase",
+    "rationale": "文本以paraphrase表达呈现guaranteed_return_or_principal风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-05-04",
+    "text": "介绍材料将本金完整返还描述为产品承诺而非演示结果。",
+    "expected_rules": [
+      "guaranteed_return_or_principal"
+    ],
+    "primary_rule": "guaranteed_return_or_principal",
+    "case_type": "single_positive",
+    "stratum": "paraphrase",
+    "rationale": "文本以paraphrase表达呈现guaranteed_return_or_principal风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-05-05",
+    "text": "这笔钱放进来，每年拿多少早就定好了。",
+    "expected_rules": [
+      "guaranteed_return_or_principal"
+    ],
+    "primary_rule": "guaranteed_return_or_principal",
+    "case_type": "single_positive",
+    "stratum": "colloquial",
+    "rationale": "文本以colloquial表达呈现guaranteed_return_or_principal风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-05-06",
+    "text": "到期本金照数回来，收益也按说好的给。",
+    "expected_rules": [
+      "guaranteed_return_or_principal"
+    ],
+    "primary_rule": "guaranteed_return_or_principal",
+    "case_type": "single_positive",
+    "stratum": "colloquial",
+    "rationale": "文本以colloquial表达呈现guaranteed_return_or_principal风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-05-07",
+    "text": "收益表中的固定数值被作为保单实际承诺向客户说明。",
+    "expected_rules": [
+      "guaranteed_return_or_principal"
+    ],
+    "primary_rule": "guaranteed_return_or_principal",
+    "case_type": "single_positive",
+    "stratum": "light_implicit",
+    "rationale": "文本以light_implicit表达呈现guaranteed_return_or_principal风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-05-08",
+    "text": "销售说明把非保证利益表述成到期确定兑现的金额。",
+    "expected_rules": [
+      "guaranteed_return_or_principal"
+    ],
+    "primary_rule": "guaranteed_return_or_principal",
+    "case_type": "single_positive",
+    "stratum": "light_implicit",
+    "rationale": "文本以light_implicit表达呈现guaranteed_return_or_principal风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-06-01",
+    "text": "宣传称本产品保障范围优于同类保险，却没有提供比较依据。",
+    "expected_rules": [
+      "improper_comparison_or_ranking"
+    ],
+    "primary_rule": "improper_comparison_or_ranking",
+    "case_type": "single_positive",
+    "stratum": "explicit",
+    "rationale": "文本以explicit表达呈现improper_comparison_or_ranking风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-06-02",
+    "text": "销售话术声称本公司理赔服务胜过A公司，但没有可核验数据。",
+    "expected_rules": [
+      "improper_comparison_or_ranking"
+    ],
+    "primary_rule": "improper_comparison_or_ranking",
+    "case_type": "single_positive",
+    "stratum": "explicit",
+    "rationale": "文本以explicit表达呈现improper_comparison_or_ranking风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-06-03",
+    "text": "介绍页把两款不同期限产品直接比较，并宣称本款回报更高。",
+    "expected_rules": [
+      "improper_comparison_or_ranking"
+    ],
+    "primary_rule": "improper_comparison_or_ranking",
+    "case_type": "single_positive",
+    "stratum": "paraphrase",
+    "rationale": "文本以paraphrase表达呈现improper_comparison_or_ranking风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-06-04",
+    "text": "宣传只选取对手较弱项目，得出本产品保障更好的结论。",
+    "expected_rules": [
+      "improper_comparison_or_ranking"
+    ],
+    "primary_rule": "improper_comparison_or_ranking",
+    "case_type": "single_positive",
+    "stratum": "paraphrase",
+    "rationale": "文本以paraphrase表达呈现improper_comparison_or_ranking风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-06-05",
+    "text": "同样交一万，我们这款就是比别家的更值。",
+    "expected_rules": [
+      "improper_comparison_or_ranking"
+    ],
+    "primary_rule": "improper_comparison_or_ranking",
+    "case_type": "single_positive",
+    "stratum": "colloquial",
+    "rationale": "文本以colloquial表达呈现improper_comparison_or_ranking风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-06-06",
+    "text": "别家那种保障差远了，还是我们这个划算。",
+    "expected_rules": [
+      "improper_comparison_or_ranking"
+    ],
+    "primary_rule": "improper_comparison_or_ranking",
+    "case_type": "single_positive",
+    "stratum": "colloquial",
+    "rationale": "文本以colloquial表达呈现improper_comparison_or_ranking风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-06-07",
+    "text": "材料以不同统计口径制作排名，将本产品置于同类首位。",
+    "expected_rules": [
+      "improper_comparison_or_ranking"
+    ],
+    "primary_rule": "improper_comparison_or_ranking",
+    "case_type": "single_positive",
+    "stratum": "light_implicit",
+    "rationale": "文本以light_implicit表达呈现improper_comparison_or_ranking风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-06-08",
+    "text": "销售展示未经来源说明的行业对比表，突出本产品领先位置。",
+    "expected_rules": [
+      "improper_comparison_or_ranking"
+    ],
+    "primary_rule": "improper_comparison_or_ranking",
+    "case_type": "single_positive",
+    "stratum": "light_implicit",
+    "rationale": "文本以light_implicit表达呈现improper_comparison_or_ranking风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-07-01",
+    "text": "宣传把演示收益率百分之六写成客户实际年收益。",
+    "expected_rules": [
+      "misleading_interest_or_yield"
+    ],
+    "primary_rule": "misleading_interest_or_yield",
+    "case_type": "single_positive",
+    "stratum": "explicit",
+    "rationale": "文本以explicit表达呈现misleading_interest_or_yield风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-07-02",
+    "text": "产品页面只展示高档收益情景，未说明该数值属于非保证利益。",
+    "expected_rules": [
+      "misleading_interest_or_yield"
+    ],
+    "primary_rule": "misleading_interest_or_yield",
+    "case_type": "single_positive",
+    "stratum": "explicit",
+    "rationale": "文本以explicit表达呈现misleading_interest_or_yield风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-07-03",
+    "text": "销售用过去某一年度的结算率推断客户未来每年的回报。",
+    "expected_rules": [
+      "misleading_interest_or_yield"
+    ],
+    "primary_rule": "misleading_interest_or_yield",
+    "case_type": "single_positive",
+    "stratum": "paraphrase",
+    "rationale": "文本以paraphrase表达呈现misleading_interest_or_yield风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-07-04",
+    "text": "宣传将预期收益区间当作客户可实际取得的回报。",
+    "expected_rules": [
+      "misleading_interest_or_yield"
+    ],
+    "primary_rule": "misleading_interest_or_yield",
+    "case_type": "single_positive",
+    "stratum": "paraphrase",
+    "rationale": "文本以paraphrase表达呈现misleading_interest_or_yield风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-07-05",
+    "text": "演示表上写百分之六，你就按这个数理解每年收益吧。",
+    "expected_rules": [
+      "misleading_interest_or_yield"
+    ],
+    "primary_rule": "misleading_interest_or_yield",
+    "case_type": "single_positive",
+    "stratum": "colloquial",
+    "rationale": "文本以colloquial表达呈现misleading_interest_or_yield风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-07-06",
+    "text": "去年结算得不错，今年照着那个水平看就行。",
+    "expected_rules": [
+      "misleading_interest_or_yield"
+    ],
+    "primary_rule": "misleading_interest_or_yield",
+    "case_type": "single_positive",
+    "stratum": "colloquial",
+    "rationale": "文本以colloquial表达呈现misleading_interest_or_yield风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-07-07",
+    "text": "收益图表突出最高演示档位，弱化实际结果可能波动的说明。",
+    "expected_rules": [
+      "misleading_interest_or_yield"
+    ],
+    "primary_rule": "misleading_interest_or_yield",
+    "case_type": "single_positive",
+    "stratum": "light_implicit",
+    "rationale": "文本以light_implicit表达呈现misleading_interest_or_yield风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-07-08",
+    "text": "销售测算把不同期限的累计回报换算成年化数字，却未说明口径。",
+    "expected_rules": [
+      "misleading_interest_or_yield"
+    ],
+    "primary_rule": "misleading_interest_or_yield",
+    "case_type": "single_positive",
+    "stratum": "light_implicit",
+    "rationale": "文本以light_implicit表达呈现misleading_interest_or_yield风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-08-01",
+    "text": "这款产品不存在市场波动导致的资金损失。",
+    "expected_rules": [
+      "no_risk_or_no_loss"
+    ],
+    "primary_rule": "no_risk_or_no_loss",
+    "case_type": "single_positive",
+    "stratum": "explicit",
+    "rationale": "文本以explicit表达呈现no_risk_or_no_loss风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-08-02",
+    "text": "投保资金不会因为风险变化出现亏损。",
+    "expected_rules": [
+      "no_risk_or_no_loss"
+    ],
+    "primary_rule": "no_risk_or_no_loss",
+    "case_type": "single_positive",
+    "stratum": "explicit",
+    "rationale": "文本以explicit表达呈现no_risk_or_no_loss风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-08-03",
+    "text": "产品风险已经被消除，资金只会稳步积累。",
+    "expected_rules": [
+      "no_risk_or_no_loss"
+    ],
+    "primary_rule": "no_risk_or_no_loss",
+    "case_type": "single_positive",
+    "stratum": "paraphrase",
+    "rationale": "文本以paraphrase表达呈现no_risk_or_no_loss风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-08-04",
+    "text": "销售介绍将产品描述为零波动、零损失的资金安排。",
+    "expected_rules": [
+      "no_risk_or_no_loss"
+    ],
+    "primary_rule": "no_risk_or_no_loss",
+    "case_type": "single_positive",
+    "stratum": "paraphrase",
+    "rationale": "文本以paraphrase表达呈现no_risk_or_no_loss风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-08-05",
+    "text": "放心放进来，怎么都亏不了。",
+    "expected_rules": [
+      "no_risk_or_no_loss"
+    ],
+    "primary_rule": "no_risk_or_no_loss",
+    "case_type": "single_positive",
+    "stratum": "colloquial",
+    "rationale": "文本以colloquial表达呈现no_risk_or_no_loss风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-08-06",
+    "text": "这份保险不用担心赔钱的可能。",
+    "expected_rules": [
+      "no_risk_or_no_loss"
+    ],
+    "primary_rule": "no_risk_or_no_loss",
+    "case_type": "single_positive",
+    "stratum": "colloquial",
+    "rationale": "文本以colloquial表达呈现no_risk_or_no_loss风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-08-07",
+    "text": "材料暗示客户无需评估风险，因为本金不受市场影响。",
+    "expected_rules": [
+      "no_risk_or_no_loss"
+    ],
+    "primary_rule": "no_risk_or_no_loss",
+    "case_type": "single_positive",
+    "stratum": "light_implicit",
+    "rationale": "文本以light_implicit表达呈现no_risk_or_no_loss风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-08-08",
+    "text": "宣传把保险描述成无需承担损失可能的稳健工具。",
+    "expected_rules": [
+      "no_risk_or_no_loss"
+    ],
+    "primary_rule": "no_risk_or_no_loss",
+    "case_type": "single_positive",
+    "stratum": "light_implicit",
+    "rationale": "文本以light_implicit表达呈现no_risk_or_no_loss风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-09-01",
+    "text": "这不是保险，就是银行定期存款的替代品。",
+    "expected_rules": [
+      "product_nature_confusion"
+    ],
+    "primary_rule": "product_nature_confusion",
+    "case_type": "single_positive",
+    "stratum": "explicit",
+    "rationale": "文本以explicit表达呈现product_nature_confusion风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-09-02",
+    "text": "销售把年金保险称为可随取随用的银行理财账户。",
+    "expected_rules": [
+      "product_nature_confusion"
+    ],
+    "primary_rule": "product_nature_confusion",
+    "case_type": "single_positive",
+    "stratum": "explicit",
+    "rationale": "文本以explicit表达呈现product_nature_confusion风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-09-03",
+    "text": "介绍中将保费缴纳描述为往储蓄账户存款。",
+    "expected_rules": [
+      "product_nature_confusion"
+    ],
+    "primary_rule": "product_nature_confusion",
+    "case_type": "single_positive",
+    "stratum": "paraphrase",
+    "rationale": "文本以paraphrase表达呈现product_nature_confusion风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-09-04",
+    "text": "宣传把保险合同包装成与货币基金相同的现金管理工具。",
+    "expected_rules": [
+      "product_nature_confusion"
+    ],
+    "primary_rule": "product_nature_confusion",
+    "case_type": "single_positive",
+    "stratum": "paraphrase",
+    "rationale": "文本以paraphrase表达呈现product_nature_confusion风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-09-05",
+    "text": "你就当在银行存钱，名字叫保险而已。",
+    "expected_rules": [
+      "product_nature_confusion"
+    ],
+    "primary_rule": "product_nature_confusion",
+    "case_type": "single_positive",
+    "stratum": "colloquial",
+    "rationale": "文本以colloquial表达呈现product_nature_confusion风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-09-06",
+    "text": "这其实就是个理财账户，和买保险没什么关系。",
+    "expected_rules": [
+      "product_nature_confusion"
+    ],
+    "primary_rule": "product_nature_confusion",
+    "case_type": "single_positive",
+    "stratum": "colloquial",
+    "rationale": "文本以colloquial表达呈现product_nature_confusion风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-09-07",
+    "text": "页面全程使用存入、利息和账户余额等措辞，回避其保险合同性质。",
+    "expected_rules": [
+      "product_nature_confusion"
+    ],
+    "primary_rule": "product_nature_confusion",
+    "case_type": "single_positive",
+    "stratum": "light_implicit",
+    "rationale": "文本以light_implicit表达呈现product_nature_confusion风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-09-08",
+    "text": "销售以基金申购的方式解释投保流程，使客户误认产品属性。",
+    "expected_rules": [
+      "product_nature_confusion"
+    ],
+    "primary_rule": "product_nature_confusion",
+    "case_type": "single_positive",
+    "stratum": "light_implicit",
+    "rationale": "文本以light_implicit表达呈现product_nature_confusion风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-10-01",
+    "text": "该产品已获金融监管部门认证，购买更有保障。",
+    "expected_rules": [
+      "regulatory_endorsement"
+    ],
+    "primary_rule": "regulatory_endorsement",
+    "case_type": "single_positive",
+    "stratum": "explicit",
+    "rationale": "文本以explicit表达呈现regulatory_endorsement风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-10-02",
+    "text": "监管机构指定本公司承办这款养老保险。",
+    "expected_rules": [
+      "regulatory_endorsement"
+    ],
+    "primary_rule": "regulatory_endorsement",
+    "case_type": "single_positive",
+    "stratum": "explicit",
+    "rationale": "文本以explicit表达呈现regulatory_endorsement风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-10-03",
+    "text": "宣传称产品方案得到监管专家认可并推荐给家庭客户。",
+    "expected_rules": [
+      "regulatory_endorsement"
+    ],
+    "primary_rule": "regulatory_endorsement",
+    "case_type": "single_positive",
+    "stratum": "paraphrase",
+    "rationale": "文本以paraphrase表达呈现regulatory_endorsement风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-10-04",
+    "text": "销售介绍借用监管备案概念，声称官方为产品安全背书。",
+    "expected_rules": [
+      "regulatory_endorsement"
+    ],
+    "primary_rule": "regulatory_endorsement",
+    "case_type": "single_positive",
+    "stratum": "paraphrase",
+    "rationale": "文本以paraphrase表达呈现regulatory_endorsement风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-10-05",
+    "text": "这是监管点名推荐给消费者的产品。",
+    "expected_rules": [
+      "regulatory_endorsement"
+    ],
+    "primary_rule": "regulatory_endorsement",
+    "case_type": "single_positive",
+    "stratum": "colloquial",
+    "rationale": "文本以colloquial表达呈现regulatory_endorsement风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-10-06",
+    "text": "官方都认可这款，您放心投保就行。",
+    "expected_rules": [
+      "regulatory_endorsement"
+    ],
+    "primary_rule": "regulatory_endorsement",
+    "case_type": "single_positive",
+    "stratum": "colloquial",
+    "rationale": "文本以colloquial表达呈现regulatory_endorsement风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-10-07",
+    "text": "海报把监管部门标识放在产品名称旁，暗示双方存在推荐关系。",
+    "expected_rules": [
+      "regulatory_endorsement"
+    ],
+    "primary_rule": "regulatory_endorsement",
+    "case_type": "single_positive",
+    "stratum": "light_implicit",
+    "rationale": "文本以light_implicit表达呈现regulatory_endorsement风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-10-08",
+    "text": "材料称完成备案意味着产品品质获得监管保证。",
+    "expected_rules": [
+      "regulatory_endorsement"
+    ],
+    "primary_rule": "regulatory_endorsement",
+    "case_type": "single_positive",
+    "stratum": "light_implicit",
+    "rationale": "文本以light_implicit表达呈现regulatory_endorsement风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-11-01",
+    "text": "保单生效后随时退保都能按已交保费原额领取。",
+    "expected_rules": [
+      "surrender_or_cash_value_misstatement"
+    ],
+    "primary_rule": "surrender_or_cash_value_misstatement",
+    "case_type": "single_positive",
+    "stratum": "explicit",
+    "rationale": "文本以explicit表达呈现surrender_or_cash_value_misstatement风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-11-02",
+    "text": "前五年退保不扣任何费用，现金价值等同累计保费。",
+    "expected_rules": [
+      "surrender_or_cash_value_misstatement"
+    ],
+    "primary_rule": "surrender_or_cash_value_misstatement",
+    "case_type": "single_positive",
+    "stratum": "explicit",
+    "rationale": "文本以explicit表达呈现surrender_or_cash_value_misstatement风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-11-03",
+    "text": "销售把现金价值说成客户想取就能全额取出的余额。",
+    "expected_rules": [
+      "surrender_or_cash_value_misstatement"
+    ],
+    "primary_rule": "surrender_or_cash_value_misstatement",
+    "case_type": "single_positive",
+    "stratum": "paraphrase",
+    "rationale": "文本以paraphrase表达呈现surrender_or_cash_value_misstatement风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-11-04",
+    "text": "宣传称中途退出只影响保障，不会造成资金减少。",
+    "expected_rules": [
+      "surrender_or_cash_value_misstatement"
+    ],
+    "primary_rule": "surrender_or_cash_value_misstatement",
+    "case_type": "single_positive",
+    "stratum": "paraphrase",
+    "rationale": "文本以paraphrase表达呈现surrender_or_cash_value_misstatement风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-11-05",
+    "text": "哪天不想要了就退，交多少拿回多少。",
+    "expected_rules": [
+      "surrender_or_cash_value_misstatement"
+    ],
+    "primary_rule": "surrender_or_cash_value_misstatement",
+    "case_type": "single_positive",
+    "stratum": "colloquial",
+    "rationale": "文本以colloquial表达呈现surrender_or_cash_value_misstatement风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-11-06",
+    "text": "这钱随时能退出来，一分钱都不会少。",
+    "expected_rules": [
+      "surrender_or_cash_value_misstatement"
+    ],
+    "primary_rule": "surrender_or_cash_value_misstatement",
+    "case_type": "single_positive",
+    "stratum": "colloquial",
+    "rationale": "文本以colloquial表达呈现surrender_or_cash_value_misstatement风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-11-07",
+    "text": "材料用可灵活支取描述退保，却未提示现金价值可能低于已交保费。",
+    "expected_rules": [
+      "surrender_or_cash_value_misstatement"
+    ],
+    "primary_rule": "surrender_or_cash_value_misstatement",
+    "case_type": "single_positive",
+    "stratum": "light_implicit",
+    "rationale": "文本以light_implicit表达呈现surrender_or_cash_value_misstatement风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-11-08",
+    "text": "销售示例把某一保单年度的现金价值直接等同退保到账金额。",
+    "expected_rules": [
+      "surrender_or_cash_value_misstatement"
+    ],
+    "primary_rule": "surrender_or_cash_value_misstatement",
+    "case_type": "single_positive",
+    "stratum": "light_implicit",
+    "rationale": "文本以light_implicit表达呈现surrender_or_cash_value_misstatement风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-12-01",
+    "text": "本产品投保次日即覆盖所有疾病，不设等待期。",
+    "expected_rules": [
+      "waiting_or_cooling_period_misstatement"
+    ],
+    "primary_rule": "waiting_or_cooling_period_misstatement",
+    "case_type": "single_positive",
+    "stratum": "explicit",
+    "rationale": "文本以explicit表达呈现waiting_or_cooling_period_misstatement风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-12-02",
+    "text": "犹豫期结束后仍可无条件全额撤单。",
+    "expected_rules": [
+      "waiting_or_cooling_period_misstatement"
+    ],
+    "primary_rule": "waiting_or_cooling_period_misstatement",
+    "case_type": "single_positive",
+    "stratum": "explicit",
+    "rationale": "文本以explicit表达呈现waiting_or_cooling_period_misstatement风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-12-03",
+    "text": "销售称等待期只是流程名称，期间出险同样按正常责任赔付。",
+    "expected_rules": [
+      "waiting_or_cooling_period_misstatement"
+    ],
+    "primary_rule": "waiting_or_cooling_period_misstatement",
+    "case_type": "single_positive",
+    "stratum": "paraphrase",
+    "rationale": "文本以paraphrase表达呈现waiting_or_cooling_period_misstatement风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-12-04",
+    "text": "宣传把十五天犹豫期解释为从收到宣传册当天开始计算。",
+    "expected_rules": [
+      "waiting_or_cooling_period_misstatement"
+    ],
+    "primary_rule": "waiting_or_cooling_period_misstatement",
+    "case_type": "single_positive",
+    "stratum": "paraphrase",
+    "rationale": "文本以paraphrase表达呈现waiting_or_cooling_period_misstatement风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-12-05",
+    "text": "今天买明天生病也照常赔，根本不用等。",
+    "expected_rules": [
+      "waiting_or_cooling_period_misstatement"
+    ],
+    "primary_rule": "waiting_or_cooling_period_misstatement",
+    "case_type": "single_positive",
+    "stratum": "colloquial",
+    "rationale": "文本以colloquial表达呈现waiting_or_cooling_period_misstatement风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-12-06",
+    "text": "过了犹豫期想退也还是原款退给你。",
+    "expected_rules": [
+      "waiting_or_cooling_period_misstatement"
+    ],
+    "primary_rule": "waiting_or_cooling_period_misstatement",
+    "case_type": "single_positive",
+    "stratum": "colloquial",
+    "rationale": "文本以colloquial表达呈现waiting_or_cooling_period_misstatement风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-12-07",
+    "text": "产品页面省略九十天等待安排，并暗示保障自缴费时完整生效。",
+    "expected_rules": [
+      "waiting_or_cooling_period_misstatement"
+    ],
+    "primary_rule": "waiting_or_cooling_period_misstatement",
+    "case_type": "single_positive",
+    "stratum": "light_implicit",
+    "rationale": "文本以light_implicit表达呈现waiting_or_cooling_period_misstatement风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-S-12-08",
+    "text": "销售将犹豫期与宽限期混为一谈，告知客户缴费后六十天内可撤销。",
+    "expected_rules": [
+      "waiting_or_cooling_period_misstatement"
+    ],
+    "primary_rule": "waiting_or_cooling_period_misstatement",
+    "case_type": "single_positive",
+    "stratum": "light_implicit",
+    "rationale": "文本以light_implicit表达呈现waiting_or_cooling_period_misstatement风险，未标注其他非必要类别。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-M-001",
+    "text": "这是唯一能确保每年固定回报并完整返还本金的家庭保险方案。",
+    "expected_rules": [
+      "absolute_or_superlative_claim",
+      "guaranteed_return_or_principal"
+    ],
+    "primary_rule": "absolute_or_superlative_claim",
+    "case_type": "multi_positive",
+    "stratum": "multi_label",
+    "rationale": "文本自然包含两个独立且可辨识的保险营销风险主张。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-M-002",
+    "text": "这款产品是全行业最安全的选择，资金完全不可能出现损失。",
+    "expected_rules": [
+      "absolute_or_superlative_claim",
+      "no_risk_or_no_loss"
+    ],
+    "primary_rule": "absolute_or_superlative_claim",
+    "case_type": "multi_positive",
+    "stratum": "multi_label",
+    "rationale": "文本自然包含两个独立且可辨识的保险营销风险主张。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-M-003",
+    "text": "我们的保障排名市场第一，各项责任都优于其他同类产品。",
+    "expected_rules": [
+      "absolute_or_superlative_claim",
+      "improper_comparison_or_ranking"
+    ],
+    "primary_rule": "absolute_or_superlative_claim",
+    "case_type": "multi_positive",
+    "stratum": "multi_label",
+    "rationale": "文本自然包含两个独立且可辨识的保险营销风险主张。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-M-004",
+    "text": "免责条款不必向客户展开，因为购买这款产品不存在损失风险。",
+    "expected_rules": [
+      "concealment_or_minimization_of_exclusions",
+      "no_risk_or_no_loss"
+    ],
+    "primary_rule": "concealment_or_minimization_of_exclusions",
+    "case_type": "multi_positive",
+    "stratum": "multi_label",
+    "rationale": "文本自然包含两个独立且可辨识的保险营销风险主张。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-M-005",
+    "text": "销售时不要提九十天等待期，直接告诉客户缴费后保障立即全部生效。",
+    "expected_rules": [
+      "concealment_or_minimization_of_exclusions",
+      "waiting_or_cooling_period_misstatement"
+    ],
+    "primary_rule": "concealment_or_minimization_of_exclusions",
+    "case_type": "multi_positive",
+    "stratum": "multi_label",
+    "rationale": "文本自然包含两个独立且可辨识的保险营销风险主张。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-M-006",
+    "text": "介绍产品时隐去退保费用，并告诉客户退出时可以取回全部已交保费。",
+    "expected_rules": [
+      "concealment_or_minimization_of_exclusions",
+      "surrender_or_cash_value_misstatement"
+    ],
+    "primary_rule": "concealment_or_minimization_of_exclusions",
+    "case_type": "multi_positive",
+    "stratum": "multi_label",
+    "rationale": "文本自然包含两个独立且可辨识的保险营销风险主张。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-M-007",
+    "text": "今天签单额外送购物卡，还能参加规则尚未公布的豪车抽奖。",
+    "expected_rules": [
+      "extra_contractual_benefit",
+      "false_promotion_or_prize"
+    ],
+    "primary_rule": "extra_contractual_benefit",
+    "case_type": "multi_positive",
+    "stratum": "multi_label",
+    "rationale": "文本自然包含两个独立且可辨识的保险营销风险主张。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-M-008",
+    "text": "投保后业务员私下返现，同时承诺保单每年提供固定收益。",
+    "expected_rules": [
+      "extra_contractual_benefit",
+      "guaranteed_return_or_principal"
+    ],
+    "primary_rule": "extra_contractual_benefit",
+    "case_type": "multi_positive",
+    "stratum": "multi_label",
+    "rationale": "文本自然包含两个独立且可辨识的保险营销风险主张。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-M-009",
+    "text": "销售称这是监管推出的惠民产品，投保后另送合同外健康服务。",
+    "expected_rules": [
+      "extra_contractual_benefit",
+      "regulatory_endorsement"
+    ],
+    "primary_rule": "extra_contractual_benefit",
+    "case_type": "multi_positive",
+    "stratum": "multi_label",
+    "rationale": "文本自然包含两个独立且可辨识的保险营销风险主张。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-M-010",
+    "text": "这是本季度唯一的限量投保大奖活动，名额倒计时结束后不再开放。",
+    "expected_rules": [
+      "absolute_or_superlative_claim",
+      "false_promotion_or_prize"
+    ],
+    "primary_rule": "absolute_or_superlative_claim",
+    "case_type": "multi_positive",
+    "stratum": "multi_label",
+    "rationale": "文本自然包含两个独立且可辨识的保险营销风险主张。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-M-011",
+    "text": "宣传称监管部门支持本次投保抽奖，具体活动规则由销售随后说明。",
+    "expected_rules": [
+      "false_promotion_or_prize",
+      "regulatory_endorsement"
+    ],
+    "primary_rule": "false_promotion_or_prize",
+    "case_type": "multi_positive",
+    "stratum": "multi_label",
+    "rationale": "文本自然包含两个独立且可辨识的保险营销风险主张。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-M-012",
+    "text": "演示表中的百分之六被说成已经锁定、每年固定到账的实际收益。",
+    "expected_rules": [
+      "guaranteed_return_or_principal",
+      "misleading_interest_or_yield"
+    ],
+    "primary_rule": "guaranteed_return_or_principal",
+    "case_type": "multi_positive",
+    "stratum": "multi_label",
+    "rationale": "文本自然包含两个独立且可辨识的保险营销风险主张。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-M-013",
+    "text": "销售承诺期满本金和收益照数返还，并表示整个持有过程不会亏损。",
+    "expected_rules": [
+      "guaranteed_return_or_principal",
+      "no_risk_or_no_loss"
+    ],
+    "primary_rule": "guaranteed_return_or_principal",
+    "case_type": "multi_positive",
+    "stratum": "multi_label",
+    "rationale": "文本自然包含两个独立且可辨识的保险营销风险主张。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-M-014",
+    "text": "宣传用不同期限产品作比较，声称本款的演示收益明显高于所有竞品。",
+    "expected_rules": [
+      "improper_comparison_or_ranking",
+      "misleading_interest_or_yield"
+    ],
+    "primary_rule": "improper_comparison_or_ranking",
+    "case_type": "multi_positive",
+    "stratum": "multi_label",
+    "rationale": "文本自然包含两个独立且可辨识的保险营销风险主张。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-M-015",
+    "text": "销售说这款保险其实就是银行理财，而且比同类存款产品更划算。",
+    "expected_rules": [
+      "improper_comparison_or_ranking",
+      "product_nature_confusion"
+    ],
+    "primary_rule": "improper_comparison_or_ranking",
+    "case_type": "multi_positive",
+    "stratum": "multi_label",
+    "rationale": "文本自然包含两个独立且可辨识的保险营销风险主张。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-M-016",
+    "text": "材料把高档演示收益当成实际回报，并据此夸大退保时可领取的现金价值。",
+    "expected_rules": [
+      "misleading_interest_or_yield",
+      "surrender_or_cash_value_misstatement"
+    ],
+    "primary_rule": "misleading_interest_or_yield",
+    "case_type": "multi_positive",
+    "stratum": "multi_label",
+    "rationale": "文本自然包含两个独立且可辨识的保险营销风险主张。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-M-017",
+    "text": "这份保险就是随取随用的储蓄账户，放进去的资金没有亏损可能。",
+    "expected_rules": [
+      "no_risk_or_no_loss",
+      "product_nature_confusion"
+    ],
+    "primary_rule": "no_risk_or_no_loss",
+    "case_type": "multi_positive",
+    "stratum": "multi_label",
+    "rationale": "文本自然包含两个独立且可辨识的保险营销风险主张。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-M-018",
+    "text": "宣传把保险称作官方认可的储蓄产品，让客户误以为由监管机构运营。",
+    "expected_rules": [
+      "product_nature_confusion",
+      "regulatory_endorsement"
+    ],
+    "primary_rule": "product_nature_confusion",
+    "case_type": "multi_positive",
+    "stratum": "multi_label",
+    "rationale": "文本自然包含两个独立且可辨识的保险营销风险主张。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-M-019",
+    "text": "销售称产品由监管部门担保，并承诺客户每年取得确定回报。",
+    "expected_rules": [
+      "guaranteed_return_or_principal",
+      "regulatory_endorsement"
+    ],
+    "primary_rule": "guaranteed_return_or_principal",
+    "case_type": "multi_positive",
+    "stratum": "multi_label",
+    "rationale": "文本自然包含两个独立且可辨识的保险营销风险主张。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-M-020",
+    "text": "客户随时退保都不会损失，已交保费可以原额拿回。",
+    "expected_rules": [
+      "no_risk_or_no_loss",
+      "surrender_or_cash_value_misstatement"
+    ],
+    "primary_rule": "no_risk_or_no_loss",
+    "case_type": "multi_positive",
+    "stratum": "multi_label",
+    "rationale": "文本自然包含两个独立且可辨识的保险营销风险主张。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-M-021",
+    "text": "销售把等待期说成可忽略的手续，还称过了犹豫期退保仍能全额退款。",
+    "expected_rules": [
+      "surrender_or_cash_value_misstatement",
+      "waiting_or_cooling_period_misstatement"
+    ],
+    "primary_rule": "surrender_or_cash_value_misstatement",
+    "case_type": "multi_positive",
+    "stratum": "multi_label",
+    "rationale": "文本自然包含两个独立且可辨识的保险营销风险主张。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-M-022",
+    "text": "保障从投保当天完整生效，等待期间也不存在任何保障缺口。",
+    "expected_rules": [
+      "no_risk_or_no_loss",
+      "waiting_or_cooling_period_misstatement"
+    ],
+    "primary_rule": "no_risk_or_no_loss",
+    "case_type": "multi_positive",
+    "stratum": "multi_label",
+    "rationale": "文本自然包含两个独立且可辨识的保险营销风险主张。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-M-023",
+    "text": "把保费存入这个保险账户还能得到合同外礼品，使用方式和储蓄账户一样。",
+    "expected_rules": [
+      "extra_contractual_benefit",
+      "product_nature_confusion"
+    ],
+    "primary_rule": "extra_contractual_benefit",
+    "case_type": "multi_positive",
+    "stratum": "multi_label",
+    "rationale": "文本自然包含两个独立且可辨识的保险营销风险主张。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-M-024",
+    "text": "销售借监管备案为产品排名背书，宣称其保障水平高于其他保险公司。",
+    "expected_rules": [
+      "improper_comparison_or_ranking",
+      "regulatory_endorsement"
+    ],
+    "primary_rule": "improper_comparison_or_ranking",
+    "case_type": "multi_positive",
+    "stratum": "multi_label",
+    "rationale": "文本自然包含两个独立且可辨识的保险营销风险主张。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-001",
+    "text": "本产品不保证收益，实际利益以合同和经营情况为准。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "negation",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-002",
+    "text": "销售人员不得承诺本金安全，也不能保证客户不会发生损失。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "negation",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-003",
+    "text": "该演示利率不代表未来回报，实际结果可能高于或低于演示值。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "negation",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-004",
+    "text": "本保险并非银行存款，也不具备随时支取的储蓄账户属性。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "negation",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-005",
+    "text": "监管备案不代表对产品收益、安全或品质作出认可与推荐。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "negation",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-006",
+    "text": "退保金额不等于已交保费，具体以退保时现金价值为准。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "negation",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-007",
+    "text": "等待期内发生的疾病是否承担责任，应依保险合同约定判断。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "negation",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-008",
+    "text": "本公司不会向投保人提供保险合同之外的返现或礼品。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "negation",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-009",
+    "text": "宣传材料不得省略责任免除和健康告知的重要影响。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "negation",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-010",
+    "text": "产品不存在所谓唯一最佳方案，客户应结合自身需求选择。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "negation",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-011",
+    "text": "本次活动不设置抽奖或保证中奖安排，详情以公开规则为准。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "negation",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-012",
+    "text": "收益并非固定到账，消费者应充分了解非保证利益的不确定性。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "negation",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-013",
+    "text": "不得使用最高、唯一、百分之百等绝对化语言宣传保险产品。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "educational",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-014",
+    "text": "向消费者介绍产品时，应完整说明责任免除和不保事项。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "educational",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-015",
+    "text": "禁止以合同外返现、礼品或服务诱导消费者投保。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "educational",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-016",
+    "text": "保险营销活动不得虚构限时名额、抽奖资格或奖品价值。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "educational",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-017",
+    "text": "销售人员不得向客户承诺固定收益、保本或到期必然获利。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "educational",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-018",
+    "text": "比较保险产品时应采用一致口径并提供可核验的数据来源。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "educational",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-019",
+    "text": "演示收益和历史结算水平不得作为未来实际回报进行宣传。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "educational",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-020",
+    "text": "保险产品具有风险，不得宣称零风险、零损失或资金绝对安全。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "educational",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-021",
+    "text": "介绍保险时不得混同银行存款、基金或普通理财产品。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "educational",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-022",
+    "text": "禁止暗示监管机构对具体保险产品作出认证、推荐或担保。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "educational",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-023",
+    "text": "说明退保时应提示现金价值及可能发生的费用和损失。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "educational",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-024",
+    "text": "销售人员应准确解释等待期、犹豫期的起算和保障效果。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "educational",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-025",
+    "text": "本产品为长期人身保险，保险责任、责任免除及给付条件详见合同条款。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "compliant",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-026",
+    "text": "页面所列利益演示基于假设，不代表实际收益，也不构成任何承诺。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "compliant",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-027",
+    "text": "投保前请如实完成健康告知，并仔细阅读免责事项和等待期说明。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "compliant",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-028",
+    "text": "犹豫期、退保现金价值和相关费用以正式保险合同及保全规则为准。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "compliant",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-029",
+    "text": "消费者可结合保障需求和缴费能力自主选择，宣传内容仅作产品介绍。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "compliant",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-030",
+    "text": "历史数据仅供参考，保险利益可能受合同约定和实际经营情况影响。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "compliant",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-031",
+    "text": "公司决定季度业绩达标后奖励销售团队手机，奖励对象仅限内部员工。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-032",
+    "text": "培训负责人提出为优秀代理人发放购物卡，不面向投保客户。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-033",
+    "text": "分公司内部竞赛设置旅行奖励，依据销售人员合规服务质量评定。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-034",
+    "text": "客服人员提醒客户警惕所谓监管推荐产品的虚假宣传。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-035",
+    "text": "合规课程分析了保证收益、随时退保无损失等典型错误话术。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  },
+  {
+    "case_id": "FEV-N-036",
+    "text": "会议要求下架使用零风险和最佳产品字样的旧宣传材料。",
+    "expected_rules": [],
+    "primary_rule": null,
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "rationale": "该文本属于合规限定、教育禁止或非消费者营销语境，不应形成风险标签。",
+    "review_status": "AI_ASSISTED_FROZEN_VALIDATION",
+    "seen_by_system_before_freeze": false
+  }
+]

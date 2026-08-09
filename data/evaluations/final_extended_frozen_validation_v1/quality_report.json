@@ -1,0 +1,10 @@
+{
+  "cases": 156,
+  "unique_texts": 156,
+  "exact_external_duplicates": [],
+  "normalized_internal_duplicates": [],
+  "internal_near_duplicates": [],
+  "external_near_duplicates": [],
+  "near_duplicate_method": "normalized Chinese/alphanumeric character 3-gram Jaccard; internal>=0.82, external>=0.86",
+  "old_sets_used_only_for_duplicate_detection": true
+}
