@@ -3,117 +3,174 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#071427" />
-    <title>保销智审｜保险营销合规智能审查</title>
-    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/static/styles.css" />
+    <meta name="theme-color" content="#f7faf8" />
+    <title>保销智审｜保险营销智能合规审核</title>
+    <link rel="icon" href="/static/favicon.svg?v=final-frontend-20260809" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/styles.css?v=final-frontend-20260809" />
   </head>
   <body>
-    <div class="ambient ambient-one"></div>
-    <div class="ambient ambient-two"></div>
-    <main class="shell">
+    <main class="app-shell">
       <aside class="sidebar" aria-label="主导航">
         <div class="brand">
-          <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
-          <div><strong>保销智审</strong><small>BAOXIAO INTELLIGENCE</small></div>
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 2.5 20 6v5.5c0 5.1-3.3 8.5-8 10-4.7-1.5-8-4.9-8-10V6l8-3.5Z"/><path d="m8.6 12 2.1 2.1 4.8-5"/></svg>
+          </span>
+          <span><strong>保销智审</strong><small>保险营销智能合规审核</small></span>
         </div>
+
         <nav class="nav-list">
-          <button class="nav-item active" data-view-target="dashboard"><span>◈</span>智能审核工作台</button>
-          <button class="nav-item" data-view-target="review"><span>＋</span>新建智能审核</button>
-          <button class="nav-item" data-view-target="result"><span>◇</span>审核结果中心</button>
+          <button class="nav-item active" data-view-target="dashboard">
+            <span class="nav-icon" aria-hidden="true">⌂</span><span>工作台</span>
+          </button>
+          <button class="nav-item" data-view-target="review">
+            <span class="nav-icon" aria-hidden="true">＋</span><span>新建审核</span>
+          </button>
+          <button class="nav-item is-hidden" id="result-nav" data-view-target="result">
+            <span class="nav-icon" aria-hidden="true">✓</span><span>当前审核结果</span>
+          </button>
         </nav>
-        <div class="sidebar-bottom">
-          <div class="trust-card">
-            <span class="eyebrow">可信审查引擎</span>
-            <strong>Evidence-first</strong>
-            <p>确定性规则 · 可信知识 · 受控解释</p>
-          </div>
-          <div class="system-status"><i></i>演示工作台已就绪</div>
+
+        <div class="sidebar-note">
+          <span class="mini-shield" aria-hidden="true">✓</span>
+          <div><strong>可信监管知识驱动</strong><small>规则 · 语义 · 知识 · 证据</small></div>
         </div>
       </aside>
 
       <section class="main-panel">
         <header class="topbar">
-          <div class="crumb"><span>赛事演示</span><b>/</b><strong id="view-title">智能审核工作台</strong></div>
-          <div class="top-actions">
-            <span class="top-chip"><i></i>可信链路已加载</span>
-            <button class="avatar" title="赛事演示账户">评</button>
+          <div>
+            <span class="topbar-kicker">保销智审</span>
+            <strong id="view-title">工作台</strong>
           </div>
+          <button class="secondary-button topbar-action" data-view-target="review">新建审核</button>
         </header>
 
         <section id="dashboard" class="view active-view">
-          <div class="hero-grid">
-            <article class="hero-card panel-glass">
-              <div class="hero-orbit"></div>
-              <span class="eyebrow">INSURANCE MARKETING COMPLIANCE REVIEW</span>
-              <h1>保险营销材料<br /><em>智能合规审核</em></h1>
-              <p>以确定性规则锁定风险、以可信监管知识提供证据，并由受控 AI 生成可验证的双端解释。</p>
-              <div class="hero-actions">
-                <button class="primary-button" id="hero-start">新建智能审核 <span>→</span></button>
-                <button class="quiet-button" id="hero-demo">播放高风险案例</button>
+          <section class="welcome-card">
+            <div class="welcome-copy">
+              <span class="section-kicker">保险营销合规审查</span>
+              <h1>保险营销材料智能审核</h1>
+              <p>通过规则识别、语义解析与可信监管知识，形成可追溯的风险 Finding 与合规解释。</p>
+              <div class="capability-tags" aria-label="系统能力">
+                <span>规则筛查</span><span>语义解析</span><span>可信知识</span><span>证据溯源</span>
               </div>
-              <div class="hero-meta"><span>规则命中可追溯</span><span>引用连续可验证</span><span>解释双端分层</span></div>
-            </article>
-            <article class="score-card panel-glass" id="dashboard-context">
-              <div class="score-head"><span>当前演示配置</span><span class="pulse">READY</span></div>
-              <div class="provider-orb"><span>AI</span></div>
-              <div class="score-list" id="dashboard-provider"></div>
-            </article>
-          </div>
-
-          <div class="metric-grid" id="metrics"></div>
-
-          <section class="pipeline-card panel-glass" aria-label="审核技术链路">
-            <div class="pipeline-heading"><span class="eyebrow">AUDIT TECHNICAL CHAIN</span><h2>系统如何形成可复核结论</h2><p>这是结果形成的技术链路说明；展示状态与当前审核结果一致，不表示伪造的实时耗时。</p></div>
-            <div class="pipeline-flow" id="pipeline-flow"></div>
+              <button class="primary-button" id="dashboard-start">
+                <span class="button-shield" aria-hidden="true">✓</span>开始一次审核
+              </button>
+            </div>
+            <div class="welcome-visual" aria-hidden="true">
+              <span class="visual-shield">
+                <svg viewBox="0 0 24 24"><path d="M12 2.5 20 6v5.5c0 5.1-3.3 8.5-8 10-4.7-1.5-8-4.9-8-10V6l8-3.5Z"/><path d="m8.6 12 2.1 2.1 4.8-5"/></svg>
+              </span>
+              <div class="visual-line"><i></i><b>Finding</b><span>确定性校验</span></div>
+              <div class="visual-line"><i></i><b>Evidence</b><span>可信来源</span></div>
+              <div class="visual-line"><i></i><b>Citation</b><span>可验证引用</span></div>
+            </div>
           </section>
 
-          <div class="section-heading"><div><span class="eyebrow">RECENT WORKSPACE</span><h2>最近审核任务</h2></div><button class="text-button" data-view-target="review">查看全部案例 →</button></div>
-          <div class="recent-grid" id="recent-cases"></div>
+          <section class="content-section">
+            <header class="section-heading">
+              <div><span class="section-kicker">真实 API 演示</span><h2>典型演示场景</h2></div>
+              <p>选择场景后将提交真实筛查流程，不展示预设审核结果。</p>
+            </header>
+            <div class="scenario-grid" id="dashboard-scenarios"></div>
+          </section>
 
-          <div class="section-heading compact"><div><span class="eyebrow">TRUSTED BY DESIGN</span><h2>系统能力概览</h2></div></div>
-          <div class="capability-grid">
-            <article><span class="cap-icon cyan">⌁</span><h3>确定性风险筛查</h3><p>规则、命中原文与偏移量固定，风险信号可重复复核。</p></article>
-            <article><span class="cap-icon violet">◫</span><h3>可信知识增强</h3><p>只使用经审核、可验证来源与索引闸门准入的知识块。</p></article>
-            <article><span class="cap-icon amber">◎</span><h3>受控 AI 解释</h3><p>AI 只解释既有 finding；每个 claim 都需绑定可见 Citation。</p></article>
-            <article><span class="cap-icon lime">↗</span><h3>双端结果呈现</h3><p>同一事实分别面向机构合规与消费者权益保护进行说明。</p></article>
-          </div>
+          <section class="architecture-card" aria-label="审核技术链路">
+            <header><span class="section-kicker">可信审核链路</span><h2>每一步都受系统边界约束</h2></header>
+            <div class="architecture-flow">
+              <div><span>01</span><strong>规则识别 + 语义解析</strong><small>并行发现候选风险</small></div>
+              <i>→</i>
+              <div><span>02</span><strong>确定性校验</strong><small>锁定 Finding 与原文 span</small></div>
+              <i>→</i>
+              <div><span>03</span><strong>可信监管知识</strong><small>形成 EvidenceLink</small></div>
+              <i>→</i>
+              <div><span>04</span><strong>受控解释</strong><small>机构与消费者双端输出</small></div>
+              <i>→</i>
+              <div><span>05</span><strong>证据溯源</strong><small>验证 Claim 与 Citation</small></div>
+            </div>
+          </section>
         </section>
 
         <section id="review" class="view">
-          <div class="page-intro"><span class="eyebrow">CREATE REVIEW</span><h1>新建智能审核</h1><p>选择稳定的赛事演示案例，或将文本材料提交至已有的筛查 API。</p></div>
-          <div class="mode-note"><span>◈</span><div><strong>现场演示建议：预置案例</strong><p>预置案例为明确标注的构造展示数据，不写入正式证据库；“在线审查”直接调用当前后端 API。</p></div></div>
-          <div class="case-selector" id="case-selector"></div>
-          <div class="or-separator"><span>或</span></div>
-          <div class="submission-grid">
-            <form class="material-form panel-glass" id="live-review-form">
-              <div class="form-title"><div><span class="eyebrow">LIVE API MODE</span><h2>提交文本材料</h2></div><span class="api-dot">API</span></div>
-              <label>材料标题<input id="material-title" maxlength="300" value="现场演示材料" /></label>
-              <div class="split-fields"><label>材料类型<select id="material-type"><option value="advertisement">宣传广告</option><option value="sales_script">销售话术</option><option value="social_media">社交媒体</option><option value="product_introduction">产品介绍</option><option value="other">其他文本</option></select></label><label class="file-label">导入 TXT<input id="file-input" type="file" accept="text/plain,.txt" /><span>选择文本文件</span></label></div>
-              <label>待审材料<textarea id="material-text" rows="8" placeholder="粘贴保险营销文本；将直接提交至 /api/v1/screenings。"></textarea></label>
-              <div class="form-footer"><small>仅支持文本材料；不上传或处理图片、OCR、Embedding。</small><button class="primary-button" type="submit">启动在线审核 <span>→</span></button></div>
+          <header class="page-heading">
+            <span class="section-kicker">新建审核</span>
+            <h1>新建智能审核</h1>
+            <p>输入保险销售话术或宣传材料，系统将从规则与语义两个通道识别风险信号。</p>
+          </header>
+
+          <div class="review-layout">
+            <form class="material-form surface-card" id="live-review-form">
+              <header class="card-heading">
+                <div><h2>原始材料</h2><p>提交内容仅用于当前审核流程。</p></div>
+                <span class="real-flow-badge">真实 API</span>
+              </header>
+
+              <div class="field-row">
+                <label class="field">材料标题
+                  <input id="material-title" maxlength="300" value="现场审核材料" autocomplete="off" />
+                </label>
+                <label class="field">材料类型
+                  <select id="material-type">
+                    <option value="advertisement">宣传广告</option>
+                    <option value="sales_script">销售话术</option>
+                    <option value="social_media">社交媒体</option>
+                    <option value="product_introduction">产品介绍</option>
+                    <option value="other">其他文本</option>
+                  </select>
+                </label>
+              </div>
+
+              <label class="field material-field">待审材料
+                <textarea id="material-text" placeholder="请输入需要审核的保险营销话术、宣传文本或销售材料……"></textarea>
+                <span class="text-counter"><b id="text-count">0</b> / 100000</span>
+              </label>
+
+              <div class="form-tools">
+                <label class="file-picker">
+                  <input id="file-input" type="file" accept="text/plain,.txt" />
+                  <span aria-hidden="true">⇧</span>导入 TXT 文本
+                </label>
+                <span id="provider-status" class="provider-status">正在读取解释 Provider…</span>
+              </div>
+
+              <button class="primary-button submit-button" type="submit">
+                <span class="button-shield" aria-hidden="true">✓</span>开始智能审核
+              </button>
             </form>
-            <aside class="process-preview panel-glass"><span class="eyebrow">REVIEW CHAIN</span><h2>全流程可验证</h2><ol><li><b>01</b><span>文本规范化与材料指纹</span></li><li><b>02</b><span>确定性风险信号筛查</span></li><li><b>03</b><span>可信监管知识检索</span></li><li><b>04</b><span>受控 AI 解释编排</span></li><li><b>05</b><span>Citation 与证据边界校验</span></li><li><b>06</b><span>机构 / 消费者双端结果</span></li></ol></aside>
+
+            <aside class="review-aside surface-card">
+              <header class="card-heading"><div><h2>典型演示场景</h2><p>点击后载入文本并立即开始真实审核。</p></div></header>
+              <div class="review-scenarios" id="review-scenarios"></div>
+              <div class="boundary-tip">
+                <strong>审核边界</strong>
+                <p>模型只产生候选 Claim；最终 Finding、severity、原文 span 与监管证据均由系统控制。</p>
+              </div>
+            </aside>
           </div>
         </section>
 
-        <section id="processing" class="view processing-view">
-          <div class="processing-card panel-glass"><div class="processing-pulse"><span></span><span></span><span></span></div><span class="eyebrow">REVIEW IN PROGRESS</span><h1 id="processing-title">正在建立审查链路</h1><p id="processing-copy">正在准备材料指纹与确定性规则上下文。</p><div class="stage-list" id="stage-list"></div><div class="process-progress"><i id="process-progress-bar"></i></div><small id="processing-hint">每一步均对应现有系统的受控处理边界。</small></div>
+        <section id="processing" class="view processing-view" aria-live="polite">
+          <article class="processing-card surface-card">
+            <span class="loading-spinner" aria-hidden="true"></span>
+            <span class="section-kicker">审核处理中</span>
+            <h1 id="processing-title">正在进行风险识别…</h1>
+            <p id="processing-copy">系统正在通过规则与语义两个通道形成候选风险，并执行确定性校验。</p>
+            <div class="processing-note"><span>✓</span>仅展示真实请求状态，不估算或伪造处理进度。</div>
+          </article>
         </section>
 
         <section id="result" class="view">
-          <div class="result-topline"><button class="back-button" data-view-target="dashboard">← 返回工作台</button><span id="result-mode" class="demo-badge"></span></div>
+          <div class="result-topbar">
+            <button class="back-button" data-view-target="dashboard">← 返回工作台</button>
+            <span id="result-mode" class="result-mode"></span>
+          </div>
           <div id="result-content"></div>
-        </section>
-
-        <section id="evaluation" class="view">
-          <div class="page-intro"><span class="eyebrow">EVALUATION CENTER</span><h1>系统验证中心</h1><p>业务识别性能、公开案例外部验证与受控 RAG 安全门禁相互独立展示。</p></div>
-          <div class="evaluation-note"><b>评测边界</b><span>Precision / Recall / F1 仅评估确定性筛查的 rule_id；生成安全门禁不等同于真实模型总体安全率。</span></div>
-          <div id="evaluation-center" class="evaluation-grid"><div class="evaluation-loading">正在读取评测状态…</div></div>
         </section>
       </section>
     </main>
-    <div id="toast" class="toast" role="status"></div>
-    <script src="/static/app.js"></script>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="/static/app.js?v=final-frontend-20260809"></script>
   </body>
 </html>
