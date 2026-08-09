@@ -175,18 +175,7 @@ class DeterministicComplianceRuleEngine:
         rule: MarketingRiskRule,
     ) -> bool:
         raw_start, raw_end = normalized.raw_span(start, end)
-        clause_start, clause_end = _local_clause_span(raw_text, raw_start, raw_end, rule)
-        clause_raw = raw_text[clause_start:clause_end]
-        clause = normalize_marketing_text(clause_raw).text
-        relative_start = len(normalize_marketing_text(raw_text[clause_start:raw_start]).text)
-        relative_end = relative_start + len(
-            normalize_marketing_text(raw_text[raw_start:raw_end]).text
-        )
-        rule_exception = any(
-            _pattern_is_local(pattern, clause, relative_start, relative_end, 40)
-            for pattern in rule.exception_patterns
-        )
-        return rule_exception or _claim_is_negated(clause, relative_start, relative_end, rule)
+        return claim_is_excepted_at_raw_span(raw_text, raw_start, raw_end, rule)
 
     @staticmethod
     def _required_context_present(
@@ -230,6 +219,27 @@ def _merge_overlaps(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
         else:
             merged.append((start, end))
     return merged
+
+
+def claim_is_excepted_at_raw_span(
+    raw_text: str,
+    raw_start: int,
+    raw_end: int,
+    rule: MarketingRiskRule,
+) -> bool:
+    """Apply the authoritative local exception/negation gate to a system-owned raw span."""
+    if raw_start < 0 or raw_end <= raw_start or raw_end > len(raw_text):
+        raise ScreeningError("screening_offset_mapping_failed")
+    clause_start, clause_end = _local_clause_span(raw_text, raw_start, raw_end, rule)
+    clause_raw = raw_text[clause_start:clause_end]
+    clause = normalize_marketing_text(clause_raw).text
+    relative_start = len(normalize_marketing_text(raw_text[clause_start:raw_start]).text)
+    relative_end = relative_start + len(normalize_marketing_text(raw_text[raw_start:raw_end]).text)
+    rule_exception = any(
+        _pattern_is_local(pattern, clause, relative_start, relative_end, 40)
+        for pattern in rule.exception_patterns
+    )
+    return rule_exception or _claim_is_negated(clause, relative_start, relative_end, rule)
 
 
 def _local_clause_span(

@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 from app.core.exceptions import ScreeningError
 from app.models import MarketingMaterial, MaterialSegment, RiskFinding, ScreeningRun
 from app.models.enums import (
@@ -25,6 +25,7 @@ from app.services.screening.normalization import NORMALIZATION_VERSION, normaliz
 from app.services.screening.reports import ScreeningReportService
 from app.services.screening.rules import MarketingRuleSet, load_ruleset
 from app.services.screening.segmenter import SEGMENTER_VERSION, segment_marketing_text
+from app.services.screening.semantic_parser import SemanticClaimParser
 
 MAX_RAW_TEXT_LENGTH = 100_000
 MAX_TITLE_LENGTH = 300
@@ -35,11 +36,17 @@ class DeterministicScreeningService:
         self,
         ruleset: MarketingRuleSet | None = None,
         settings: Settings | None = None,
+        semantic_parser: SemanticClaimParser | None = None,
     ) -> None:
         self.ruleset = ruleset or load_ruleset()
+        self.settings = settings or get_settings()
         self.rule_by_id = {rule.rule_id: rule for rule in self.ruleset.rules}
-        self.evidence = FindingEvidenceAssembler(settings)
+        self.evidence = FindingEvidenceAssembler(self.settings)
         self.reports = ScreeningReportService()
+        self.semantic_parser = semantic_parser or SemanticClaimParser(
+            ruleset=self.ruleset,
+            settings=self.settings,
+        )
 
     def run(
         self,
@@ -137,10 +144,25 @@ class DeterministicScreeningService:
 
         try:
             with session.begin_nested():
-                finding_candidates = DeterministicComplianceRuleEngine(self.ruleset).run(
+                deterministic_candidates = DeterministicComplianceRuleEngine(self.ruleset).run(
                     raw_text=raw_text,
                     material_sha256=input_sha,
                     segments=candidates,
+                )
+                semantic_outcome = self.semantic_parser.supplement(
+                    raw_text=raw_text,
+                    material_sha256=input_sha,
+                    segments=candidates,
+                    deterministic=deterministic_candidates,
+                )
+                finding_candidates = sorted(
+                    [*deterministic_candidates, *semantic_outcome.candidates],
+                    key=lambda value: (
+                        value.raw_start_offset,
+                        value.raw_end_offset,
+                        value.rule_id,
+                        value.finding_sha256,
+                    ),
                 )
                 segment_by_ordinal = {segment.ordinal: segment for segment in segments}
                 findings: list[RiskFinding] = []
@@ -217,6 +239,7 @@ class DeterministicScreeningService:
                     "candidates_passed": candidates_passed,
                     "candidates_rejected": candidates_rejected,
                     "links_persisted": links_persisted,
+                    "semantic_parser": semantic_outcome.diagnostics,
                 }
                 run.evidence_evaluation_summary_json = evaluation_summary
                 run.run_payload_sha256 = _sha(

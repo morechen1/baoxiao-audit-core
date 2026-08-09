@@ -14,6 +14,7 @@ export DATA_DIR="${DATA_DIR:-$ROOT_DIR/.final-demo-data}"
 export BAOXIAO_FINAL_RUNTIME=1
 export FINAL_DATABASE_NAME
 export SEMANTIC_SCREENING_ENABLED=false
+export SEMANTIC_PARSER_ENABLED="${SEMANTIC_PARSER_ENABLED:-false}"
 
 fail() {
   echo "[final-demo] $*" >&2
@@ -51,7 +52,7 @@ elif [[ "$document_count" != "15" ]]; then
 fi
 
 echo "[final-demo] Verifying 73-chunk runtime and three deterministic cases..."
-"$PYTHON" scripts/final_demo_smoke.py --skip-explanations
+SEMANTIC_PARSER_ENABLED=false "$PYTHON" scripts/final_demo_smoke.py --skip-explanations
 
 if lsof -nP -iTCP:"$FINAL_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
   fail "Port $FINAL_PORT is already in use."

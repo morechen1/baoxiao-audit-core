@@ -32,6 +32,7 @@ if [[ "$DEMO_DATABASE_NAME" == "baoxiao_contest_final" ]]; then
   export FINAL_DATABASE_URL="$DEMO_DATABASE_URL"
   export FINAL_DEMO_PORT="$DEMO_PORT"
   export SEMANTIC_SCREENING_ENABLED=false
+  export SEMANTIC_PARSER_ENABLED="${SEMANTIC_PARSER_ENABLED:-false}"
   exec "$ROOT_DIR/scripts/start_final_demo.sh"
 fi
 
