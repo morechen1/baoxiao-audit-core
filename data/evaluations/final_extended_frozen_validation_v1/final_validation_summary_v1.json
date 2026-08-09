@@ -1,0 +1,484 @@
+{
+  "dataset": {
+    "name": "FINAL EXTENDED FROZEN VALIDATION v1",
+    "sha256": "fb67cb12f5e44f5c55d74794856a4beb0616cd74e3d5bf656da6013e6b3736ed",
+    "cases": 156,
+    "single_positive": 96,
+    "multi_positive": 24,
+    "negative": 36,
+    "positive_label_assignments": 144,
+    "label_status": "AI_ASSISTED_FROZEN_VALIDATION"
+  },
+  "system_freeze_head": "1176d10e1fd62b7778324157e585b1f22b3cb035",
+  "evaluation_head": "b6bdd4c15d6795106341104400d13b7b8b2e3184",
+  "started_at": "2026-08-09T13:28:06.701655+00:00",
+  "completed_at": "2026-08-09T13:32:08.106511+00:00",
+  "evaluation_status": "VALID",
+  "provider": {
+    "model": "deepseek-v4-flash",
+    "parser_cases": 156,
+    "parser_calls": 156,
+    "retries": 0,
+    "rag_smoke_cases": 6,
+    "explanation_calls": 12,
+    "total_provider_calls": 168,
+    "budget": 180,
+    "budget_exceeded": false
+  },
+  "metrics": {
+    "tp": 128,
+    "fp": 33,
+    "fn": 16,
+    "micro_precision": 0.7950310559006211,
+    "micro_recall": 0.8888888888888888,
+    "micro_f1": 0.8393442622950819,
+    "macro_precision": 0.8346870520783565,
+    "macro_recall": 0.8846361971361971,
+    "macro_f1": 0.847280617932792,
+    "exact_set_accuracy": 0.7307692307692307,
+    "positive_case_hit_rate": 0.9,
+    "negative_false_alarm_rate": 0.16666666666666666,
+    "negative_specificity": 0.8333333333333334,
+    "per_rule": {
+      "absolute_or_superlative_claim": {
+        "support": 12,
+        "tp": 11,
+        "fp": 3,
+        "fn": 1,
+        "precision": 0.7857142857142857,
+        "recall": 0.9166666666666666,
+        "f1": 0.8461538461538461
+      },
+      "concealment_or_minimization_of_exclusions": {
+        "support": 11,
+        "tp": 10,
+        "fp": 2,
+        "fn": 1,
+        "precision": 0.8333333333333334,
+        "recall": 0.9090909090909091,
+        "f1": 0.8695652173913043
+      },
+      "extra_contractual_benefit": {
+        "support": 12,
+        "tp": 12,
+        "fp": 3,
+        "fn": 0,
+        "precision": 0.8,
+        "recall": 1.0,
+        "f1": 0.888888888888889
+      },
+      "false_promotion_or_prize": {
+        "support": 11,
+        "tp": 7,
+        "fp": 0,
+        "fn": 4,
+        "precision": 1.0,
+        "recall": 0.6363636363636364,
+        "f1": 0.7777777777777778
+      },
+      "guaranteed_return_or_principal": {
+        "support": 13,
+        "tp": 12,
+        "fp": 11,
+        "fn": 1,
+        "precision": 0.5217391304347826,
+        "recall": 0.9230769230769231,
+        "f1": 0.6666666666666667
+      },
+      "improper_comparison_or_ranking": {
+        "support": 12,
+        "tp": 12,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "misleading_interest_or_yield": {
+        "support": 11,
+        "tp": 7,
+        "fp": 3,
+        "fn": 4,
+        "precision": 0.7,
+        "recall": 0.6363636363636364,
+        "f1": 0.6666666666666666
+      },
+      "no_risk_or_no_loss": {
+        "support": 14,
+        "tp": 13,
+        "fp": 8,
+        "fn": 1,
+        "precision": 0.6190476190476191,
+        "recall": 0.9285714285714286,
+        "f1": 0.742857142857143
+      },
+      "product_nature_confusion": {
+        "support": 12,
+        "tp": 11,
+        "fp": 1,
+        "fn": 1,
+        "precision": 0.9166666666666666,
+        "recall": 0.9166666666666666,
+        "f1": 0.9166666666666666
+      },
+      "regulatory_endorsement": {
+        "support": 13,
+        "tp": 12,
+        "fp": 1,
+        "fn": 1,
+        "precision": 0.9230769230769231,
+        "recall": 0.9230769230769231,
+        "f1": 0.9230769230769231
+      },
+      "surrender_or_cash_value_misstatement": {
+        "support": 12,
+        "tp": 11,
+        "fp": 1,
+        "fn": 1,
+        "precision": 0.9166666666666666,
+        "recall": 0.9166666666666666,
+        "f1": 0.9166666666666666
+      },
+      "waiting_or_cooling_period_misstatement": {
+        "support": 11,
+        "tp": 10,
+        "fp": 0,
+        "fn": 1,
+        "precision": 1.0,
+        "recall": 0.9090909090909091,
+        "f1": 0.9523809523809523
+      }
+    }
+  },
+  "confidence_intervals_95": {
+    "micro_precision": [
+      0.732866896431376,
+      0.8571428571428571
+    ],
+    "micro_recall": [
+      0.8344094922737307,
+      0.9361702127659575
+    ],
+    "micro_f1": [
+      0.7923259418593616,
+      0.8811273832550428
+    ],
+    "exact_set_accuracy": [
+      0.6602564102564102,
+      0.8012820512820513
+    ],
+    "negative_false_alarm_rate": [
+      0.05401849217638692,
+      0.2972972972972973
+    ]
+  },
+  "strata": {
+    "explicit": {
+      "cases": 24,
+      "label_assignments": 24,
+      "precision": 0.7333333333333333,
+      "recall": 0.9166666666666666,
+      "f1": 0.8148148148148148,
+      "exact_set_accuracy": 0.6666666666666666,
+      "false_alarm_rate": null
+    },
+    "paraphrase": {
+      "cases": 24,
+      "label_assignments": 24,
+      "precision": 0.8518518518518519,
+      "recall": 0.9583333333333334,
+      "f1": 0.9019607843137256,
+      "exact_set_accuracy": 0.7916666666666666,
+      "false_alarm_rate": null
+    },
+    "colloquial": {
+      "cases": 24,
+      "label_assignments": 24,
+      "precision": 0.7142857142857143,
+      "recall": 0.8333333333333334,
+      "f1": 0.7692307692307692,
+      "exact_set_accuracy": 0.625,
+      "false_alarm_rate": null
+    },
+    "light_implicit": {
+      "cases": 24,
+      "label_assignments": 24,
+      "precision": 0.8636363636363636,
+      "recall": 0.7916666666666666,
+      "f1": 0.8260869565217391,
+      "exact_set_accuracy": 0.7083333333333334,
+      "false_alarm_rate": null
+    },
+    "multi_label": {
+      "cases": 24,
+      "label_assignments": 48,
+      "precision": 0.9361702127659575,
+      "recall": 0.9166666666666666,
+      "f1": 0.9263157894736843,
+      "exact_set_accuracy": 0.7083333333333334,
+      "false_alarm_rate": null
+    },
+    "negation": {
+      "cases": 12,
+      "label_assignments": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "exact_set_accuracy": 0.9166666666666666,
+      "false_alarm_rate": 0.08333333333333333
+    },
+    "educational": {
+      "cases": 12,
+      "label_assignments": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "exact_set_accuracy": 0.8333333333333334,
+      "false_alarm_rate": 0.16666666666666666
+    },
+    "compliant": {
+      "cases": 6,
+      "label_assignments": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "exact_set_accuracy": 1.0,
+      "false_alarm_rate": 0.0
+    },
+    "hard_negative": {
+      "cases": 6,
+      "label_assignments": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "exact_set_accuracy": 0.5,
+      "false_alarm_rate": 0.5
+    }
+  },
+  "safety": {
+    "accepted_semantic_findings": 146,
+    "accepted_exact_semantic_quotes": 146,
+    "quote_integrity_rate": 1.0,
+    "hallucinated_quote_accepted": 0,
+    "rejected_candidates": 54,
+    "reject_reasons": {
+      "confidence": 4,
+      "duplicate": 8,
+      "educational_context": 5,
+      "negation": 24,
+      "role_ambiguity": 2,
+      "semantic_ambiguity": 11
+    }
+  },
+  "rag_sample": {
+    "selection_rule": "case_id order; first valid case for explicit/paraphrase/colloquial/light_implicit/multi_label with a new taxonomy, then fill by case_id with new taxonomy",
+    "cases": 6,
+    "explanation_calls": 12,
+    "results": [
+      {
+        "case_id": "FEV-S-01-01",
+        "stratum": "explicit",
+        "screening_run_id": 34,
+        "evidence_link_success": true,
+        "audiences": {
+          "institution": {
+            "status": "completed",
+            "validation_status": "passed",
+            "citation_count": 2,
+            "citation_validation": true,
+            "claim_validation": true,
+            "uncertainty_validation": true,
+            "explanation_run_id": 15
+          },
+          "consumer": {
+            "status": "completed",
+            "validation_status": "passed",
+            "citation_count": 2,
+            "citation_validation": true,
+            "claim_validation": true,
+            "uncertainty_validation": true,
+            "explanation_run_id": 16
+          }
+        }
+      },
+      {
+        "case_id": "FEV-S-02-03",
+        "stratum": "paraphrase",
+        "screening_run_id": 39,
+        "evidence_link_success": true,
+        "audiences": {
+          "institution": {
+            "status": "completed",
+            "validation_status": "passed",
+            "citation_count": 3,
+            "citation_validation": true,
+            "claim_validation": true,
+            "uncertainty_validation": true,
+            "explanation_run_id": 17
+          },
+          "consumer": {
+            "status": "completed",
+            "validation_status": "passed",
+            "citation_count": 3,
+            "citation_validation": true,
+            "claim_validation": true,
+            "uncertainty_validation": true,
+            "explanation_run_id": 18
+          }
+        }
+      },
+      {
+        "case_id": "FEV-S-03-05",
+        "stratum": "colloquial",
+        "screening_run_id": 52,
+        "evidence_link_success": true,
+        "audiences": {
+          "institution": {
+            "status": "completed",
+            "validation_status": "passed",
+            "citation_count": 1,
+            "citation_validation": true,
+            "claim_validation": true,
+            "uncertainty_validation": true,
+            "explanation_run_id": 19
+          },
+          "consumer": {
+            "status": "completed",
+            "validation_status": "passed",
+            "citation_count": 1,
+            "citation_validation": true,
+            "claim_validation": true,
+            "uncertainty_validation": true,
+            "explanation_run_id": 20
+          }
+        }
+      },
+      {
+        "case_id": "FEV-S-04-07",
+        "stratum": "light_implicit",
+        "screening_run_id": 60,
+        "evidence_link_success": true,
+        "audiences": {
+          "institution": {
+            "status": "completed",
+            "validation_status": "passed",
+            "citation_count": 2,
+            "citation_validation": true,
+            "claim_validation": true,
+            "uncertainty_validation": true,
+            "explanation_run_id": 21
+          },
+          "consumer": {
+            "status": "completed",
+            "validation_status": "passed",
+            "citation_count": 2,
+            "citation_validation": true,
+            "claim_validation": true,
+            "uncertainty_validation": true,
+            "explanation_run_id": 22
+          }
+        }
+      },
+      {
+        "case_id": "FEV-M-001",
+        "stratum": "multi_label",
+        "screening_run_id": 128,
+        "evidence_link_success": true,
+        "audiences": {
+          "institution": {
+            "status": "completed",
+            "validation_status": "passed",
+            "citation_count": 6,
+            "citation_validation": true,
+            "claim_validation": true,
+            "uncertainty_validation": true,
+            "explanation_run_id": 23
+          },
+          "consumer": {
+            "status": "completed",
+            "validation_status": "passed",
+            "citation_count": 6,
+            "citation_validation": true,
+            "claim_validation": true,
+            "uncertainty_validation": true,
+            "explanation_run_id": 24
+          }
+        }
+      },
+      {
+        "case_id": "FEV-M-002",
+        "stratum": "multi_label",
+        "screening_run_id": 127,
+        "evidence_link_success": true,
+        "audiences": {
+          "institution": {
+            "status": "completed",
+            "validation_status": "passed",
+            "citation_count": 4,
+            "citation_validation": true,
+            "claim_validation": true,
+            "uncertainty_validation": true,
+            "explanation_run_id": 25
+          },
+          "consumer": {
+            "status": "completed",
+            "validation_status": "passed",
+            "citation_count": 4,
+            "citation_validation": true,
+            "claim_validation": true,
+            "uncertainty_validation": true,
+            "explanation_run_id": 26
+          }
+        }
+      }
+    ],
+    "evidence_link_success": 6,
+    "institution_artifact_success": 6,
+    "consumer_artifact_success": 6,
+    "citation_validation_success": 6,
+    "claim_validation_success": 6,
+    "uncertainty_validation_success": 6
+  },
+  "negative_short_circuit": {
+    "selection_rule": "first three negative cases by case_id",
+    "cases_checked": 3,
+    "no_finding": 3,
+    "rag_calls_avoided": 3,
+    "explanation_calls_avoided": 6,
+    "results": [
+      {
+        "case_id": "FEV-N-001",
+        "screening_run_id": 151,
+        "no_finding": true,
+        "evidence_links": 0,
+        "explanation_runs": 0,
+        "rag_call_avoided": true,
+        "explanation_calls_avoided": 2
+      },
+      {
+        "case_id": "FEV-N-002",
+        "screening_run_id": 154,
+        "no_finding": true,
+        "evidence_links": 0,
+        "explanation_runs": 0,
+        "rag_call_avoided": true,
+        "explanation_calls_avoided": 2
+      },
+      {
+        "case_id": "FEV-N-003",
+        "screening_run_id": 152,
+        "no_finding": true,
+        "evidence_links": 0,
+        "explanation_runs": 0,
+        "rag_call_avoided": true,
+        "explanation_calls_avoided": 2
+      }
+    ]
+  },
+  "definitions": {
+    "classification": "12-label multilabel set classification; duplicate findings collapse to one predicted rule per case",
+    "positive_case_hit": "at least one expected rule appears in predicted_rules",
+    "negative_false_alarm": "negative case has one or more predicted_rules",
+    "confidence_interval": "case bootstrap, 2000 resamples, fixed seed 20260809, percentile 95% interval"
+  }
+}

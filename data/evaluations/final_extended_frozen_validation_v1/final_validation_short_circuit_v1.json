@@ -1,0 +1,36 @@
+{
+  "selection_rule": "first three negative cases by case_id",
+  "cases_checked": 3,
+  "no_finding": 3,
+  "rag_calls_avoided": 3,
+  "explanation_calls_avoided": 6,
+  "results": [
+    {
+      "case_id": "FEV-N-001",
+      "screening_run_id": 151,
+      "no_finding": true,
+      "evidence_links": 0,
+      "explanation_runs": 0,
+      "rag_call_avoided": true,
+      "explanation_calls_avoided": 2
+    },
+    {
+      "case_id": "FEV-N-002",
+      "screening_run_id": 154,
+      "no_finding": true,
+      "evidence_links": 0,
+      "explanation_runs": 0,
+      "rag_call_avoided": true,
+      "explanation_calls_avoided": 2
+    },
+    {
+      "case_id": "FEV-N-003",
+      "screening_run_id": 152,
+      "no_finding": true,
+      "evidence_links": 0,
+      "explanation_runs": 0,
+      "rag_call_avoided": true,
+      "explanation_calls_avoided": 2
+    }
+  ]
+}

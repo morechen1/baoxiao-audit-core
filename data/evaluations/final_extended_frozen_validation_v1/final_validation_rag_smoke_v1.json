@@ -1,0 +1,169 @@
+{
+  "selection_rule": "case_id order; first valid case for explicit/paraphrase/colloquial/light_implicit/multi_label with a new taxonomy, then fill by case_id with new taxonomy",
+  "cases": 6,
+  "explanation_calls": 12,
+  "results": [
+    {
+      "case_id": "FEV-S-01-01",
+      "stratum": "explicit",
+      "screening_run_id": 34,
+      "evidence_link_success": true,
+      "audiences": {
+        "institution": {
+          "status": "completed",
+          "validation_status": "passed",
+          "citation_count": 2,
+          "citation_validation": true,
+          "claim_validation": true,
+          "uncertainty_validation": true,
+          "explanation_run_id": 15
+        },
+        "consumer": {
+          "status": "completed",
+          "validation_status": "passed",
+          "citation_count": 2,
+          "citation_validation": true,
+          "claim_validation": true,
+          "uncertainty_validation": true,
+          "explanation_run_id": 16
+        }
+      }
+    },
+    {
+      "case_id": "FEV-S-02-03",
+      "stratum": "paraphrase",
+      "screening_run_id": 39,
+      "evidence_link_success": true,
+      "audiences": {
+        "institution": {
+          "status": "completed",
+          "validation_status": "passed",
+          "citation_count": 3,
+          "citation_validation": true,
+          "claim_validation": true,
+          "uncertainty_validation": true,
+          "explanation_run_id": 17
+        },
+        "consumer": {
+          "status": "completed",
+          "validation_status": "passed",
+          "citation_count": 3,
+          "citation_validation": true,
+          "claim_validation": true,
+          "uncertainty_validation": true,
+          "explanation_run_id": 18
+        }
+      }
+    },
+    {
+      "case_id": "FEV-S-03-05",
+      "stratum": "colloquial",
+      "screening_run_id": 52,
+      "evidence_link_success": true,
+      "audiences": {
+        "institution": {
+          "status": "completed",
+          "validation_status": "passed",
+          "citation_count": 1,
+          "citation_validation": true,
+          "claim_validation": true,
+          "uncertainty_validation": true,
+          "explanation_run_id": 19
+        },
+        "consumer": {
+          "status": "completed",
+          "validation_status": "passed",
+          "citation_count": 1,
+          "citation_validation": true,
+          "claim_validation": true,
+          "uncertainty_validation": true,
+          "explanation_run_id": 20
+        }
+      }
+    },
+    {
+      "case_id": "FEV-S-04-07",
+      "stratum": "light_implicit",
+      "screening_run_id": 60,
+      "evidence_link_success": true,
+      "audiences": {
+        "institution": {
+          "status": "completed",
+          "validation_status": "passed",
+          "citation_count": 2,
+          "citation_validation": true,
+          "claim_validation": true,
+          "uncertainty_validation": true,
+          "explanation_run_id": 21
+        },
+        "consumer": {
+          "status": "completed",
+          "validation_status": "passed",
+          "citation_count": 2,
+          "citation_validation": true,
+          "claim_validation": true,
+          "uncertainty_validation": true,
+          "explanation_run_id": 22
+        }
+      }
+    },
+    {
+      "case_id": "FEV-M-001",
+      "stratum": "multi_label",
+      "screening_run_id": 128,
+      "evidence_link_success": true,
+      "audiences": {
+        "institution": {
+          "status": "completed",
+          "validation_status": "passed",
+          "citation_count": 6,
+          "citation_validation": true,
+          "claim_validation": true,
+          "uncertainty_validation": true,
+          "explanation_run_id": 23
+        },
+        "consumer": {
+          "status": "completed",
+          "validation_status": "passed",
+          "citation_count": 6,
+          "citation_validation": true,
+          "claim_validation": true,
+          "uncertainty_validation": true,
+          "explanation_run_id": 24
+        }
+      }
+    },
+    {
+      "case_id": "FEV-M-002",
+      "stratum": "multi_label",
+      "screening_run_id": 127,
+      "evidence_link_success": true,
+      "audiences": {
+        "institution": {
+          "status": "completed",
+          "validation_status": "passed",
+          "citation_count": 4,
+          "citation_validation": true,
+          "claim_validation": true,
+          "uncertainty_validation": true,
+          "explanation_run_id": 25
+        },
+        "consumer": {
+          "status": "completed",
+          "validation_status": "passed",
+          "citation_count": 4,
+          "citation_validation": true,
+          "claim_validation": true,
+          "uncertainty_validation": true,
+          "explanation_run_id": 26
+        }
+      }
+    }
+  ],
+  "evidence_link_success": 6,
+  "institution_artifact_success": 6,
+  "consumer_artifact_success": 6,
+  "citation_validation_success": 6,
+  "claim_validation_success": 6,
+  "uncertainty_validation_success": 6
+}
