@@ -1,12 +1,17 @@
-# Quality Gate
+# Final Release Quality Gate
 
-| Change type | Minimum evidence |
-|---|---|
-| Small, bounded change | Relevant focused tests |
-| Normal feature | Module tests + smoke check |
-| Core audit/trust-chain change | Relevant complete tests + necessary Sol review |
-| Milestone | Full test suite + Demo smoke + checkpoint |
+The submission is releasable only when all of the following pass:
 
-Use the smallest meaningful verification first. Do not rerun full tests merely to restate historical evidence.
+- algorithm-integrity diff against `1176d10e1fd62b7778324157e585b1f22b3cb035`;
+- frozen dataset and prediction byte identity;
+- Ruff, mypy and complete pytest suite;
+- offline 156-case metric verification;
+- release-tree and extracted-ZIP secret scans;
+- clean Python 3.12+ virtualenv dependency installation and imports;
+- no-key fail-closed application startup;
+- configured-provider High/Boundary/Low smoke within the explicitly allowed cases;
+- PostgreSQL migration, 15-source restore, 73-chunk verification and partial-state refusal;
+- frontend audience Citation binding, EvidenceLink/Citation semantics, browser console, assets and layout;
+- `RELEASE_MANIFEST.json` and `SHA256SUMS` verification.
 
-Known baseline evidence: Claude's final handoff records 666 passing tests; M0-B freshly ran 144 controlled-explanation tests plus offline 12/12 valid and 43/43 invalid acceptance. PostgreSQL formal acceptance and Docker rehearsal remain separate work, not implied by the offline result.
+Skipped environment-specific tests are reported honestly and are not altered merely to reach zero skips.

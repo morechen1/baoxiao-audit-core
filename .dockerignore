@@ -1,6 +1,9 @@
 .git
 .venv
 .env
+config/local.env
+runtime
+*.log
 __pycache__
 .pytest_cache
 .mypy_cache

@@ -78,7 +78,9 @@ SHA、上下文 SHA、安全 Provider 配置、结构化输出及稳定引用材
 异常创建 `failed` run。系统不自动重试；显式重试创建新 run，并通过 `retry_of_id` 保留
 关系。Artifact GET 只读历史快照，绝不再次调用 Provider。
 
-构造响应位于 `tests/fixtures/controlled_rag_eval_v1`，全部标记 `constructed=true`，正式
-离线验收会逐条实际调用 Provider 和验证器，而不是只统计期望值。它们不得
-进入 `SourceDocument`、`KnowledgeChunk` 或正式证据。当前尚未绑定生产模型；下一阶段
-需单独完成供应商安全审计、密钥托管、超时/限流、生产评测和前端集成。
+构造响应位于 `tests/fixtures/controlled_rag_eval_v1`，全部标记 `constructed=true`，离线验收
+会逐条实际调用 Fixture Provider 和验证器，而不是只统计期望值。它们不得进入
+`SourceDocument`、`KnowledgeChunk` 或正式证据。最终提交支持可选 OpenAI-compatible
+真实 Provider（当前配置为 DeepSeek）和前端双端 Artifact/Citation 展示；密钥只存在于
+本机未跟踪配置。该能力仍是比赛提交级受控集成，不宣称生产密钥托管、多供应商路由或
+生产可用性保障。

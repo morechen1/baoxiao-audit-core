@@ -178,9 +178,8 @@ function explanationText(artifact, findingKey, audience) {
   return { text: candidates.find((value) => typeof value === "string" && value.trim()) || "" };
 }
 
-function apiFinding(row, institutionArtifact, consumerArtifact, citations) {
-  const findingKey = row.finding_key;
-  const validatedCitations = (citations || [])
+function validatedCitationsForFinding(citations, findingKey) {
+  return (citations || [])
     .filter((item) => item.finding_key === findingKey)
     .map((item) => ({
       key: item.citation_key,
@@ -191,6 +190,15 @@ function apiFinding(row, institutionArtifact, consumerArtifact, citations) {
       locator: formatLocator(item.source_locator),
       sourceUrl: item.source_url,
     }));
+}
+
+function apiFinding(
+  row,
+  institutionArtifact,
+  consumerArtifact,
+  citationsByAudience = { institution: [], consumer: [] },
+) {
+  const findingKey = row.finding_key;
   const evidenceSnapshots = (row.evidence || []).map((item, index) => ({
     key: `EV-${String(index + 1).padStart(2, "0")}`,
     kind: "evidence",
@@ -221,7 +229,15 @@ function apiFinding(row, institutionArtifact, consumerArtifact, citations) {
     consumer: consumer.text || row.review_question,
     consumerSource: consumer.text ? "真实模型受控解释" : "基础报告文本（确定性筛查结果）",
     consumerDisplaySource: consumer.text ? "真实模型受控解释" : "基础报告文本（Finding 已确定性校验）",
-    references: validatedCitations.length ? validatedCitations : evidenceSnapshots,
+    evidenceLinks: evidenceSnapshots,
+    citations: {
+      institution: validatedCitationsForFinding(citationsByAudience.institution, findingKey),
+      consumer: validatedCitationsForFinding(citationsByAudience.consumer, findingKey),
+    },
+    artifactAvailable: {
+      institution: Boolean(institutionArtifact),
+      consumer: Boolean(consumerArtifact),
+    },
   };
 }
 
@@ -254,6 +270,30 @@ async function requestAudienceArtifacts(runId, create = createApiExplanation) {
     audiences: audienceStatus,
     status: completed === 2 ? "completed" : completed === 1 ? "partial" : "failed",
   };
+}
+
+async function requestAudienceCitations(
+  artifacts,
+  fetchCitations = (explanationRunId) => fetchJson(`/api/v1/explanations/${explanationRunId}/citations`),
+) {
+  const audiences = ["institution", "consumer"];
+  const settled = await Promise.allSettled(audiences.map((audience) => {
+    const artifact = artifacts[audience];
+    return artifact ? fetchCitations(artifact.explanation_run_id) : Promise.resolve([]);
+  }));
+  const citations = {};
+  const statuses = {};
+  settled.forEach((outcome, index) => {
+    const audience = audiences[index];
+    if (outcome.status === "fulfilled") {
+      citations[audience] = outcome.value;
+      statuses[audience] = { status: artifacts[audience] ? "completed" : "not_available" };
+    } else {
+      citations[audience] = [];
+      statuses[audience] = { status: "failed", error: outcome.reason?.message || "unknown_error" };
+    }
+  });
+  return { citations, statuses };
 }
 
 async function loadProviderStatus() {
@@ -328,13 +368,19 @@ async function runLiveReview() {
       }
     }
 
-    let citations = [];
-    const citationArtifact = institutionArtifact || consumerArtifact;
-    if (citationArtifact) {
-      citations = await fetchJson(`/api/v1/explanations/${citationArtifact.explanation_run_id}/citations`);
-    }
-    const constructedRuntime = citations.some((item) => String(item.source_url || "").includes("contest-demo.invalid"));
-    const findings = screening.findings.map((row) => apiFinding(row, institutionArtifact, consumerArtifact, citations));
+    const citationResult = await requestAudienceCitations({
+      institution: institutionArtifact,
+      consumer: consumerArtifact,
+    });
+    explanationStatus.citations = citationResult.statuses;
+    const allCitations = Object.values(citationResult.citations).flat();
+    const constructedRuntime = allCitations.some((item) => String(item.source_url || "").includes("contest-demo.invalid"));
+    const findings = screening.findings.map((row) => apiFinding(
+      row,
+      institutionArtifact,
+      consumerArtifact,
+      citationResult.citations,
+    ));
     const riskLevel = findings.some((item) => item.severity === "high")
       ? "high"
       : findings.some((item) => item.severity === "medium") ? "medium" : "low";
@@ -350,6 +396,7 @@ async function runLiveReview() {
       status: created.status,
       institutionReport,
       consumerReport,
+      evidenceSummary: institutionReport.evidence_summary || {},
       explanationStatus,
       screeningDiagnostics: screening.evidence_evaluation_summary || {},
     });
@@ -403,9 +450,17 @@ function pipelineSnapshot(result) {
     counts[finding.severity] = (counts[finding.severity] || 0) + 1;
     return counts;
   }, { high: 0, medium: 0, low: 0 });
-  const references = findings.flatMap((finding) => finding.references || []);
-  const sourceCount = new Set(references.map((item) => item.sourceTitle).filter(Boolean)).size;
-  const citationCount = references.filter((item) => item.kind === "citation").length;
+  const evidenceLinkCount = countValue(result.evidenceSummary?.link_count);
+  const sourceCount = countValue(result.evidenceSummary?.source_document_count);
+  const institutionCitationCount = findings.reduce(
+    (count, finding) => count + (finding.citations?.institution || []).length,
+    0,
+  );
+  const consumerCitationCount = findings.reduce(
+    (count, finding) => count + (finding.citations?.consumer || []).length,
+    0,
+  );
+  const citationCount = institutionCitationCount + consumerCitationCount;
   const audiences = result.explanationStatus?.audiences || {};
   const institutionDone = audiences.institution?.status === "completed";
   const consumerDone = audiences.consumer?.status === "completed";
@@ -419,9 +474,11 @@ function pipelineSnapshot(result) {
     deterministicCandidates,
     candidateTotal,
     severity,
-    references,
+    evidenceLinkCount,
     sourceCount,
     citationCount,
+    institutionCitationCount,
+    consumerCitationCount,
     institutionDone,
     consumerDone,
     anyExplanationDone,
@@ -465,7 +522,7 @@ function renderAuditPipeline() {
     {
       key: "validation", step: "03", title: "确定性校验", subtitle: "证据、语境、角色与置信度门禁",
       value: `通过 ${data.findings.length} · 拦截 ${data.rejectedCandidates}`,
-      detail: `<p class="pipeline-detail-note strong-note">所有候选需通过原文证据、上下文、角色对象、歧义及置信度等确定性校验，方可形成最终 RiskFinding。</p><div class="validation-gates"><span>原文证据校验</span><span>否定语境</span><span>教育 / 禁止语境</span><span>角色与受益对象</span><span>语义歧义</span><span>置信度门禁</span><span>重复候选融合</span></div>${rejectionDetail(data.semantic)}`,
+      detail: `<p class="pipeline-detail-note strong-note">候选风险经规则上下文及语义安全门禁等确定性机制校验后，形成最终 RiskFinding；AI 语义解析只生成候选，Finding 归属、severity 与证据均由系统控制。</p><div class="validation-gates"><span>规则上下文校验</span><span>原文证据校验</span><span>否定语境</span><span>教育 / 禁止语境</span><span>角色与受益对象</span><span>语义歧义</span><span>置信度门禁</span><span>重复候选融合</span></div>${rejectionDetail(data.semantic)}`,
     },
     {
       key: "finding", step: "04", title: "RiskFinding", subtitle: "最终风险事实",
@@ -474,11 +531,11 @@ function renderAuditPipeline() {
     },
     {
       key: "knowledge", step: "05", title: "可信监管知识", subtitle: "15 个可信来源 · 73 个 KnowledgeChunks",
-      value: hasFindings ? `${data.references.length} EvidenceLinks` : "未触发",
+      value: hasFindings ? `${data.evidenceLinkCount} EvidenceLinks` : "未触发",
       muted: !hasFindings,
       // 15/73 已于 2026-08-09 对 baoxiao_contest_final 做只读核验：15 个 approved/indexed 来源、73 个 active chunks。
       detail: hasFindings
-        ? `<div class="pipeline-detail-grid"><span><b>本次 EvidenceLinks</b><strong>${data.references.length}</strong></span><span><b>本次监管来源</b><strong>${data.sourceCount}</strong></span><span><b>可信知识资产</b><strong>15 来源 / 73 Chunks</strong></span></div>`
+        ? `<div class="pipeline-detail-grid"><span><b>本次 EvidenceLinks</b><strong>${data.evidenceLinkCount}</strong></span><span><b>本次监管来源</b><strong>${data.sourceCount}</strong></span><span><b>可信知识资产</b><strong>15 来源 / 73 Chunks</strong></span></div>`
         : '<p class="pipeline-empty-detail">未形成有效 RiskFinding，因此未触发可信监管知识检索。</p>',
     },
     {
@@ -486,7 +543,7 @@ function renderAuditPipeline() {
       value: hasFindings ? validationStatusLabel(explanationStatus, true) : "未触发",
       muted: !hasFindings,
       detail: hasFindings
-        ? `<div class="pipeline-validation-list"><span><b>机构合规视图</b><strong>${data.institutionDone ? "完成" : "未形成有效 Artifact"}</strong></span><span><b>消费者权益视图</b><strong>${data.consumerDone ? "完成" : "未形成有效 Artifact"}</strong></span><span><b>Citation Validation</b><strong>${data.citationCount > 0 ? "PASS" : "未形成有效 Citation"}</strong></span><span><b>Claim Validation</b><strong>${data.anyExplanationDone ? "PASS" : "未形成有效 Artifact"}</strong></span><span><b>Uncertainty Validation</b><strong>${data.anyExplanationDone ? "PASS" : "未形成有效 Artifact"}</strong></span></div>`
+        ? `<div class="pipeline-validation-list"><span><b>机构合规视图</b><strong>${data.institutionDone ? `完成 · ${data.institutionCitationCount} Citations` : "未形成有效 Artifact"}</strong></span><span><b>消费者权益视图</b><strong>${data.consumerDone ? `完成 · ${data.consumerCitationCount} Citations` : "未形成有效 Artifact"}</strong></span><span><b>Citation Validation</b><strong>${data.citationCount > 0 ? `${data.citationCount} 条已验证` : "未形成有效 Citation"}</strong></span><span><b>Claim Validation</b><strong>${data.anyExplanationDone ? "PASS" : "未形成有效 Artifact"}</strong></span><span><b>Uncertainty Validation</b><strong>${data.anyExplanationDone ? "PASS" : "未形成有效 Artifact"}</strong></span></div>`
         : '<p class="pipeline-empty-detail">未形成有效 RiskFinding，因此未触发受控解释与 Citation、Claim、Uncertainty 验证。</p>',
     },
   ];
@@ -508,7 +565,8 @@ function renderResult() {
     return;
   }
   const findings = result.findings || [];
-  const evidenceCount = findings.reduce((count, item) => count + item.references.length, 0);
+  const evidenceCount = countValue(result.evidenceSummary?.link_count);
+  const sourceCount = countValue(result.evidenceSummary?.source_document_count);
   $("#result-mode").textContent = result.mode;
   const lowRisk = findings.length === 0;
   $("#result-content").innerHTML = `
@@ -520,8 +578,8 @@ function renderResult() {
       <div class="overview-grid">
         <article class="overview-card"><span>风险等级</span><strong class="${riskClass(result.riskLevel)}">${riskLabel(result.riskLevel)}</strong></article>
         <article class="overview-card"><span>风险发现</span><strong>${findings.length} 项</strong></article>
-        <article class="overview-card"><span>监管证据</span><strong>${evidenceCount} 条</strong></article>
-        <article class="overview-card"><span>审核状态</span><strong class="status-value">${result.status === "completed" ? "已完成" : "已创建"}</strong></article>
+        <article class="overview-card"><span>EvidenceLinks</span><strong>${evidenceCount} 条</strong></article>
+        <article class="overview-card"><span>监管来源</span><strong>${sourceCount} 个</strong></article>
       </div>
     </section>
     <section class="audit-pipeline" id="audit-pipeline"></section>
@@ -598,7 +656,7 @@ function findingRow(item, index) {
     <span class="finding-index">${escapeHtml(item.id)}</span>
     <span><span class="finding-heading"><h3>${escapeHtml(item.title)}</h3><span class="risk-pill ${riskClass(item.severity)}">${riskLabel(item.severity)}</span></span>
     <span class="matched">“${escapeHtml(item.matchedText)}”</span>
-    <span class="finding-meta"><span>Finding 已校验</span><span>${escapeHtml(item.evidenceStatus)}</span><span>${item.references.length} 条证据</span></span></span>
+    <span class="finding-meta"><span>Finding 已校验</span><span>${escapeHtml(item.evidenceStatus)}</span><span>${item.evidenceLinks.length} EvidenceLinks</span></span></span>
   </button>`;
 }
 
@@ -641,6 +699,10 @@ function referenceCard(reference) {
   </article>`;
 }
 
+function citationsForAudience(item, audience) {
+  return item.citations?.[audience] || [];
+}
+
 function renderDetail() {
   const item = state.current?.findings[state.selectedFinding];
   const target = $("#detail-panel");
@@ -648,9 +710,15 @@ function renderDetail() {
   const institution = state.audience === "institution";
   const audienceText = institution ? item.institution : item.consumer;
   const source = institution ? item.institutionDisplaySource : item.consumerDisplaySource;
-  const references = item.references.length
-    ? `<div class="citation-list">${item.references.map(referenceCard).join("")}</div>`
-    : '<p class="no-citation">当前 Finding 未绑定可用监管证据，系统保留证据不足状态并提示人工复核。</p>';
+  const evidenceLinks = item.evidenceLinks.length
+    ? `<div class="citation-list">${item.evidenceLinks.map(referenceCard).join("")}</div>`
+    : '<p class="no-citation">当前 Finding 未绑定可用 EvidenceLink，系统保留证据不足状态并提示人工复核。</p>';
+  const citations = citationsForAudience(item, state.audience);
+  const citationCards = citations.length
+    ? `<div class="citation-list">${citations.map(referenceCard).join("")}</div>`
+    : `<p class="no-citation">${item.artifactAvailable[state.audience]
+      ? "该视图未形成持久化的 validated Citation。"
+      : "该视图未形成有效 Artifact，因此没有可展示的 Citation。"}</p>`;
   target.innerHTML = `
     <header class="detail-header">
       <div class="detail-title"><div><h2>${escapeHtml(item.title)}</h2><p>${escapeHtml(item.id)} · ${escapeHtml(item.ruleId || item.category)}</p></div><span class="risk-pill ${riskClass(item.severity)}">${riskLabel(item.severity)}</span></div>
@@ -662,7 +730,8 @@ function renderDetail() {
     <div class="detail-body">
       <section class="detail-section"><h3>风险描述</h3><div class="matched-quote">命中原文：“${escapeHtml(item.matchedText)}”</div><p>${escapeHtml(item.explanation)}</p></section>
       <section class="detail-section"><h3>受控合规解释</h3><div class="explanation-box"><span class="explanation-source">${escapeHtml(source)}</span><p>${escapeHtml(audienceText)}</p></div></section>
-      <section class="detail-section"><h3>监管 Evidence / Citation</h3>${references}</section>
+      <section class="detail-section"><h3>监管 EvidenceLinks</h3>${evidenceLinks}</section>
+      <section class="detail-section"><h3>${institution ? "机构端" : "消费者端"} validated Citations</h3>${citationCards}</section>
       <section class="detail-section"><h3>${institution ? "人工复核与整改建议" : "消费者核实建议"}</h3><div class="remediation-grid"><div><strong>${institution ? "复核问题" : "建议核实"}</strong><p>${escapeHtml(item.question)}</p></div><div><strong>${institution ? "修改方向" : "审慎提示"}</strong><p>${escapeHtml(item.remediation)}</p></div></div></section>
     </div>`;
   target.querySelectorAll("[data-audience]").forEach((button) => {

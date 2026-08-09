@@ -1,29 +1,42 @@
 # Project Context
 
-## Authoritative Baseline
+## Final Product
 
-- Repo: `/Users/morechen/项目/金科创 2/一队/自命题/自命题 2/baoxiao-audit-core`
-- Branch: `demo/contest-mvp`
-- HEAD: `22c1137dc02444767f5d19fbdd026048adb06d1f`
-- Tag: `demo-core-baseline-20260802`
-- Role: stable contest-Demo backend baseline.
+“保销智审”是保险营销材料智能合规审核系统。最终提交包含完整后端、前端、数据库迁移、
+可信知识恢复资产、Semantic Parser、受控 RAG、测试、冻结验证资产和可复现启动器。
 
-The original Codex repo at `/Users/morechen/项目/金科创 2/一队/自命题/baoxiao-audit-core` is permanent read-only history at `d48b9a5`.
+## Frozen Authorities
 
-## Product Position
+- Algorithm system freeze: `1176d10e1fd62b7778324157e585b1f22b3cb035`
+- 156-case evaluation checkpoint: `b6bdd4c15d6795106341104400d13b7b8b2e3184`
+- Presentation before release: `e1be3eb895afc20eade576177f70fc915f4792cd`
+- Final release checkpoint: recorded in `RELEASE_MANIFEST.json`.
 
-Insurance marketing compliance-review and consumer-protection Demo. The target is a complete, stable, explainable presentation—not a production commercial platform.
+## Final Chain
 
-## Existing Stable Chain
+Immutable material → deterministic rules + Semantic Parser → channel-specific deterministic safety
+gates → candidate fusion → system-owned RiskFinding → trusted regulatory retrieval → EvidenceLink →
+Controlled RAG → independent institution/consumer Artifact → Citation/Claim/Uncertainty validation.
 
-Immutable collection and parsing → deterministic validation → human review/authenticity → trusted knowledge admission and deterministic `pg_trgm` retrieval → deterministic screening and institution/consumer reports → controlled-RAG explanation of existing findings only.
+`SEMANTIC_SCREENING_ENABLED=false` permanently disables the legacy semantic-screening path. The
+current Semantic Parser only proposes candidates and cannot own Finding, severity, offsets, sources,
+EvidenceLinks, or Citations.
 
-受控的 OpenAI-compatible LLM 解释可作为初赛录制视频的正式模式；它只能解释既有 finding，
-输出仍须通过现有 Schema、Citation 和安全门禁。Fixture 保持默认测试/CI/开发/备用演示模式。
-OCR、embedding/vector retrieval、自动法律结论和生产认证仍不属于当前基线能力。
+## Trusted Runtime
 
-## Claude Baseline Delta
+- PostgreSQL 16 / `baoxiao_contest_final`
+- 15 trusted SourceDocuments
+- 73 active KnowledgeChunks: 33 regulation, 6 product, 34 penalty
+- 34 penalty records
+- RegulatoryCase chunks: 0
 
-`d48b9a5..22c1137` is part of the official Demo baseline. It closes five PR #12 safety gaps: visible evidence segments, consumer Artifact schema integrity, truncation audit metadata, per-claim uncertainty, and per-finding citation coverage. Do not reimplement or revert these closures.
+## External Provider Boundary
 
-`feat/controlled-rag-explanation-layer` adds experimental formal restore work after `22c1137`; it is not a release/Demo authority.
+The OpenAI-compatible provider is optional and fail-closed. Secrets are local-only. Model output must
+pass existing Schema, Finding, Claim, Citation, exact-quote, uncertainty and disclaimer validation.
+Fixture output remains explicitly labeled and never impersonates real AI output.
+
+## Explicit Non-goals
+
+Production authentication, OCR service, embeddings/vector search, automatic legal conclusions,
+multi-provider routing and production key management are outside this submission.

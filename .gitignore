@@ -1,4 +1,10 @@
 .env
+.env.*
+!.env.example
+config/local.env
+config/*.local
+config/*secret*
+!config/local.env.example
 .venv/
 __pycache__/
 *.py[cod]
@@ -21,6 +27,8 @@ data/review_bundles/*
 data/review_results/*
 .demo-data/
 .final-demo-data/
+runtime/
+*.log
 !data/raw/.gitkeep
 !data/parsed/.gitkeep
 !data/review_batches/.gitkeep

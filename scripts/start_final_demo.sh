@@ -7,7 +7,9 @@ cd "$ROOT_DIR"
 PYTHON="$ROOT_DIR/.venv/bin/python"
 FINAL_PORT="${FINAL_DEMO_PORT:-8000}"
 FINAL_DATABASE_NAME="${FINAL_DATABASE_NAME:-baoxiao_contest_final}"
-FINAL_DATABASE_URL="${FINAL_DATABASE_URL:-postgresql+psycopg://${USER}@localhost:5432/${FINAL_DATABASE_NAME}}"
+FINAL_DATABASE_HOST="${FINAL_DATABASE_HOST:-127.0.0.1}"
+FINAL_DATABASE_PORT="${FINAL_DATABASE_PORT:-5432}"
+FINAL_DATABASE_URL="${FINAL_DATABASE_URL:-postgresql+psycopg://${USER}@${FINAL_DATABASE_HOST}:${FINAL_DATABASE_PORT}/${FINAL_DATABASE_NAME}}"
 
 export DATABASE_URL="$FINAL_DATABASE_URL"
 export DATA_DIR="${DATA_DIR:-$ROOT_DIR/.final-demo-data}"
@@ -30,18 +32,19 @@ esac
 [[ -x "$PYTHON" ]] || fail "Missing .venv; run make install first."
 command -v psql >/dev/null || fail "PostgreSQL client psql is required."
 command -v pg_isready >/dev/null || fail "PostgreSQL pg_isready is required."
-pg_isready -h 127.0.0.1 -p 5432 -q || fail "PostgreSQL is not ready on 127.0.0.1:5432."
+pg_isready -h "$FINAL_DATABASE_HOST" -p "$FINAL_DATABASE_PORT" -q \
+  || fail "PostgreSQL is not ready on ${FINAL_DATABASE_HOST}:${FINAL_DATABASE_PORT}."
 
-if ! psql -h 127.0.0.1 -d postgres -Atqc \
+if ! psql -h "$FINAL_DATABASE_HOST" -p "$FINAL_DATABASE_PORT" -d postgres -Atqc \
   "SELECT 1 FROM pg_database WHERE datname = '$FINAL_DATABASE_NAME'" | grep -qx "1"; then
   echo "[final-demo] Creating $FINAL_DATABASE_NAME..."
-  createdb -h 127.0.0.1 "$FINAL_DATABASE_NAME"
+  createdb -h "$FINAL_DATABASE_HOST" -p "$FINAL_DATABASE_PORT" "$FINAL_DATABASE_NAME"
 fi
 
 echo "[final-demo] Applying migrations..."
 "$PYTHON" -m alembic upgrade head
 
-document_count="$(psql -h 127.0.0.1 -d "$FINAL_DATABASE_NAME" -Atqc 'SELECT count(*) FROM source_documents')"
+document_count="$(psql -h "$FINAL_DATABASE_HOST" -p "$FINAL_DATABASE_PORT" -d "$FINAL_DATABASE_NAME" -Atqc 'SELECT count(*) FROM source_documents')"
 if [[ "$document_count" == "0" ]]; then
   echo "[final-demo] Restoring the reviewed 15-source trusted corpus..."
   "$PYTHON" scripts/rematerialize_m7_trusted_knowledge.py \
