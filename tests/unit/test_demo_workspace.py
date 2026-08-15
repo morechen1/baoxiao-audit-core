@@ -1,5 +1,11 @@
+import hashlib
+import os
 import shutil
+import socket
 import subprocess
+import sys
+import time
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -157,3 +163,194 @@ assert.equal(snapshot.consumerCitationCount, 1);
         text=True,
     )
     assert completed.returncode == 0, completed.stderr
+
+
+def test_step6_status_contract_distinguishes_completed_skipped_and_unavailable() -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is required for the Step 6 status contract test")
+    script_path = Path(__file__).parents[2] / "app" / "web" / "app.js"
+    probe = r"""
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const vm = require("node:vm");
+(async () => {
+let source = fs.readFileSync(process.argv[1], "utf8");
+const bootstrap = "renderDashboard(); renderCaseSelector(); bindEvents(); "
+  + "loadProviderStatus(); loadEvaluationCenter();";
+source = source.replace(bootstrap, "");
+source += "\nglobalThis.__step6 = { validationStatusLabel, audienceStatusLabel, "
+  + "explanationFailureState, requestAudienceArtifacts };";
+const sandbox = { console, Promise, Object, String, Array, Error, Set, globalThis: null };
+sandbox.globalThis = sandbox;
+vm.runInNewContext(source, sandbox);
+const {
+  validationStatusLabel, audienceStatusLabel, explanationFailureState,
+  requestAudienceArtifacts,
+} = sandbox.__step6;
+
+assert.equal(validationStatusLabel("completed", true), "完成");
+assert.equal(validationStatusLabel("completed", true), "完成");
+assert.equal(validationStatusLabel("not_required", false), "无需执行");
+assert.equal(validationStatusLabel("unavailable", true), "增强暂不可用");
+assert.equal(validationStatusLabel("not_requested_long_document", true), "已跳过（长文档）");
+assert.equal(validationStatusLabel("not_requested", true), "未请求增强");
+assert.equal(validationStatusLabel("failed", true), "验证失败关闭");
+assert.equal(audienceStatusLabel("completed"), "完成");
+assert.equal(audienceStatusLabel("unavailable"), "增强暂不可用");
+
+const unavailable = new Error("provider timeout");
+unavailable.code = "explanation_provider_timeout";
+assert.equal(explanationFailureState(unavailable), "unavailable");
+const invalid = new Error("invalid output");
+invalid.code = "explanation_output_invalid_schema";
+assert.equal(explanationFailureState(invalid), "failed");
+
+const outcomes = await requestAudienceArtifacts(1, async (_runId, audience) => {
+  const error = new Error(`${audience} unavailable`);
+  error.code = "explanation_provider_not_configured";
+  throw error;
+});
+assert.equal(outcomes.status, "unavailable");
+assert.equal(outcomes.audiences.institution.status, "unavailable");
+assert.equal(outcomes.audiences.consumer.status, "unavailable");
+assert(source.includes("resetLiveReviewState();"));
+assert(source.includes("if (state.provider.ready)"));
+})().catch((error) => { console.error(error); process.exit(1); });
+"""
+    completed = subprocess.run(
+        [node, "-e", probe, str(script_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_step6_launcher_reloads_changed_config_without_exposing_credentials() -> None:
+    root = Path(__file__).parents[2]
+    launcher = (root / "一键启动.command").read_text(encoding="utf-8")
+    stopper = (root / "停止程序.command").read_text(encoding="utf-8")
+
+    assert 'CONFIG_SHA_FILE="$ROOT_DIR/runtime/config.sha256"' in launcher
+    assert 'CURRENT_CONFIG_SHA="$(shasum -a 256 "$CONFIG_FILE"' in launcher
+    assert 'if [[ "$RUNNING_CONFIG_SHA" == "$CURRENT_CONFIG_SHA" ]]' in launcher
+    assert 'stop_owned_project "$RUNNING_PID"' in launcher
+    assert "! kill -0 \"$PROJECT_PID\"" in launcher
+    assert 'lsof -a -p "$candidate_pid" -d cwd' in launcher
+    assert 'lsof -a -p "$PROJECT_PID" -d cwd' in stopper
+    assert "LLM_API_KEY" not in launcher
+    assert "Authorization" not in launcher
+
+
+def test_step6_launcher_restarts_owned_server_after_local_config_change(
+    tmp_path: Path,
+) -> None:
+    required = ("bash", "curl", "lsof", "shasum")
+    if any(shutil.which(command) is None for command in required):
+        pytest.skip("launcher integration test requires macOS release commands")
+    root = Path(__file__).parents[2]
+    fixture = tmp_path / "release"
+    (fixture / "config").mkdir(parents=True)
+    (fixture / "runtime/logs").mkdir(parents=True)
+    (fixture / "scripts").mkdir(parents=True)
+    shutil.copy2(root / "一键启动.command", fixture / "一键启动.command")
+    shutil.copy2(root / "停止程序.command", fixture / "停止程序.command")
+
+    with socket.socket() as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        port = reservation.getsockname()[1]
+    config = fixture / "config/local.env"
+    config.write_text(f"FINAL_DEMO_PORT={port}\nLLM_API_KEY=configured-later\n", encoding="utf-8")
+    server = fixture / "server.py"
+    server.write_text(
+        """from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import sys
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200 if self.path == '/health' else 404)
+        self.end_headers()
+        if self.path == '/health': self.wfile.write(b'{\"status\":\"ok\"}')
+    def log_message(self, *_args): pass
+ThreadingHTTPServer(('127.0.0.1', int(sys.argv[1])), Handler).serve_forever()
+""",
+        encoding="utf-8",
+    )
+    starter = fixture / "scripts/start_project.sh"
+    starter.write_text(
+        f'#!/bin/bash\nexec "{sys.executable}" "{server}" "${{FINAL_DEMO_PORT}}"\n',
+        encoding="utf-8",
+    )
+    starter.chmod(0o755)
+    fake_bin = fixture / "fake-bin"
+    fake_bin.mkdir()
+    fake_open = fake_bin / "open"
+    fake_open.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_open.chmod(0o755)
+
+    old_server = subprocess.Popen([sys.executable, str(server), str(port)], cwd=fixture)
+    launcher: subprocess.Popen[str] | None = None
+    try:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=0.2)
+                break
+            except OSError:
+                time.sleep(0.05)
+        else:
+            pytest.fail("fixture server did not start")
+        (fixture / "runtime/config.sha256").write_text("stale\n", encoding="utf-8")
+        environment = {**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"}
+        launcher = subprocess.Popen(
+            ["bash", str(fixture / "一键启动.command")],
+            cwd=fixture,
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        deadline = time.monotonic() + 15
+        new_pid = 0
+        expected_config_sha = hashlib.sha256(config.read_bytes()).hexdigest()
+        while time.monotonic() < deadline:
+            pid_file = fixture / "runtime/project.pid"
+            if pid_file.is_file():
+                new_pid = int(pid_file.read_text().strip())
+                if new_pid != old_server.pid:
+                    try:
+                        urllib.request.urlopen(
+                            f"http://127.0.0.1:{port}/health", timeout=0.2
+                        )
+                        config_sha_file = fixture / "runtime/config.sha256"
+                        if (
+                            config_sha_file.is_file()
+                            and config_sha_file.read_text().strip() == expected_config_sha
+                        ):
+                            break
+                    except OSError:
+                        pass
+            time.sleep(0.1)
+        else:
+            pytest.fail("launcher did not restart the owned server")
+        assert old_server.poll() is not None
+        assert new_pid > 0
+        assert (fixture / "runtime/config.sha256").read_text().strip() == expected_config_sha
+        stopped = subprocess.run(
+            ["bash", str(fixture / "停止程序.command")],
+            cwd=fixture,
+            env=environment,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert stopped.returncode == 0, stopped.stderr
+        launcher.wait(timeout=10)
+    finally:
+        if old_server.poll() is None:
+            old_server.terminate()
+            old_server.wait(timeout=5)
+        if launcher is not None and launcher.poll() is None:
+            launcher.terminate()
+            launcher.wait(timeout=5)

@@ -98,7 +98,20 @@ const apiErrorLabels = {
   upload_document_empty: "材料中没有可供审核的文本。",
   upload_text_encoding_invalid: "文本不是有效 UTF-8 编码，未执行审核。",
   long_document_chunk_limit_exceeded: "文档超过当前安全处理上限，请拆分后重新审核。",
+  explanation_provider_not_configured: "受控解释 Provider 尚未加载；修改本机配置后请重新双击一键启动。",
+  explanation_provider_timeout: "受控解释 Provider 响应超时。",
+  explanation_provider_network_error: "受控解释 Provider 网络不可用。",
+  explanation_provider_rate_limited: "受控解释 Provider 当前限流。",
+  explanation_provider_http_error: "受控解释 Provider 返回服务错误。",
 };
+
+const explanationUnavailableCodes = new Set([
+  "explanation_provider_not_configured",
+  "explanation_provider_timeout",
+  "explanation_provider_network_error",
+  "explanation_provider_rate_limited",
+  "explanation_provider_http_error",
+]);
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -171,10 +184,25 @@ function fetchJson(path, options = {}) {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       const code = payload?.error?.code || payload?.detail || `HTTP ${response.status}`;
-      throw new Error(apiErrorLabels[code] || code);
+      const error = new Error(apiErrorLabels[code] || code);
+      error.code = code;
+      error.httpStatus = response.status;
+      throw error;
     }
     return payload;
   });
+}
+
+function explanationFailureState(error) {
+  return explanationUnavailableCodes.has(error?.code) ? "unavailable" : "failed";
+}
+
+function unavailableAudienceStatus(errorCode = "explanation_provider_not_configured") {
+  return {
+    status: "unavailable",
+    error: apiErrorLabels[errorCode] || errorCode,
+    errorCode,
+  };
 }
 
 function formatLocator(locator) {
@@ -281,14 +309,24 @@ async function requestAudienceArtifacts(runId, create = createApiExplanation) {
       artifacts[audience] = outcome.value;
       audienceStatus[audience] = { status: "completed" };
     } else {
-      audienceStatus[audience] = { status: "failed", error: outcome.reason?.message || "unknown_error" };
+      audienceStatus[audience] = {
+        status: explanationFailureState(outcome.reason),
+        error: outcome.reason?.message || "unknown_error",
+        errorCode: outcome.reason?.code || "unknown_error",
+      };
     }
   });
   const completed = Object.values(audienceStatus).filter((item) => item.status === "completed").length;
   return {
     artifacts,
     audiences: audienceStatus,
-    status: completed === 2 ? "completed" : completed === 1 ? "partial" : "failed",
+    status: completed === 2
+      ? "completed"
+      : completed === 1
+        ? "partial"
+        : Object.values(audienceStatus).every((item) => item.status === "unavailable")
+          ? "unavailable"
+          : "failed",
   };
 }
 
@@ -350,6 +388,7 @@ async function runLiveReview() {
   }
   const submitButton = $("#live-review-form button[type='submit']");
   submitButton.disabled = true;
+  resetLiveReviewState();
   await loadProviderStatus();
   showView("processing");
   $("#processing-title").textContent = "正在进行风险识别…";
@@ -393,17 +432,29 @@ async function runLiveReview() {
     );
     const shortText = Boolean(created.runtime?.short_text_direct_v1);
     if (screening.findings.length && hasGroundedFinding && shortText) {
-      $("#processing-copy").textContent = "Finding 与监管 Evidence 已锁定，正在生成并验证机构端与消费者端受控解释。";
-      const audienceResult = await requestAudienceArtifacts(created.screening_run_id);
-      institutionArtifact = audienceResult.artifacts.institution || null;
-      consumerArtifact = audienceResult.artifacts.consumer || null;
-      explanationStatus = { ...state.provider, ...audienceResult };
+      if (state.provider.ready) {
+        $("#processing-copy").textContent = "Finding 与监管 Evidence 已锁定，正在生成并验证机构端与消费者端受控解释。";
+        const audienceResult = await requestAudienceArtifacts(created.screening_run_id);
+        institutionArtifact = audienceResult.artifacts.institution || null;
+        consumerArtifact = audienceResult.artifacts.consumer || null;
+        explanationStatus = { ...state.provider, ...audienceResult };
+      } else {
+        const unavailable = unavailableAudienceStatus();
+        explanationStatus = {
+          ...state.provider,
+          status: "unavailable",
+          audiences: { institution: unavailable, consumer: { ...unavailable } },
+        };
+      }
       if (explanationStatus.status !== "completed") {
         const detail = Object.entries(explanationStatus.audiences)
-          .filter(([, item]) => item.status === "failed")
+          .filter(([, item]) => item.status !== "completed")
           .map(([audience, item]) => `${audience === "institution" ? "机构端" : "消费者端"}：${item.error}`)
           .join("；");
-        showToast(`筛查已完成；受控解释${explanationStatus.status === "partial" ? "部分成功" : "不可用"}：${detail}`, true);
+        const statusCopy = explanationStatus.status === "partial"
+          ? "部分成功"
+          : explanationStatus.status === "unavailable" ? "增强暂不可用" : "验证失败关闭";
+        showToast(`筛查已完成；受控解释${statusCopy}：${detail}`, true);
       }
     } else if (screening.findings.length && !shortText) {
       explanationStatus = { ...state.provider, status: "not_requested_long_document", audiences: {} };
@@ -458,6 +509,15 @@ async function runLiveReview() {
   }
 }
 
+function resetLiveReviewState() {
+  state.current = null;
+  state.audience = "institution";
+  state.selectedFinding = 0;
+  state.expandedPipelineStage = null;
+  $("#result-nav").classList.add("is-hidden");
+  $("#result-content").innerHTML = "";
+}
+
 function setCurrentResult(result) {
   state.current = result;
   state.audience = "institution";
@@ -479,11 +539,24 @@ function countValue(value) {
 }
 
 function validationStatusLabel(status, hasFindings) {
-  if (!hasFindings) return "未触发";
+  if (!hasFindings || status === "not_required") return "无需执行";
   if (status === "completed") return "完成";
   if (status === "partial") return "部分完成";
-  if (status === "failed") return "失败关闭";
-  return "未形成有效 Artifact";
+  if (status === "unavailable") return "增强暂不可用";
+  if (status === "failed") return "验证失败关闭";
+  if (status === "not_requested_long_document") return "已跳过（长文档）";
+  if (status === "not_required_without_evidence") return "无需执行（证据不足）";
+  if (status === "not_requested") return "未请求增强";
+  if (status === "pending") return "处理中";
+  return "状态待确认";
+}
+
+function audienceStatusLabel(status) {
+  if (status === "completed") return "完成";
+  if (status === "unavailable") return "增强暂不可用";
+  if (status === "failed") return "验证失败关闭";
+  if (status === "not_available") return "未形成有效 Artifact";
+  return "未执行";
 }
 
 function pipelineSnapshot(result) {
@@ -533,6 +606,8 @@ function pipelineSnapshot(result) {
     institutionDone,
     consumerDone,
     anyExplanationDone,
+    institutionStatus: audiences.institution?.status,
+    consumerStatus: audiences.consumer?.status,
   };
 }
 
@@ -591,10 +666,10 @@ function renderAuditPipeline() {
     },
     {
       key: "explanation", step: "06", title: "受控解释与验证", subtitle: "双端解释 · Claim · Citation",
-      value: hasFindings ? validationStatusLabel(explanationStatus, true) : "未触发",
-      muted: !hasFindings,
+      value: validationStatusLabel(explanationStatus, hasFindings),
+      muted: !hasFindings || ["unavailable", "not_requested_long_document", "not_required_without_evidence", "not_requested"].includes(explanationStatus),
       detail: hasFindings
-        ? `<div class="pipeline-validation-list"><span><b>机构合规视图</b><strong>${data.institutionDone ? `完成 · ${data.institutionCitationCount} Citations` : "未形成有效 Artifact"}</strong></span><span><b>消费者权益视图</b><strong>${data.consumerDone ? `完成 · ${data.consumerCitationCount} Citations` : "未形成有效 Artifact"}</strong></span><span><b>Citation Validation</b><strong>${data.citationCount > 0 ? `${data.citationCount} 条已验证` : "未形成有效 Citation"}</strong></span><span><b>Claim Validation</b><strong>${data.anyExplanationDone ? "PASS" : "未形成有效 Artifact"}</strong></span><span><b>Uncertainty Validation</b><strong>${data.anyExplanationDone ? "PASS" : "未形成有效 Artifact"}</strong></span></div>`
+        ? `<div class="pipeline-validation-list"><span><b>机构合规视图</b><strong>${data.institutionDone ? `完成 · ${data.institutionCitationCount} Citations` : audienceStatusLabel(data.institutionStatus)}</strong></span><span><b>消费者权益视图</b><strong>${data.consumerDone ? `完成 · ${data.consumerCitationCount} Citations` : audienceStatusLabel(data.consumerStatus)}</strong></span><span><b>Citation Validation</b><strong>${data.anyExplanationDone ? `${data.citationCount} 条已验证` : validationStatusLabel(explanationStatus, true)}</strong></span><span><b>Claim Validation</b><strong>${data.anyExplanationDone ? "PASS" : validationStatusLabel(explanationStatus, true)}</strong></span><span><b>Uncertainty Validation</b><strong>${data.anyExplanationDone ? "PASS" : validationStatusLabel(explanationStatus, true)}</strong></span></div>`
         : '<p class="pipeline-empty-detail">未形成有效 RiskFinding，因此未触发受控解释与 Citation、Claim、Uncertainty 验证。</p>',
     },
   ];
