@@ -134,3 +134,22 @@ def test_v2_development_dataset_is_dev_only_and_balanced() -> None:
     assert all(row["split"] == "DEV_ONLY" for row in rows)
     assert sum(bool(row["expected_rules"]) for row in rows) == 72
     assert sum(not row["expected_rules"] for row in rows) == 48
+
+
+def test_v2_unseen_holdout_is_frozen_after_system_and_structurally_balanced() -> None:
+    directory = ROOT / "data/evaluations/v2_unseen_holdout_v1"
+    rows = [
+        json.loads(line)
+        for line in (directory / "v2_unseen_holdout_v1.jsonl").read_text().splitlines()
+        if line
+    ]
+    manifest = json.loads((directory / "manifest.json").read_text())
+    quality = json.loads((directory / "quality_report.json").read_text())
+    assert len(rows) == len({row["text"] for row in rows}) == 180
+    assert all(row["split"] == "UNSEEN_HOLDOUT" for row in rows)
+    assert sum(row["case_type"] == "single_positive" for row in rows) == 108
+    assert sum(row["case_type"] == "multi_label" for row in rows) == 24
+    assert sum(row["case_type"] == "negative" for row in rows) == 48
+    assert manifest["system_freeze_head"] == "08acc0dd210eb022c10c38ce97fe8b16e70558f3"
+    assert quality["prior_exact_duplicates"] == 0
+    assert quality["near_duplicates"] == 0

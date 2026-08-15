@@ -1,0 +1,16 @@
+{
+  "case_count": 180,
+  "unique_text_count": 180,
+  "prior_exact_duplicates": 0,
+  "within_holdout_exact_duplicates": 0,
+  "near_duplicate_threshold": 0.86,
+  "highest_within_holdout_similarity": 0.431373,
+  "closest_pair": [
+    "V2HOLD-055",
+    "V2HOLD-113"
+  ],
+  "highest_prior_similarity": 0.75,
+  "closest_prior_case": "V2HOLD-162",
+  "near_duplicates": 0,
+  "expected_rule_set_complete": true
+}
