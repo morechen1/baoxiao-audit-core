@@ -18,9 +18,15 @@ def test_contest_demo_workspace_and_assets_are_served() -> None:
     assert workspace.status_code == 200
     assert "保销智审" in workspace.text
     assert "新建智能审核" in workspace.text
+    assert "批量材料审核" in workspace.text
+    assert ".docx,.pdf" in workspace.text
     assert stylesheet.status_code == 200
     assert script.status_code == 200
     assert "demoCases" in script.text
+    assert "/api/v2/screenings/upload" in script.text
+    assert "/api/v2/batches" in script.text
+    assert "语义增强暂不可用" in script.text
+    assert "导出 HTML" in script.text
 
 
 def test_explanation_ui_uses_finding_keys_and_keeps_partial_audience_artifacts() -> None:

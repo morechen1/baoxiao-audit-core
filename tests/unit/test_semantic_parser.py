@@ -17,6 +17,7 @@ from app.services.screening import (
     load_ruleset,
     segment_marketing_text,
 )
+from app.services.screening.semantic_v2 import PARSER_CACHE, segment_semantic_text
 
 
 class QueueProvider:
@@ -50,6 +51,18 @@ def _claim(
         "negated": False,
         "conditionality": "none",
         "educational_or_prohibitive_context": False,
+        "speaker_role": "salesperson",
+        "statement_mode": "DIRECT_MARKETING",
+        "quoted_statement": False,
+        "educational_context": False,
+        "prohibitive_context": False,
+        "historical_case_context": False,
+        "internal_incentive_context": False,
+        "conditional": False,
+        "comparison_target": None,
+        "guarantee_strength": "none",
+        "risk_strength": "none",
+        "time_scope": None,
         "role_ambiguity": False,
         "semantic_ambiguity": False,
         "confidence": 0.95,
@@ -139,6 +152,7 @@ def test_negation_reuses_existing_local_context_gate() -> None:
                         "保证收益",
                         claim_type="return_or_principal_guarantee",
                         semantic_features=["guarantee", "return_or_yield"],
+                        guarantee_strength="explicit",
                     )
                 )
             ]
@@ -244,6 +258,7 @@ def test_deterministic_and_semantic_overlap_fuses_without_duplicate() -> None:
                         "保证收益",
                         claim_type="return_or_principal_guarantee",
                         semantic_features=["guarantee", "return_or_yield"],
+                        guarantee_strength="explicit",
                     )
                 )
             ]
@@ -348,3 +363,216 @@ def test_openai_compatible_payload_contains_no_rag_or_client_secret() -> None:
     assert isinstance(user_message, dict)
     user_payload = json.loads(user_message["content"])
     assert set(user_payload) == {"original_marketing_text", "taxonomy", "output_schema"}
+    claim_schema = user_payload["output_schema"]["$defs"]["SemanticClaim"]
+    assert "statement_mode" in claim_schema["required"]
+    assert "speaker_role" in claim_schema["required"]
+
+
+def test_context_guard_is_scoped_to_current_clause() -> None:
+    raw = "监管部门明确禁止宣称保证收益。本产品现在承诺保证收益。"
+    quote = "本产品现在承诺保证收益"
+    outcome = _run(
+        raw,
+        QueueProvider(
+            [
+                _payload(
+                    _claim(
+                        "guaranteed_return_or_principal",
+                        quote,
+                        claim_type="return_or_principal_guarantee",
+                        guarantee_strength="explicit",
+                    )
+                )
+            ]
+        ),
+    )
+    assert [item.rule_id for item in outcome.candidates] == ["guaranteed_return_or_principal"]
+
+
+def test_v2_statement_modes_reject_quoted_historical_and_internal_contexts() -> None:
+    cases = (
+        ("培训材料列举“保证收益”属于错误话术。", "保证收益", "QUOTED_MARKETING", "quoted_context"),
+        (
+            "历史案例中销售人员曾宣称保证收益。",
+            "保证收益",
+            "HISTORICAL_CASE_DESCRIPTION",
+            "historical_context",
+        ),
+        (
+            "销售人员季度达标，公司奖励手机。",
+            "公司奖励手机",
+            "INTERNAL_EMPLOYEE_INCENTIVE",
+            "internal_incentive_context",
+        ),
+    )
+    for raw, quote, mode, reason in cases:
+        rule = (
+            "extra_contractual_benefit"
+            if mode == "INTERNAL_EMPLOYEE_INCENTIVE"
+            else "guaranteed_return_or_principal"
+        )
+        outcome = _run(
+            raw,
+            QueueProvider(
+                [
+                    _payload(
+                        _claim(
+                            rule,
+                            quote,
+                            statement_mode=mode,
+                            claim_type=(
+                                "extra_benefit_or_gift"
+                                if rule == "extra_contractual_benefit"
+                                else "return_or_principal_guarantee"
+                            ),
+                        )
+                    )
+                ]
+            ),
+        )
+        assert outcome.candidates == ()
+        assert outcome.diagnostics["reject_reasons"] == {reason: 1}
+
+
+def test_v2_semantic_contract_rejects_unknown_mode_and_weak_risk_strength() -> None:
+    unknown = _run(
+        "这款产品不会亏损",
+        QueueProvider(
+            [
+                _payload(
+                    _claim(
+                        "no_risk_or_no_loss",
+                        "不会亏损",
+                        claim_type="risk_or_loss",
+                        statement_mode="UNKNOWN",
+                        risk_strength="explicit",
+                    )
+                )
+            ]
+        ),
+    )
+    weak = _run(
+        "这款产品不会亏损",
+        QueueProvider(
+            [
+                _payload(
+                    _claim(
+                        "no_risk_or_no_loss",
+                        "不会亏损",
+                        claim_type="risk_or_loss",
+                        risk_strength="weak",
+                    )
+                )
+            ]
+        ),
+    )
+    assert unknown.diagnostics["reject_reasons"] == {"semantic_ambiguity": 1}
+    assert weak.diagnostics["reject_reasons"] == {"semantic_ambiguity": 1}
+
+
+def test_long_text_chunks_keep_document_offsets_and_fuse_overlap() -> None:
+    quote = "购买本保险即可额外获赠手机"
+    raw = "甲" * 440 + quote + "乙" * 360
+
+    class ContextProvider:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def generate(self, raw_text: str) -> SemanticParserProviderResponse:
+            self.calls += 1
+            claims = [_claim("extra_contractual_benefit", quote)] if quote in raw_text else []
+            return SemanticParserProviderResponse(_payload(*claims))
+
+    provider = ContextProvider()
+    ruleset = load_ruleset()
+    parser = SemanticClaimParser(
+        ruleset=ruleset,
+        settings=Settings(
+            semantic_parser_enabled=True,
+            semantic_parser_max_chunk_chars=500,
+            semantic_parser_chunk_overlap=200,
+            max_semantic_chunks_per_document=4,
+        ),
+        provider=provider,
+    )
+    outcome = parser.supplement(
+        raw_text=raw,
+        material_sha256="a" * 64,
+        segments=segment_marketing_text(raw, "a" * 64),
+        deterministic=[],
+    )
+    assert len(outcome.candidates) == 1
+    candidate = outcome.candidates[0]
+    assert raw[candidate.raw_start_offset : candidate.raw_end_offset] == quote
+    assert outcome.diagnostics["semantic_chunks"] >= 2
+    assert provider.calls >= 2
+
+
+def test_taxonomy_arbitration_reduces_semantic_over_labeling() -> None:
+    raw = "本产品保证固定收益"
+    outcome = _run(
+        raw,
+        QueueProvider(
+            [
+                _payload(
+                    _claim(
+                        "misleading_interest_or_yield",
+                        "保证固定收益",
+                        claim_type="interest_or_yield",
+                    ),
+                    _claim(
+                        "guaranteed_return_or_principal",
+                        "保证固定收益",
+                        claim_type="return_or_principal_guarantee",
+                        guarantee_strength="explicit",
+                    ),
+                )
+            ]
+        ),
+    )
+    assert [item.rule_id for item in outcome.candidates] == ["guaranteed_return_or_principal"]
+    assert outcome.diagnostics["reject_reasons"] == {"taxonomy_arbitration": 1}
+
+
+def test_parser_cache_binds_text_model_and_schema() -> None:
+    PARSER_CACHE.clear()
+    quote = "购买本保险即可额外获赠手机"
+    provider = QueueProvider([_payload(_claim("extra_contractual_benefit", quote))])
+    settings = Settings(
+        semantic_parser_enabled=True,
+        semantic_parser_cache_enabled=True,
+        llm_model="cache-test-model",
+    )
+    parser = SemanticClaimParser(settings=settings, provider=provider)
+    segments = segment_marketing_text(quote, "a" * 64)
+    first = parser.supplement(
+        raw_text=quote,
+        material_sha256="a" * 64,
+        segments=segments,
+        deterministic=[],
+    )
+    second = parser.supplement(
+        raw_text=quote,
+        material_sha256="a" * 64,
+        segments=segments,
+        deterministic=[],
+    )
+    assert len(first.candidates) == len(second.candidates) == 1
+    assert provider.calls == 1
+    assert second.diagnostics["cache_hits"] == 1
+
+
+def test_semantic_chunk_budget_reports_partial_coverage() -> None:
+    coverage = segment_semantic_text(
+        "段落。" * 1000,
+        max_chars=500,
+        overlap=50,
+        max_chunks=2,
+        max_text_length=10_000,
+    )
+    assert len(coverage.chunks) == 2
+    assert coverage.partial is True
+    for chunk in coverage.chunks:
+        assert (
+            chunk.text == ("段落。" * 1000)[chunk.document_offset_start : chunk.document_offset_end]
+        )

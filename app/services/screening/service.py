@@ -155,6 +155,9 @@ class DeterministicScreeningService:
                     segments=candidates,
                     deterministic=deterministic_candidates,
                 )
+                semantic_finding_shas = {
+                    candidate.finding_sha256 for candidate in semantic_outcome.candidates
+                }
                 finding_candidates = sorted(
                     [*deterministic_candidates, *semantic_outcome.candidates],
                     key=lambda value: (
@@ -235,11 +238,30 @@ class DeterministicScreeningService:
                 )
                 evaluation_summary = {
                     "version": SUPPORT_EVALUATION_VERSION,
+                    "deterministic_candidates": len(deterministic_candidates),
+                    "semantic_candidates_accepted": len(semantic_outcome.candidates),
+                    "final_findings": len(findings),
+                    "knowledge_retrievals": len(finding_candidates),
                     "candidates_total": candidates_total,
                     "candidates_passed": candidates_passed,
                     "candidates_rejected": candidates_rejected,
                     "links_persisted": links_persisted,
                     "semantic_parser": semantic_outcome.diagnostics,
+                    "semantic_only_evidence": {
+                        "findings": sum(
+                            finding.finding_sha256 in semantic_finding_shas for finding in findings
+                        ),
+                        "with_evidence": sum(
+                            finding.finding_sha256 in semantic_finding_shas
+                            and bool(evidence_snapshots[finding.finding_sha256])
+                            for finding in findings
+                        ),
+                        "without_evidence": sum(
+                            finding.finding_sha256 in semantic_finding_shas
+                            and not evidence_snapshots[finding.finding_sha256]
+                            for finding in findings
+                        ),
+                    },
                 }
                 run.evidence_evaluation_summary_json = evaluation_summary
                 run.run_payload_sha256 = _sha(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from collections import Counter
 from dataclasses import dataclass
 from typing import Literal, Protocol
@@ -16,8 +17,19 @@ from app.services.screening.engine import FindingCandidate, claim_is_excepted_at
 from app.services.screening.normalization import normalize_marketing_text
 from app.services.screening.rules import MarketingRuleSet, load_ruleset
 from app.services.screening.segmenter import SegmentCandidate
+from app.services.screening.semantic_v2 import (
+    ARBITRATION_RULES,
+    PARSER_CACHE,
+    SemanticTextChunk,
+    arbitration_priority,
+    cache_key,
+    deterministic_context_reject_reason,
+    segment_semantic_text,
+    spans_overlap,
+)
 
-SEMANTIC_PARSER_VERSION = "semantic_claim_parser_v1"
+SEMANTIC_PARSER_VERSION = "semantic_claim_parser_v2"
+SEMANTIC_SCHEMA_VERSION = "semantic_claim_schema_v2"
 SEMANTIC_PARSER_CONFIDENCE_THRESHOLD = 0.72
 
 TaxonomyId = Literal[
@@ -137,6 +149,30 @@ class SemanticClaim(_StrictModel):
     negated: bool
     conditionality: Literal["none", "conditional", "unclear"]
     educational_or_prohibitive_context: bool
+    speaker_role: Literal[
+        "insurer", "salesperson", "regulator", "consumer", "trainer", "reporter", "unknown"
+    ]
+    statement_mode: Literal[
+        "DIRECT_MARKETING",
+        "QUOTED_MARKETING",
+        "REGULATORY_PROHIBITION",
+        "EDUCATIONAL_WARNING",
+        "HISTORICAL_CASE_DESCRIPTION",
+        "INTERNAL_EMPLOYEE_INCENTIVE",
+        "PRODUCT_DISCLOSURE",
+        "NEGATED_CLAIM",
+        "UNKNOWN",
+    ]
+    quoted_statement: bool
+    educational_context: bool
+    prohibitive_context: bool
+    historical_case_context: bool
+    internal_incentive_context: bool
+    conditional: bool
+    comparison_target: str | None = Field(max_length=200)
+    guarantee_strength: Literal["none", "weak", "explicit", "absolute"]
+    risk_strength: Literal["none", "weak", "explicit", "absolute"]
+    time_scope: str | None = Field(max_length=100)
     role_ambiguity: bool
     semantic_ambiguity: bool
     confidence: float = Field(ge=0, le=1)
@@ -234,18 +270,24 @@ class OpenAICompatibleSemanticParserProvider:
             for rule_id, definition in TAXONOMY_DEFINITIONS
         ]
         instruction = (
-            "你是保险营销语义 Claim Parser，不作违法结论。只输出一个严格 JSON 对象，不要 Markdown。"
+            "你是保险营销语义 Claim Parser 2.0，不作违法结论。"
+            "只输出一个严格 JSON 对象，不要 Markdown。"
             "输入仅含原始营销文本、既有12类语义定义和输出 schema；不得索取或使用监管知识、"
             "Citation、EvidenceLink、Finding ID、severity 或最终合规结论。"
             "对每个可能相关的语义主张输出 claim。source_quote 必须从"
             " original_marketing_text 逐字复制为连续片段，不得改写、补字、纠错或规范化；"
             "若同一短语重复，应扩展为能唯一定位的完整原文片段，无法唯一定位则不要输出。"
-            "actor/audience/beneficiary 必须按实际角色填写。"
+            "actor/audience/beneficiary/speaker_role 必须按实际角色填写。"
             "面向消费者的投保赠品 beneficiary=consumer；"
             "销售人员业绩奖励 beneficiary=salesperson；无法判断受益人时 beneficiary=unknown 且"
-            "role_ambiguity=true。否定、限定、风险教育、监管禁止、引用或批判性语境仍可作为候选输出，"
-            "但必须如实设置 negated、educational_or_prohibitive_context、role_ambiguity、"
-            "semantic_ambiguity 和 conditionality，绝不能把它们改写成肯定营销主张。"
+            "role_ambiguity=true。必须从 schema 枚举中选择 statement_mode。否定、限定、风险教育、"
+            "监管禁止、引用、历史案例、内部激励或批判性语境仍可作为候选输出，但必须如实设置"
+            " negated、quoted_statement、educational_context、prohibitive_context、"
+            "historical_case_context、internal_incentive_context、role_ambiguity、semantic_ambiguity、"
+            "conditional、conditionality、guarantee_strength 与 risk_strength，"
+            "绝不能改写为肯定营销主张。比较或排名候选必须填写 comparison_target 并包含"
+            " comparison semantic feature；收益保证与无风险候选必须按原文强度填写"
+            " guarantee_strength 或 risk_strength。"
             "confidence 表示 candidate_rule 与原文主张语义的把握，不表示违法概率。"
         )
         return {
@@ -306,6 +348,10 @@ class SemanticClaimParser:
     ) -> SemanticParserOutcome:
         diagnostics: dict[str, object] = {
             "version": SEMANTIC_PARSER_VERSION,
+            "schema_version": SEMANTIC_SCHEMA_VERSION,
+            "provider_model": self.settings.llm_model
+            if self.settings.semantic_parser_enabled
+            else None,
             "enabled": self.settings.semantic_parser_enabled,
             "status": "disabled",
             "confidence_threshold": SEMANTIC_PARSER_CONFIDENCE_THRESHOLD,
@@ -317,153 +363,257 @@ class SemanticClaimParser:
             "reject_reasons": {},
             "deterministic_plus_semantic": 0,
             "hallucinated_quote_accepted": 0,
+            "semantic_chunks": 0,
+            "semantic_chunks_completed": 0,
+            "partial_semantic_coverage": False,
+            "covered_text_end": 0,
+            "cache_hits": 0,
+            "provider_latency_ms": 0,
         }
         if not self.settings.semantic_parser_enabled:
             return SemanticParserOutcome((), diagnostics)
 
-        output: SemanticClaimOutput | None = None
-        failure_code: str | None = None
+        coverage = segment_semantic_text(
+            raw_text,
+            max_chars=self.settings.semantic_parser_max_chunk_chars,
+            overlap=self.settings.semantic_parser_chunk_overlap,
+            max_chunks=self.settings.max_semantic_chunks_per_document,
+            max_text_length=self.settings.semantic_parser_max_text_length,
+        )
+        diagnostics["semantic_chunks"] = len(coverage.chunks)
+        diagnostics["covered_text_end"] = coverage.covered_end
+        diagnostics["partial_semantic_coverage"] = coverage.partial
+
+        outputs: list[tuple[SemanticClaimOutput, SemanticTextChunk]] = []
+        failure_codes: list[str] = []
         provider_calls = 0
         retries = 0
-        for attempt in range(2):
-            try:
-                response = self.provider.generate(raw_text)
-                provider_calls += response.provider_calls
-                output = SemanticClaimOutput.model_validate_json(response.raw_json)
+        cache_hits = 0
+        latency_ms = 0.0
+        for chunk in coverage.chunks:
+            if provider_calls >= self.settings.max_provider_calls_per_screening:
+                failure_codes.append("provider_call_budget_exhausted")
+                diagnostics["partial_semantic_coverage"] = True
                 break
-            except ValidationError:
-                failure_code = "schema_invalid"
-                if attempt == 0:
-                    retries = 1
+            cached_json: str | None = None
+            key = cache_key(
+                normalized_text=normalize_marketing_text(chunk.text).text,
+                model=self.settings.llm_model,
+                parser_version=SEMANTIC_PARSER_VERSION,
+                schema_version=SEMANTIC_SCHEMA_VERSION,
+            )
+            cache_enabled = self.settings.semantic_parser_cache_enabled and bool(
+                self.settings.llm_model
+            )
+            if cache_enabled:
+                cached_json = PARSER_CACHE.get(key)
+            if cached_json is not None:
+                try:
+                    outputs.append((SemanticClaimOutput.model_validate_json(cached_json), chunk))
+                    cache_hits += 1
                     continue
-            except SemanticParserError as exc:
-                provider_calls += exc.provider_calls
-                failure_code = exc.code
-                if attempt == 0 and exc.retryable:
-                    retries = 1
-                    continue
-            except Exception:
-                failure_code = "provider_internal_error"
-            break
+                except ValidationError:
+                    pass
+
+            output: SemanticClaimOutput | None = None
+            failure_code: str | None = None
+            response_json: str | None = None
+            for attempt in range(2):
+                if provider_calls >= self.settings.max_provider_calls_per_screening:
+                    failure_code = "provider_call_budget_exhausted"
+                    break
+                started = time.perf_counter()
+                try:
+                    response = self.provider.generate(chunk.text)
+                    provider_calls += response.provider_calls
+                    response_json = response.raw_json
+                    output = SemanticClaimOutput.model_validate_json(response.raw_json)
+                    latency_ms += (time.perf_counter() - started) * 1000
+                    break
+                except ValidationError:
+                    latency_ms += (time.perf_counter() - started) * 1000
+                    failure_code = "schema_invalid"
+                    if attempt == 0:
+                        retries += 1
+                        continue
+                except SemanticParserError as exc:
+                    latency_ms += (time.perf_counter() - started) * 1000
+                    provider_calls += exc.provider_calls
+                    failure_code = exc.code
+                    if attempt == 0 and exc.retryable:
+                        retries += 1
+                        continue
+                except Exception:
+                    latency_ms += (time.perf_counter() - started) * 1000
+                    failure_code = "provider_internal_error"
+                break
+            if output is None:
+                failure_codes.append(failure_code or "provider_failed")
+                diagnostics["partial_semantic_coverage"] = True
+                continue
+            outputs.append((output, chunk))
+            if cache_enabled and response_json is not None:
+                PARSER_CACHE.put(
+                    key,
+                    response_json,
+                    max_entries=self.settings.semantic_parser_cache_entries,
+                )
 
         diagnostics["provider_calls"] = provider_calls
         diagnostics["retries"] = retries
+        diagnostics["cache_hits"] = cache_hits
+        diagnostics["provider_latency_ms"] = round(latency_ms, 2)
+        diagnostics["semantic_chunks_completed"] = len(outputs)
 
-        if output is None:
+        if not outputs:
             diagnostics["status"] = "failed"
-            diagnostics["failure_code"] = failure_code or "provider_failed"
+            diagnostics["failure_code"] = failure_codes[0] if failure_codes else "provider_failed"
             return SemanticParserOutcome((), diagnostics)
 
         accepted, validation = self._validate_and_fuse(
-            output=output,
+            outputs=outputs,
             raw_text=raw_text,
             material_sha256=material_sha256,
             segments=segments,
             deterministic=deterministic,
         )
         diagnostics.update(validation)
-        diagnostics["status"] = "completed"
+        if failure_codes or bool(diagnostics["partial_semantic_coverage"]):
+            diagnostics["status"] = "partial"
+            diagnostics["failure_codes"] = sorted(set(failure_codes))
+        else:
+            diagnostics["status"] = "completed"
         return SemanticParserOutcome(tuple(accepted), diagnostics)
 
     def _validate_and_fuse(
         self,
         *,
-        output: SemanticClaimOutput,
+        outputs: list[tuple[SemanticClaimOutput, SemanticTextChunk]],
         raw_text: str,
         material_sha256: str,
         segments: list[SegmentCandidate],
         deterministic: list[FindingCandidate],
     ) -> tuple[list[FindingCandidate], dict[str, object]]:
-        accepted: list[FindingCandidate] = []
+        potential: list[FindingCandidate] = []
         reasons: Counter[str] = Counter()
         deterministic_plus_semantic = 0
-        for claim in output.claims:
-            resolved = _resolve_unique_quote(raw_text, claim.source_quote)
-            if resolved is None:
-                reasons["quote_not_found"] += 1
-                continue
-            if resolved == (-1, -1):
-                reasons["quote_ambiguous"] += 1
-                continue
-            start, end = resolved
-            containing = sorted(
-                (
-                    segment
-                    for segment in segments
-                    if segment.raw_start_offset <= start and end <= segment.raw_end_offset
-                ),
-                key=lambda segment: segment.ordinal,
-            )
-            if not containing or raw_text[start:end] != claim.source_quote:
-                reasons["quote_not_found"] += 1
-                continue
-            if claim.negated:
-                reasons["negation"] += 1
-                continue
-            if claim.educational_or_prohibitive_context:
-                reasons["educational_context"] += 1
-                continue
-            if claim.role_ambiguity:
-                reasons["role_ambiguity"] += 1
-                continue
-            if claim.semantic_ambiguity:
-                reasons["semantic_ambiguity"] += 1
-                continue
-            if _is_internal_sales_incentive_context(
-                raw_text,
-                claim.candidate_rule,
-                start,
-                end,
-            ):
-                reasons["role_ambiguity"] += 1
-                continue
-            if claim.confidence < SEMANTIC_PARSER_CONFIDENCE_THRESHOLD:
-                reasons["confidence"] += 1
-                continue
-            rule = self.rules[claim.candidate_rule]
-            if claim_is_excepted_at_raw_span(raw_text, start, end, rule):
-                reasons["negation"] += 1
-                continue
-            if claim.candidate_rule == "extra_contractual_benefit" and not (
-                claim.beneficiary == "consumer" and claim.audience in {"consumer", "general_public"}
-            ):
-                reasons["role_ambiguity"] += 1
-                continue
-            if _overlaps_rule(deterministic, claim.candidate_rule, start, end):
-                reasons["duplicate"] += 1
-                deterministic_plus_semantic += 1
-                continue
-            if _overlaps_rule(accepted, claim.candidate_rule, start, end):
-                reasons["duplicate"] += 1
-                continue
-            normalized = normalize_marketing_text(claim.source_quote).text
-            payload = {
-                "version": SEMANTIC_PARSER_VERSION,
-                "material_sha256": material_sha256,
-                "ruleset_sha256": self.ruleset.sha256,
-                "rule_id": rule.rule_id,
-                "raw_start_offset": start,
-                "raw_end_offset": end,
-                "normalized_match": normalized,
-            }
-            accepted.append(
-                FindingCandidate(
-                    segment_ordinal=containing[0].ordinal,
-                    rule_id=rule.rule_id,
-                    category=rule.category,
-                    severity=rule.severity,
-                    signal_strength=rule.signal_strength,
-                    matched_text=claim.source_quote,
-                    raw_start_offset=start,
-                    raw_end_offset=end,
-                    normalized_match=normalized,
-                    explanation=rule.explanation_template,
-                    review_question=rule.review_question_template,
-                    remediation=rule.institution_remediation_template,
-                    consumer_notice=rule.consumer_notice_template,
-                    finding_sha256=_sha(payload),
+        model_candidates = 0
+        for output, chunk in outputs:
+            for claim in output.claims:
+                model_candidates += 1
+                resolved = _resolve_unique_quote(chunk.text, claim.source_quote)
+                if resolved is None:
+                    reasons["quote_not_found"] += 1
+                    continue
+                if resolved == (-1, -1):
+                    reasons["quote_ambiguous"] += 1
+                    continue
+                local_start, local_end = resolved
+                start = chunk.document_offset_start + local_start
+                end = chunk.document_offset_start + local_end
+                containing = sorted(
+                    (
+                        segment
+                        for segment in segments
+                        if segment.raw_start_offset <= start and end <= segment.raw_end_offset
+                    ),
+                    key=lambda segment: segment.ordinal,
                 )
-            )
+                if not containing or raw_text[start:end] != claim.source_quote:
+                    reasons["quote_not_found"] += 1
+                    continue
+                if claim.negated:
+                    reasons["negation"] += 1
+                    continue
+                if claim.educational_or_prohibitive_context:
+                    reasons["educational_context"] += 1
+                    continue
+                mode_reason = _statement_mode_reject_reason(claim)
+                if mode_reason:
+                    reasons[mode_reason] += 1
+                    continue
+                contract_reason = _semantic_contract_reject_reason(claim)
+                if contract_reason:
+                    reasons[contract_reason] += 1
+                    continue
+                if claim.role_ambiguity:
+                    reasons["role_ambiguity"] += 1
+                    continue
+                if claim.semantic_ambiguity:
+                    reasons["semantic_ambiguity"] += 1
+                    continue
+                if _is_internal_sales_incentive_context(
+                    raw_text,
+                    claim.candidate_rule,
+                    start,
+                    end,
+                ):
+                    reasons["role_ambiguity"] += 1
+                    continue
+                context_reason = deterministic_context_reject_reason(
+                    raw_text,
+                    start=start,
+                    end=end,
+                    rule_id=claim.candidate_rule,
+                )
+                if context_reason:
+                    reasons[context_reason] += 1
+                    continue
+                if claim.confidence < SEMANTIC_PARSER_CONFIDENCE_THRESHOLD:
+                    reasons["confidence"] += 1
+                    continue
+                rule = self.rules[claim.candidate_rule]
+                if claim_is_excepted_at_raw_span(raw_text, start, end, rule):
+                    reasons["negation"] += 1
+                    continue
+                if claim.candidate_rule == "extra_contractual_benefit" and not (
+                    claim.beneficiary == "consumer"
+                    and claim.audience in {"consumer", "general_public"}
+                ):
+                    reasons["role_ambiguity"] += 1
+                    continue
+                if _overlaps_rule(deterministic, claim.candidate_rule, start, end):
+                    reasons["duplicate"] += 1
+                    deterministic_plus_semantic += 1
+                    continue
+                if _overlaps_rule(potential, claim.candidate_rule, start, end):
+                    reasons["duplicate"] += 1
+                    continue
+                normalized = normalize_marketing_text(claim.source_quote).text
+                payload = {
+                    "version": SEMANTIC_PARSER_VERSION,
+                    "material_sha256": material_sha256,
+                    "ruleset_sha256": self.ruleset.sha256,
+                    "rule_id": rule.rule_id,
+                    "raw_start_offset": start,
+                    "raw_end_offset": end,
+                    "normalized_match": normalized,
+                }
+                potential.append(
+                    FindingCandidate(
+                        segment_ordinal=containing[0].ordinal,
+                        rule_id=rule.rule_id,
+                        category=rule.category,
+                        severity=rule.severity,
+                        signal_strength=rule.signal_strength,
+                        matched_text=claim.source_quote,
+                        raw_start_offset=start,
+                        raw_end_offset=end,
+                        normalized_match=normalized,
+                        explanation=rule.explanation_template,
+                        review_question=rule.review_question_template,
+                        remediation=rule.institution_remediation_template,
+                        consumer_notice=rule.consumer_notice_template,
+                        finding_sha256=_sha(payload),
+                    )
+                )
+        accepted, arbitration_rejected = _arbitrate_semantic_candidates(
+            potential,
+            deterministic=deterministic,
+        )
+        reasons["taxonomy_arbitration"] += arbitration_rejected
+        if not reasons["taxonomy_arbitration"]:
+            reasons.pop("taxonomy_arbitration", None)
         accepted.sort(
             key=lambda item: (
                 item.raw_start_offset,
@@ -474,7 +624,7 @@ class SemanticClaimParser:
         )
         rejected = sum(reasons.values())
         return accepted, {
-            "model_candidates": len(output.claims),
+            "model_candidates": model_candidates,
             "semantic_supplements": len(accepted),
             "rejected_candidates": rejected,
             "reject_reasons": dict(sorted(reasons.items())),
@@ -498,6 +648,104 @@ def _overlaps_rule(candidates: list[FindingCandidate], rule_id: str, start: int,
         and max(item.raw_start_offset, start) < min(item.raw_end_offset, end)
         for item in candidates
     )
+
+
+def _statement_mode_reject_reason(claim: SemanticClaim) -> str | None:
+    if claim.statement_mode == "NEGATED_CLAIM":
+        return "negation"
+    if claim.quoted_statement or claim.statement_mode == "QUOTED_MARKETING":
+        return "quoted_context"
+    if claim.prohibitive_context or claim.statement_mode == "REGULATORY_PROHIBITION":
+        return "prohibitive_context"
+    if claim.educational_context or claim.statement_mode == "EDUCATIONAL_WARNING":
+        return "educational_context"
+    if claim.historical_case_context or claim.statement_mode == "HISTORICAL_CASE_DESCRIPTION":
+        return "historical_context"
+    if claim.internal_incentive_context or claim.statement_mode == "INTERNAL_EMPLOYEE_INCENTIVE":
+        return "internal_incentive_context"
+    if claim.statement_mode == "PRODUCT_DISCLOSURE":
+        return "product_disclosure_context"
+    if claim.statement_mode == "UNKNOWN":
+        return "semantic_ambiguity"
+    return None
+
+
+def _semantic_contract_reject_reason(claim: SemanticClaim) -> str | None:
+    if claim.candidate_rule == "improper_comparison_or_ranking" and not (
+        claim.comparison_target and "comparison" in claim.semantic_features
+    ):
+        return "semantic_ambiguity"
+    if (
+        claim.candidate_rule == "guaranteed_return_or_principal"
+        and claim.guarantee_strength
+        not in {
+            "explicit",
+            "absolute",
+        }
+    ):
+        return "semantic_ambiguity"
+    if claim.candidate_rule == "no_risk_or_no_loss" and claim.risk_strength not in {
+        "explicit",
+        "absolute",
+    }:
+        return "semantic_ambiguity"
+    return None
+
+
+def _arbitrate_semantic_candidates(
+    candidates: list[FindingCandidate],
+    *,
+    deterministic: list[FindingCandidate],
+) -> tuple[list[FindingCandidate], int]:
+    """Reduce semantic-only over-labeling without altering deterministic findings."""
+    ordered = sorted(
+        candidates,
+        key=lambda item: (
+            -arbitration_priority(item.rule_id, item.matched_text),
+            item.raw_start_offset,
+            item.raw_end_offset,
+            item.rule_id,
+        ),
+    )
+    kept: list[FindingCandidate] = []
+    rejected = 0
+    for candidate in ordered:
+        if candidate.rule_id not in ARBITRATION_RULES:
+            kept.append(candidate)
+            continue
+        span = (candidate.raw_start_offset, candidate.raw_end_offset)
+        deterministic_overlap = [
+            item
+            for item in deterministic
+            if item.rule_id in ARBITRATION_RULES
+            and spans_overlap(span, (item.raw_start_offset, item.raw_end_offset))
+        ]
+        if candidate.rule_id == "misleading_interest_or_yield" and deterministic_overlap:
+            rejected += 1
+            continue
+        semantic_overlap = [
+            item
+            for item in kept
+            if item.rule_id in ARBITRATION_RULES
+            and spans_overlap(span, (item.raw_start_offset, item.raw_end_offset))
+        ]
+        if not semantic_overlap:
+            kept.append(candidate)
+            continue
+        current_priority = arbitration_priority(candidate.rule_id, candidate.matched_text)
+        existing = semantic_overlap[0]
+        existing_priority = arbitration_priority(existing.rule_id, existing.matched_text)
+        strong_distinct_pair = {
+            candidate.rule_id,
+            existing.rule_id,
+        } == {"guaranteed_return_or_principal", "no_risk_or_no_loss"} and min(
+            current_priority, existing_priority
+        ) >= 40
+        if strong_distinct_pair:
+            kept.append(candidate)
+        else:
+            rejected += 1
+    return kept, rejected
 
 
 def _is_internal_sales_incentive_context(

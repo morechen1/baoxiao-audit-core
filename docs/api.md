@@ -27,6 +27,10 @@
 | GET | `/api/v1/explanations/{run_id}` | 读取解释运行状态和审计哈希 |
 | GET | `/api/v1/explanations/{run_id}/artifact` | 读取已验证的结构化解释 Artifact |
 | GET | `/api/v1/explanations/{run_id}/citations` | 读取已验证的连续证据摘录 |
+| POST | `/api/v2/screenings/upload` | 上传并审核单份 TXT/MD/DOCX/文本 PDF |
+| POST | `/api/v2/batches` | 批量审核多个文档或 CSV 文案列表 |
+| GET | `/api/v2/screenings/{run_id}/reports/html` | 下载可打开的 HTML 审查报告 |
+| GET | `/api/v2/screenings/{run_id}/reports/json` | 下载完整 JSON 审计报告 |
 
 未捕获异常返回 `{"error":{"code","message","details"}}`。FastAPI 自身的输入错误返回
 标准 422 结构；下一阶段可统一转换为同一错误信封。
@@ -71,6 +75,17 @@
 输出只包含风险信号、待核验问题和可信证据快照，不构成违法认定。两个报告 GET 端点
 只读取已有 finding，不创建新记录。完整边界见
 [确定性营销合规风险筛查](deterministic-compliance-screening.md)。
+
+## V2 文档与批量审核
+
+上传接口采用 `multipart/form-data`，扩展名与浏览器 MIME 必须同时进入允许列表；单文件
+最大 10MB，内容只在内存中处理。DOCX 读取正文段落和表格行，PDF 只支持可提取文本，
+扫描件返回 `upload_pdf_no_extractable_text`。批量最多 20 项，CSV 支持受控文本列；
+返回每项状态、风险等级、Finding 数、主要规则、EvidenceLink 数和详情/报告端点。
+
+Semantic Parser 2.0 对长文按自然边界形成有重叠的受限 chunk，系统将逐字 Quote 回映到
+完整原文 offset。调用预算或文本长度导致未覆盖全文时，报告中的
+`partial_semantic_coverage` 为 true；确定性筛查结果仍保留。
 
 ## 受控解释
 

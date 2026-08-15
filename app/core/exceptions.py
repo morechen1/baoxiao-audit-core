@@ -52,3 +52,7 @@ class ScreeningError(BaoxiaoError):
 
 class ExplanationError(BaoxiaoError):
     """Raised when controlled explanation orchestration fails closed."""
+
+
+class DocumentIngestionError(BaoxiaoError):
+    """Raised when an uploaded marketing document cannot be safely read."""

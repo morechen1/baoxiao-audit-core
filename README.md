@@ -1,4 +1,4 @@
-# 保销智审
+# 保销智审 V2
 
 “保销智审”是一套面向保险营销材料的智能合规审核系统。系统通过规则与 Semantic Parser
 双通道发现风险候选，再由确定性安全机制形成系统拥有的 `RiskFinding`，并基于可信监管
@@ -16,11 +16,18 @@
 - Citation / Claim / Uncertainty validation：非法输出失败关闭，不降级为自由文本。
 - 完整审核流程可视化：工作台、材料审核、原文高亮、Finding 切换、双端视图和检测效果页。
 - 冻结验证资产：156 条逐 case 数据、预测、汇总指标和离线复核命令完整保留。
+- 多格式接入：TXT、Markdown、DOCX、文本型 PDF，以及 CSV 文案列表。
+- 长文语义筛查：自然边界分块、原文 offset 回映、跨块融合与调用预算上限。
+- 轻量批量审核：最多 20 份材料顺序处理，单项失败独立记录并可进入详情。
+- 审计报告导出：真实 HTML 与 JSON 报告，包含 Finding、Evidence、双端 Artifact 和验证状态。
 
 ## 系统架构
 
 ```text
-Raw marketing material
+Text / TXT / MD / DOCX / text PDF
+        │
+        ▼
+Normalization / paragraph segmentation / bounded semantic chunks
         │
         ├── Deterministic rules ── rule context gates ──┐
         │                                                │
@@ -39,6 +46,8 @@ Raw marketing material
                                       Institution Artifact   Consumer Artifact
                                               └──────────┬──────────┘
                                       Citation / Claim / Uncertainty validation
+                                                         │
+                                                 Report / Batch output
 ```
 
 `SEMANTIC_SCREENING_ENABLED=false` 是固定安全配置；它关闭的是旧 semantic screening
@@ -93,6 +102,16 @@ SEMANTIC_SCREENING_ENABLED=false
 
 API key 不随源码或 ZIP 分发。未配置 key 时应用仍可启动；Semantic Parser 与受控解释在
 Provider 不可用时 fail closed，确定性规则、可信知识、基础报告和前端仍可使用。
+
+## V2 文档、批量与报告
+
+- 单材料上传：`POST /api/v2/screenings/upload`，文件只在内存解析，不执行内容、不写入任意路径。
+- 批量审核：`POST /api/v2/batches`，最多 20 项；CSV 可从 `text`、`content`、
+  `marketing_text`、`文案`、`营销文案` 或 `材料` 列读取。
+- 报告导出：`GET /api/v2/screenings/{run_id}/reports/html` 与 `/reports/json`。
+- 每份文件最多 10MB；扫描图片 PDF 会明确返回不支持 OCR，不伪装为空白合规结果。
+- Semantic Parser 2.0 记录分块数、Provider 调用、缓存命中、延迟与部分覆盖状态；
+  原文 span 仍由系统从逐字 Quote 确定。
 
 ## 数据与可信知识
 

@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#f7faf8" />
     <title>保销智审｜保险营销智能合规审核</title>
     <link rel="icon" href="/static/favicon.svg?v=pipeline-validation-20260809" type="image/svg+xml" />
-    <link rel="stylesheet" href="/static/styles.css?v=extended-validation-20260809" />
+    <link rel="stylesheet" href="/static/styles.css?v=v2-platform-20260815" />
   </head>
   <body>
     <main class="app-shell">
@@ -24,6 +24,9 @@
           </button>
           <button class="nav-item" data-view-target="review">
             <span class="nav-icon" aria-hidden="true">＋</span><span>新建审核</span>
+          </button>
+          <button class="nav-item" data-view-target="batch">
+            <span class="nav-icon" aria-hidden="true">▦</span><span>批量审核</span>
           </button>
           <button class="nav-item is-hidden" id="result-nav" data-view-target="result">
             <span class="nav-icon" aria-hidden="true">✓</span><span>当前审核结果</span>
@@ -53,9 +56,9 @@
             <div class="welcome-copy">
               <span class="section-kicker">保险营销合规审查</span>
               <h1>保险营销材料智能审核</h1>
-              <p>通过规则识别、语义解析与可信监管知识，形成可追溯的风险 Finding 与合规解释。</p>
+              <p>接入文本与常用文档，通过规则识别、语义解析与可信监管知识，形成可追溯的风险结果与双端合规解释。</p>
               <div class="capability-tags" aria-label="系统能力">
-                <span>规则筛查</span><span>语义解析</span><span>可信知识</span><span>证据溯源</span>
+                <span>多格式材料接入</span><span>规则 + AI 语义</span><span>确定性风险门禁</span><span>可信监管知识</span><span>双端解释</span><span>批量审核</span><span>报告导出</span>
               </div>
               <button class="primary-button" id="dashboard-start">
                 <span class="button-shield" aria-hidden="true">✓</span>开始一次审核
@@ -131,8 +134,8 @@
 
               <div class="form-tools">
                 <label class="file-picker">
-                  <input id="file-input" type="file" accept="text/plain,.txt" />
-                  <span aria-hidden="true">⇧</span>导入 TXT 文本
+                  <input id="file-input" type="file" accept=".txt,.md,.docx,.pdf,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf" />
+                  <span aria-hidden="true">⇧</span>导入 TXT / MD / DOCX / PDF
                 </label>
                 <span id="provider-status" class="provider-status">正在读取解释 Provider…</span>
               </div>
@@ -151,6 +154,35 @@
               </div>
             </aside>
           </div>
+        </section>
+
+        <section id="batch" class="view">
+          <header class="page-heading">
+            <span class="section-kicker">V2 批量审核</span>
+            <h1>批量材料审核</h1>
+            <p>一次提交最多 20 份 TXT、MD、DOCX、PDF 或 CSV；单项失败不会掩盖其他材料的结果。</p>
+          </header>
+          <form class="batch-form surface-card" id="batch-review-form">
+            <div class="field-row">
+              <label class="field">统一材料类型
+                <select id="batch-material-type">
+                  <option value="advertisement">宣传广告</option>
+                  <option value="sales_script">销售话术</option>
+                  <option value="social_media">社交媒体</option>
+                  <option value="product_introduction">产品介绍</option>
+                  <option value="other">其他文本</option>
+                </select>
+              </label>
+              <label class="field">选择材料（最多 20 份）
+                <input id="batch-file-input" type="file" multiple required accept=".txt,.md,.docx,.pdf,.csv,text/plain,text/markdown,text/csv,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+              </label>
+            </div>
+            <div class="batch-submit-row">
+              <p>批量流程只执行筛查与可信证据绑定；进入单项详情后仍不会自动生成新的 AI 解释。</p>
+              <button class="primary-button" type="submit">开始批量审核</button>
+            </div>
+          </form>
+          <section class="batch-results surface-card is-hidden" id="batch-results" aria-live="polite"></section>
         </section>
 
         <section id="processing" class="view processing-view" aria-live="polite">
@@ -250,6 +282,6 @@
     </main>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script src="/static/app.js?v=extended-validation-20260809"></script>
+    <script src="/static/app.js?v=v2-platform-20260815"></script>
   </body>
 </html>

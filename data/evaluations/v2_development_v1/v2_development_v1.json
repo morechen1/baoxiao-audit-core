@@ -1,0 +1,1228 @@
+[
+  {
+    "case_id": "V2DEV-001",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "explicit",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "absolute_or_superlative_claim"
+    ],
+    "text": "这份保障方案绝对适合每一位家庭成员。"
+  },
+  {
+    "case_id": "V2DEV-002",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "paraphrase",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "absolute_or_superlative_claim"
+    ],
+    "text": "无论客户情况怎样，这款产品都必然是正确选择。"
+  },
+  {
+    "case_id": "V2DEV-003",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "colloquial",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "absolute_or_superlative_claim"
+    ],
+    "text": "闭眼选就行，它肯定是最好的。"
+  },
+  {
+    "case_id": "V2DEV-004",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "light_implicit",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "absolute_or_superlative_claim"
+    ],
+    "text": "市场上不会有比这份保障更完整的方案。"
+  },
+  {
+    "case_id": "V2DEV-005",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "multi_sentence",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "absolute_or_superlative_claim"
+    ],
+    "text": "您不用再比较了。这就是唯一值得购买的保险方案。"
+  },
+  {
+    "case_id": "V2DEV-006",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "context_dependent",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "absolute_or_superlative_claim"
+    ],
+    "text": "面向首次投保家庭，我们可以明确说它百分之百合适。"
+  },
+  {
+    "case_id": "V2DEV-007",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "explicit",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "concealment_or_minimization_of_exclusions"
+    ],
+    "text": "合同里的责任免除只是格式内容，理赔时可以忽略。"
+  },
+  {
+    "case_id": "V2DEV-008",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "paraphrase",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "concealment_or_minimization_of_exclusions"
+    ],
+    "text": "健康告知怎么填写都不会影响以后获得赔付。"
+  },
+  {
+    "case_id": "V2DEV-009",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "colloquial",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "concealment_or_minimization_of_exclusions"
+    ],
+    "text": "那些不保事项不用看，真出事都会赔。"
+  },
+  {
+    "case_id": "V2DEV-010",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "light_implicit",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "concealment_or_minimization_of_exclusions"
+    ],
+    "text": "即便属于条款列明的免责情形，公司照样承担责任。"
+  },
+  {
+    "case_id": "V2DEV-011",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "multi_sentence",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "concealment_or_minimization_of_exclusions"
+    ],
+    "text": "合同确实列了除外责任。不过这些内容不会限制实际保障。"
+  },
+  {
+    "case_id": "V2DEV-012",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "context_dependent",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "concealment_or_minimization_of_exclusions"
+    ],
+    "text": "向客户介绍时可以略过健康告知，它不会影响承保结果。"
+  },
+  {
+    "case_id": "V2DEV-013",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "explicit",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "extra_contractual_benefit"
+    ],
+    "text": "今天投保后，销售人员会另外返给您八百元现金。"
+  },
+  {
+    "case_id": "V2DEV-014",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "paraphrase",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "extra_contractual_benefit"
+    ],
+    "text": "签单后可获得合同没有写明的专属购物卡。"
+  },
+  {
+    "case_id": "V2DEV-015",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "colloquial",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "extra_contractual_benefit"
+    ],
+    "text": "保单办下来我私下再送你一部手机。"
+  },
+  {
+    "case_id": "V2DEV-016",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "light_implicit",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "extra_contractual_benefit"
+    ],
+    "text": "完成缴费即可领取条款之外的全年机场接送服务。"
+  },
+  {
+    "case_id": "V2DEV-017",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "multi_sentence",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "extra_contractual_benefit"
+    ],
+    "text": "保险利益以合同为准。除此之外，投保客户还能额外拿到现金补贴。"
+  },
+  {
+    "case_id": "V2DEV-018",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "context_dependent",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "extra_contractual_benefit"
+    ],
+    "text": "只要成为本产品的新客户，就赠送合同外的免费体检套餐。"
+  },
+  {
+    "case_id": "V2DEV-019",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "explicit",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "false_promotion_or_prize"
+    ],
+    "text": "本周投保可参加抽奖，而且每位客户保证中奖。"
+  },
+  {
+    "case_id": "V2DEV-020",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "paraphrase",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "false_promotion_or_prize"
+    ],
+    "text": "现在下单就能获得其实并不存在的限量免费名额。"
+  },
+  {
+    "case_id": "V2DEV-021",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "colloquial",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "false_promotion_or_prize"
+    ],
+    "text": "赶紧买，今晚过后所谓的百万奖池就没了。"
+  },
+  {
+    "case_id": "V2DEV-022",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "light_implicit",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "false_promotion_or_prize"
+    ],
+    "text": "本次活动的头奖人人可得，每位投保客户都不会落空。"
+  },
+  {
+    "case_id": "V2DEV-023",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "multi_sentence",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "false_promotion_or_prize"
+    ],
+    "text": "活动仅剩十分钟。投保即可抽取豪车，中奖结果已为您锁定。"
+  },
+  {
+    "case_id": "V2DEV-024",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "context_dependent",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "false_promotion_or_prize"
+    ],
+    "text": "现在签单就是前一百名，高额奖品名额已经为您锁定。"
+  },
+  {
+    "case_id": "V2DEV-025",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "explicit",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "guaranteed_return_or_principal"
+    ],
+    "text": "本产品保证每年获得固定的百分之六收益。"
+  },
+  {
+    "case_id": "V2DEV-026",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "paraphrase",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "guaranteed_return_or_principal"
+    ],
+    "text": "到期时本金和利息都会一分不少地返还。"
+  },
+  {
+    "case_id": "V2DEV-027",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "colloquial",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "guaranteed_return_or_principal"
+    ],
+    "text": "钱放进来稳赚，到点连本带利拿走。"
+  },
+  {
+    "case_id": "V2DEV-028",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "light_implicit",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "guaranteed_return_or_principal"
+    ],
+    "text": "无论市场如何变化，您的本金与既定回报都不会改变。"
+  },
+  {
+    "case_id": "V2DEV-029",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "multi_sentence",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "guaranteed_return_or_principal"
+    ],
+    "text": "收益表只是展示形式。实际到账金额已经提前锁定。"
+  },
+  {
+    "case_id": "V2DEV-030",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "context_dependent",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "guaranteed_return_or_principal"
+    ],
+    "text": "选择十年缴费方案后，公司承诺最终一定盈利。"
+  },
+  {
+    "case_id": "V2DEV-031",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "explicit",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "absolute_or_superlative_claim",
+      "improper_comparison_or_ranking"
+    ],
+    "text": "这款产品的保障水平稳居行业第一。"
+  },
+  {
+    "case_id": "V2DEV-032",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "paraphrase",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "improper_comparison_or_ranking"
+    ],
+    "text": "同类公司的方案在各方面都不如我们的产品。"
+  },
+  {
+    "case_id": "V2DEV-033",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "colloquial",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "improper_comparison_or_ranking"
+    ],
+    "text": "别家的保险都差一截，我们这款才是头名。"
+  },
+  {
+    "case_id": "V2DEV-034",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "light_implicit",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "improper_comparison_or_ranking"
+    ],
+    "text": "本产品的安全性全面领先所有竞争产品。"
+  },
+  {
+    "case_id": "V2DEV-035",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "multi_sentence",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "improper_comparison_or_ranking"
+    ],
+    "text": "其他同类产品都有不足。本产品收益全面高于它们。"
+  },
+  {
+    "case_id": "V2DEV-036",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "context_dependent",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "absolute_or_superlative_claim",
+      "improper_comparison_or_ranking"
+    ],
+    "text": "在销售海报中把本公司描述成市场唯一领先的保险机构。"
+  },
+  {
+    "case_id": "V2DEV-037",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "explicit",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "misleading_interest_or_yield"
+    ],
+    "text": "演示表中的百分之八收益率就是客户每年实际到账回报。"
+  },
+  {
+    "case_id": "V2DEV-038",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "paraphrase",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "misleading_interest_or_yield"
+    ],
+    "text": "去年的高收益会原样延续到未来每一个保单年度。"
+  },
+  {
+    "case_id": "V2DEV-039",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "colloquial",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "misleading_interest_or_yield"
+    ],
+    "text": "图上写多少利率，你以后就能拿多少。"
+  },
+  {
+    "case_id": "V2DEV-040",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "light_implicit",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "misleading_interest_or_yield"
+    ],
+    "text": "这里的预期回报就是客户能够持续取得的稳定年化收益。"
+  },
+  {
+    "case_id": "V2DEV-041",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "multi_sentence",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "misleading_interest_or_yield"
+    ],
+    "text": "该数字来自情景演示。不过您可以把它当作持续不变的实际利率。"
+  },
+  {
+    "case_id": "V2DEV-042",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "context_dependent",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "misleading_interest_or_yield"
+    ],
+    "text": "用单个历史年度的结算表现推断客户未来都能获得同等收益。"
+  },
+  {
+    "case_id": "V2DEV-043",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "explicit",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "no_risk_or_no_loss"
+    ],
+    "text": "购买这款保险完全没有任何风险。"
+  },
+  {
+    "case_id": "V2DEV-044",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "paraphrase",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "no_risk_or_no_loss"
+    ],
+    "text": "无论发生什么情况，投入的资金都不会有损失。"
+  },
+  {
+    "case_id": "V2DEV-045",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "colloquial",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "no_risk_or_no_loss"
+    ],
+    "text": "放心放钱，怎么都不可能亏。"
+  },
+  {
+    "case_id": "V2DEV-046",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "light_implicit",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "no_risk_or_no_loss"
+    ],
+    "text": "将产品描述为资金绝对安全且不存在价值波动。"
+  },
+  {
+    "case_id": "V2DEV-047",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "multi_sentence",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "no_risk_or_no_loss"
+    ],
+    "text": "市场可能出现变化。但您的账户不承担任何损失可能。"
+  },
+  {
+    "case_id": "V2DEV-048",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "context_dependent",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "no_risk_or_no_loss"
+    ],
+    "text": "面向谨慎客户时，直接说明这份产品属于零风险选择。"
+  },
+  {
+    "case_id": "V2DEV-049",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "explicit",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "product_nature_confusion"
+    ],
+    "text": "这不是保险，本质上就是银行的定期存款。"
+  },
+  {
+    "case_id": "V2DEV-050",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "paraphrase",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "product_nature_confusion"
+    ],
+    "text": "购买本保单等同于把钱存进普通储蓄账户。"
+  },
+  {
+    "case_id": "V2DEV-051",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "colloquial",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "product_nature_confusion"
+    ],
+    "text": "把它当存款就行，跟保险没什么关系。"
+  },
+  {
+    "case_id": "V2DEV-052",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "light_implicit",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "product_nature_confusion"
+    ],
+    "text": "您购买的就是银行理财产品，不必把它看作人身保险。"
+  },
+  {
+    "case_id": "V2DEV-053",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "multi_sentence",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "product_nature_confusion"
+    ],
+    "text": "合同名称虽然写着年金保险，但它其实就是一只基金。"
+  },
+  {
+    "case_id": "V2DEV-054",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "context_dependent",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "product_nature_confusion"
+    ],
+    "text": "在柜面销售时把保险缴费描述成开立高息存款账户。"
+  },
+  {
+    "case_id": "V2DEV-055",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "explicit",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "regulatory_endorsement"
+    ],
+    "text": "监管部门已经认证并推荐购买这款保险。"
+  },
+  {
+    "case_id": "V2DEV-056",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "paraphrase",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "regulatory_endorsement"
+    ],
+    "text": "本产品的收益和安全性由监管机构提供担保。"
+  },
+  {
+    "case_id": "V2DEV-057",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "colloquial",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "regulatory_endorsement"
+    ],
+    "text": "这是监管点名让大家买的产品。"
+  },
+  {
+    "case_id": "V2DEV-058",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "light_implicit",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "regulatory_endorsement"
+    ],
+    "text": "本方案属于监管机关官方指定的保险。"
+  },
+  {
+    "case_id": "V2DEV-059",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "multi_sentence",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "regulatory_endorsement"
+    ],
+    "text": "产品已经完成备案，所以监管部门也为它的收益提供站台。"
+  },
+  {
+    "case_id": "V2DEV-060",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "context_dependent",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "regulatory_endorsement"
+    ],
+    "text": "面对犹豫客户时，销售人员表示监管机关已经认可该产品表现。"
+  },
+  {
+    "case_id": "V2DEV-061",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "explicit",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "surrender_or_cash_value_misstatement"
+    ],
+    "text": "任何时候退保都能把已交保费全额拿回。"
+  },
+  {
+    "case_id": "V2DEV-062",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "paraphrase",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "surrender_or_cash_value_misstatement"
+    ],
+    "text": "提前终止合同不会产生费用或本金损失。"
+  },
+  {
+    "case_id": "V2DEV-063",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "colloquial",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "surrender_or_cash_value_misstatement"
+    ],
+    "text": "想退就退，交进去的钱一分都不会少。"
+  },
+  {
+    "case_id": "V2DEV-064",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "light_implicit",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "surrender_or_cash_value_misstatement"
+    ],
+    "text": "保单早期的现金价值始终等于您累计交纳的保费。"
+  },
+  {
+    "case_id": "V2DEV-065",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "multi_sentence",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "surrender_or_cash_value_misstatement"
+    ],
+    "text": "合同虽然列有现金价值表，但退保金额永远等于本金。"
+  },
+  {
+    "case_id": "V2DEV-066",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "context_dependent",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "surrender_or_cash_value_misstatement"
+    ],
+    "text": "在首个保单年度申请退保，也承诺立即返还全部缴费。"
+  },
+  {
+    "case_id": "V2DEV-067",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "explicit",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "waiting_or_cooling_period_misstatement"
+    ],
+    "text": "本产品没有等待期，生效当天任何疾病都能赔。"
+  },
+  {
+    "case_id": "V2DEV-068",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "paraphrase",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "waiting_or_cooling_period_misstatement"
+    ],
+    "text": "犹豫期结束后仍可随时无条件撤销并拿回全部保费。"
+  },
+  {
+    "case_id": "V2DEV-069",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "colloquial",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "waiting_or_cooling_period_misstatement"
+    ],
+    "text": "不用等，刚签完合同马上什么情况都保。"
+  },
+  {
+    "case_id": "V2DEV-070",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "light_implicit",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "waiting_or_cooling_period_misstatement"
+    ],
+    "text": "合同写了九十天等待期，实际只需要等待一天。"
+  },
+  {
+    "case_id": "V2DEV-071",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "multi_sentence",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "waiting_or_cooling_period_misstatement"
+    ],
+    "text": "条款写有犹豫期。不过超过该期限退保效果也完全相同。"
+  },
+  {
+    "case_id": "V2DEV-072",
+    "split": "DEV_ONLY",
+    "case_type": "positive",
+    "stratum": "context_dependent",
+    "context_group": "direct_marketing",
+    "expected_rules": [
+      "waiting_or_cooling_period_misstatement"
+    ],
+    "text": "针对健康险客户，销售人员否认疾病保障存在任何等待阶段。"
+  },
+  {
+    "case_id": "V2DEV-073",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "quoted",
+    "expected_rules": [],
+    "text": "培训课件展示错误话术：“这款产品保证收益”。"
+  },
+  {
+    "case_id": "V2DEV-074",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "quoted",
+    "expected_rules": [],
+    "text": "投诉记录原文写道：“投保肯定返钱”，现要求核查该表述。"
+  },
+  {
+    "case_id": "V2DEV-075",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "quoted",
+    "expected_rules": [],
+    "text": "媒体报道引用销售人员的话：“没有任何风险”。"
+  },
+  {
+    "case_id": "V2DEV-076",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "quoted",
+    "expected_rules": [],
+    "text": "风险复盘材料列出“监管推荐”这一曾被使用的说法。"
+  },
+  {
+    "case_id": "V2DEV-077",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "educational",
+    "expected_rules": [],
+    "text": "合规课堂说明，把预期收益说成固定回报属于误导性宣传。"
+  },
+  {
+    "case_id": "V2DEV-078",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "educational",
+    "expected_rules": [],
+    "text": "本页用于识别“最高收益”和“行业第一”等绝对化话术。"
+  },
+  {
+    "case_id": "V2DEV-079",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "educational",
+    "expected_rules": [],
+    "text": "消费者教育提示：保险与银行存款是不同性质的金融安排。"
+  },
+  {
+    "case_id": "V2DEV-080",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "educational",
+    "expected_rules": [],
+    "text": "内部教材解释退保金额应以现金价值和合同约定为准。"
+  },
+  {
+    "case_id": "V2DEV-081",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "prohibition",
+    "expected_rules": [],
+    "text": "监管要求销售人员不得宣称产品保证收益。"
+  },
+  {
+    "case_id": "V2DEV-082",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "prohibition",
+    "expected_rules": [],
+    "text": "宣传材料中禁止使用零风险、绝不亏损等用语。"
+  },
+  {
+    "case_id": "V2DEV-083",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "prohibition",
+    "expected_rules": [],
+    "text": "公司严禁把保险介绍成银行存款。"
+  },
+  {
+    "case_id": "V2DEV-084",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "prohibition",
+    "expected_rules": [],
+    "text": "任何渠道均不得声称监管部门推荐具体保险产品。"
+  },
+  {
+    "case_id": "V2DEV-085",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "consumer_warning",
+    "expected_rules": [],
+    "text": "请勿相信所谓百分之百不亏的保险宣传。"
+  },
+  {
+    "case_id": "V2DEV-086",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "consumer_warning",
+    "expected_rules": [],
+    "text": "遇到声称投保送高额返现的话术，请先核对正式合同。"
+  },
+  {
+    "case_id": "V2DEV-087",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "consumer_warning",
+    "expected_rules": [],
+    "text": "消费者应警惕把演示利率当作实际收益的介绍。"
+  },
+  {
+    "case_id": "V2DEV-088",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "consumer_warning",
+    "expected_rules": [],
+    "text": "不要因为销售人员说可以随时全额退保就仓促签约。"
+  },
+  {
+    "case_id": "V2DEV-089",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "internal_incentive",
+    "expected_rules": [],
+    "text": "公司完成季度销售目标后奖励销售人员一部手机。"
+  },
+  {
+    "case_id": "V2DEV-090",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "internal_incentive",
+    "expected_rules": [],
+    "text": "业务员年度业绩达到标准，可获得内部旅游激励。"
+  },
+  {
+    "case_id": "V2DEV-091",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "internal_incentive",
+    "expected_rules": [],
+    "text": "机构向优秀员工发放绩效奖金，与客户投保权益无关。"
+  },
+  {
+    "case_id": "V2DEV-092",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "internal_incentive",
+    "expected_rules": [],
+    "text": "团队新增保单达到考核数量后，公司给组员发放购物卡。"
+  },
+  {
+    "case_id": "V2DEV-093",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "comparison_explanation",
+    "expected_rules": [],
+    "text": "本文仅解释不同保险责任的比较方法，不评价任何产品排名。"
+  },
+  {
+    "case_id": "V2DEV-094",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "comparison_explanation",
+    "expected_rules": [],
+    "text": "表格对两份合同的等待期作客观列示，未声称哪一方更优。"
+  },
+  {
+    "case_id": "V2DEV-095",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "comparison_explanation",
+    "expected_rules": [],
+    "text": "消费者可比较保障范围、费用与免责事项后再作选择。"
+  },
+  {
+    "case_id": "V2DEV-096",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "comparison_explanation",
+    "expected_rules": [],
+    "text": "报告说明行业排名需要统一范围和公开数据，不能随意宣称第一。"
+  },
+  {
+    "case_id": "V2DEV-097",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "historical",
+    "expected_rules": [],
+    "text": "历史案例中，某销售人员曾因承诺保本而受到处理。"
+  },
+  {
+    "case_id": "V2DEV-098",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "historical",
+    "expected_rules": [],
+    "text": "以往处罚材料记载机构使用过“监管指定”的宣传语。"
+  },
+  {
+    "case_id": "V2DEV-099",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "historical",
+    "expected_rules": [],
+    "text": "案件复盘记录客户曾被告知退保没有损失。"
+  },
+  {
+    "case_id": "V2DEV-100",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "historical",
+    "expected_rules": [],
+    "text": "新闻回顾提到多年前市场上出现过保证中奖的投保活动。"
+  },
+  {
+    "case_id": "V2DEV-101",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "negated",
+    "expected_rules": [],
+    "text": "本产品不保证收益，非保证利益可能发生变化。"
+  },
+  {
+    "case_id": "V2DEV-102",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "negated",
+    "expected_rules": [],
+    "text": "保险合同不承诺本金不受损失，请审慎评估需求。"
+  },
+  {
+    "case_id": "V2DEV-103",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "negated",
+    "expected_rules": [],
+    "text": "该方案并非无风险，也不能替代银行存款。"
+  },
+  {
+    "case_id": "V2DEV-104",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "negated",
+    "expected_rules": [],
+    "text": "我们不提供合同之外的返现或礼品。"
+  },
+  {
+    "case_id": "V2DEV-105",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "conditional",
+    "expected_rules": [],
+    "text": "若符合合同约定的保险责任，保险公司将按条款给付保险金。"
+  },
+  {
+    "case_id": "V2DEV-106",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "conditional",
+    "expected_rules": [],
+    "text": "演示收益可能随实际经营状况变化，不代表未来结果。"
+  },
+  {
+    "case_id": "V2DEV-107",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "conditional",
+    "expected_rules": [],
+    "text": "如在犹豫期内按合同申请解除，退款金额依条款计算。"
+  },
+  {
+    "case_id": "V2DEV-108",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "conditional",
+    "expected_rules": [],
+    "text": "等待期是否适用以及期限长短，应以正式合同载明内容为准。"
+  },
+  {
+    "case_id": "V2DEV-109",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "role_ambiguity",
+    "expected_rules": [],
+    "text": "会议纪要提到有人建议送手机，但未说明对象、条件或是否采纳。"
+  },
+  {
+    "case_id": "V2DEV-110",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "role_ambiguity",
+    "expected_rules": [],
+    "text": "转述材料称某人说过收益很高，发言身份和使用场景均不明确。"
+  },
+  {
+    "case_id": "V2DEV-111",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "role_ambiguity",
+    "expected_rules": [],
+    "text": "草稿边注写有‘第一’，无法确认是标题编号还是营销表述。"
+  },
+  {
+    "case_id": "V2DEV-112",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "role_ambiguity",
+    "expected_rules": [],
+    "text": "聊天记录只出现‘奖励’，未说明奖励客户、员工还是合作方。"
+  },
+  {
+    "case_id": "V2DEV-113",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "clarification",
+    "expected_rules": [],
+    "text": "本产品是保险，不是银行存款，保险利益以合同为准。"
+  },
+  {
+    "case_id": "V2DEV-114",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "clarification",
+    "expected_rules": [],
+    "text": "监管备案不代表监管机构对产品收益作出保证或推荐。"
+  },
+  {
+    "case_id": "V2DEV-115",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "clarification",
+    "expected_rules": [],
+    "text": "现金价值可能低于已交保费，提前退保可能产生损失。"
+  },
+  {
+    "case_id": "V2DEV-116",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "hard_negative",
+    "context_group": "clarification",
+    "expected_rules": [],
+    "text": "合同包含等待期和责任免除，投保前请完整阅读条款。"
+  },
+  {
+    "case_id": "V2DEV-117",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "compliant",
+    "context_group": "compliant",
+    "expected_rules": [],
+    "text": "本材料用于说明产品基本信息，具体责任以保险合同为准。"
+  },
+  {
+    "case_id": "V2DEV-118",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "compliant",
+    "context_group": "compliant",
+    "expected_rules": [],
+    "text": "非保证利益存在不确定性，展示数值仅供理解情景使用。"
+  },
+  {
+    "case_id": "V2DEV-119",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "compliant",
+    "context_group": "compliant",
+    "expected_rules": [],
+    "text": "投保人应根据保障需求和支付能力审慎决定是否购买。"
+  },
+  {
+    "case_id": "V2DEV-120",
+    "split": "DEV_ONLY",
+    "case_type": "negative",
+    "stratum": "compliant",
+    "context_group": "compliant",
+    "expected_rules": [],
+    "text": "如需解除合同，请查阅现金价值表并咨询退保流程。"
+  }
+]

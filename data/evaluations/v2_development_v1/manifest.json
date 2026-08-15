@@ -1,0 +1,39 @@
+{
+  "dataset_id": "v2_development_v1",
+  "split": "DEV_ONLY",
+  "headline_benchmark": false,
+  "case_count": 120,
+  "positive_count": 72,
+  "negative_count": 48,
+  "per_rule_support": {
+    "absolute_or_superlative_claim": 8,
+    "concealment_or_minimization_of_exclusions": 6,
+    "extra_contractual_benefit": 6,
+    "false_promotion_or_prize": 6,
+    "guaranteed_return_or_principal": 6,
+    "improper_comparison_or_ranking": 6,
+    "misleading_interest_or_yield": 6,
+    "no_risk_or_no_loss": 6,
+    "product_nature_confusion": 6,
+    "regulatory_endorsement": 6,
+    "surrender_or_cash_value_misstatement": 6,
+    "waiting_or_cooling_period_misstatement": 6
+  },
+  "context_groups": {
+    "clarification": 4,
+    "comparison_explanation": 4,
+    "compliant": 4,
+    "conditional": 4,
+    "consumer_warning": 4,
+    "direct_marketing": 72,
+    "educational": 4,
+    "historical": 4,
+    "internal_incentive": 4,
+    "negated": 4,
+    "prohibition": 4,
+    "quoted": 4,
+    "role_ambiguity": 4
+  },
+  "dataset_sha256": "1c1e1d239f6405637eb040844757ba7be697bbc63b03c5f476aaf9faba982dae",
+  "construction_policy": "Independent V2 development material; not a holdout and not a headline benchmark. No V1 frozen predictions or failure cases were used for tuning."
+}

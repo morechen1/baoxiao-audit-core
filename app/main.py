@@ -11,6 +11,7 @@ from app.api.routes import (
     knowledge_router,
     screenings_router,
     sources_router,
+    v2_router,
     workflow_router,
 )
 from app.core.exceptions import BaoxiaoError
@@ -30,6 +31,7 @@ app.include_router(sources_router)
 app.include_router(workflow_router)
 app.include_router(knowledge_router)
 app.include_router(screenings_router)
+app.include_router(v2_router)
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
