@@ -106,6 +106,24 @@ def test_valid_consumer_extra_benefit_has_system_owned_exact_span() -> None:
     assert outcome.diagnostics["hallucinated_quote_accepted"] == 0
 
 
+def test_model_cannot_supply_or_override_severity() -> None:
+    raw = "购买本保险产品即可额外获赠一台手机。"
+    invalid = _payload(
+        _claim(
+            "extra_contractual_benefit",
+            "购买本保险产品即可额外获赠一台手机",
+            severity="low",
+        )
+    )
+    provider = QueueProvider([invalid, invalid])
+    outcome = _run(raw, provider)
+
+    assert outcome.candidates == ()
+    assert outcome.diagnostics["status"] == "failed"
+    assert outcome.diagnostics["failure_code"] == "schema_invalid"
+    assert provider.calls == 2
+
+
 def test_invalid_taxonomy_fails_closed_after_one_format_retry() -> None:
     raw = "普通文本"
     invalid = _payload(_claim("invented_risk", raw))

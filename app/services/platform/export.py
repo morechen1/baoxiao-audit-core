@@ -18,6 +18,11 @@ SAFETY_STATEMENT = (
     "AI语义解析用于发现风险候选，最终 RiskFinding 经系统确定性机制校验形成；"
     "本报告不构成违法认定或最终法律意见。"
 )
+RISK_LEVEL_LABELS_ZH = {"high": "高风险", "medium": "中风险", "low": "低风险"}
+
+
+def risk_level_label_zh(value: str) -> str:
+    return RISK_LEVEL_LABELS_ZH.get(value, "待复核")
 
 
 class PlatformAuditExportService:
@@ -28,6 +33,7 @@ class PlatformAuditExportService:
         detail = self.reports.detail(session, result)
         institution = self.reports.institution(session, result)
         consumer = self.reports.consumer(session, result)
+        summary = self.reports.summary(session, result)
         artifacts = self._artifacts(
             session,
             [chunk.screening_run_id for chunk in result.chunks],
@@ -49,7 +55,8 @@ class PlatformAuditExportService:
                 "screening_run_ids": detail["screening_run_ids"],
                 "status": detail["status"],
                 "finding_count": detail["finding_count"],
-                "risk_level": self.reports.summary(session, result)["risk_level"],
+                "risk_level": summary["risk_level"],
+                "risk_level_label_zh": risk_level_label_zh(str(summary["risk_level"])),
                 "runtime": detail["runtime"],
             },
             "findings": institution["findings"],
@@ -124,7 +131,7 @@ class PlatformAuditExportService:
                 "<h4>可信监管证据（EvidenceLink）</h4><ul>{evidence}</ul></article>".format(
                     key=html.escape(str(finding["finding_key"])),
                     rule=html.escape(str(finding["rule_id"])),
-                    severity=html.escape(str(finding["severity"])),
+                    severity=html.escape(risk_level_label_zh(str(finding["severity"]))),
                     quote=html.escape(str(finding["matched_text"])),
                     start=finding["raw_start_offset"],
                     end=finding["raw_end_offset"],
@@ -141,12 +148,13 @@ white-space:pre-wrap}
 .meta{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}.note{color:#52635a}
 """
         runtime = cast(dict[str, Any], screening["runtime"])
+        risk_label = risk_level_label_zh(str(screening["risk_level"]))
         return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <title>保销智审核报告</title><style>{css}</style></head><body><h1>保销智审核报告</h1>
 <p class="note">{html.escape(str(report['safety_statement']))}</p><div class="meta">
 <span><b>材料：</b>{html.escape(str(material['title']))}</span>
 <span><b>格式：</b>{html.escape(str(material['source_format']))}</span>
-<span><b>风险：</b>{html.escape(str(screening['risk_level']))}</span>
+<span><b>风险：</b>{html.escape(risk_label)}</span>
 <span><b>Findings：</b>{screening['finding_count']}</span></div>
 <h2>原始材料</h2><div class="raw">{html.escape(str(material['raw_text']))}</div>
 <h2>风险详情与可信证据</h2>{''.join(finding_sections) or '<p>未形成有效风险 Finding。</p>'}

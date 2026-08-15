@@ -2,8 +2,8 @@ const demoCases = [
   {
     id: "high-risk",
     number: "场景 01",
-    title: "高风险营销案例",
-    riskLevel: "high",
+    title: "显式多风险案例",
+    caseLabel: "典型营销表达",
     riskPosition: "监管背书、收益承诺与绝对安全",
     materialType: "advertisement",
     rawText: "监管推荐本产品，保证收益8%，本金绝对安全，今天投保即可领取限量礼品。",
@@ -12,8 +12,8 @@ const demoCases = [
   {
     id: "boundary-risk",
     number: "场景 02",
-    title: "边界风险案例",
-    riskLevel: "medium",
+    title: "语境边界案例",
+    caseLabel: "语境边界",
     riskPosition: "退保损失表述与合同限定并存",
     materialType: "sales_script",
     rawText: "资金使用灵活，如有需要可随时退保没有损失。具体权益和现金价值请以合同约定为准。",
@@ -23,7 +23,7 @@ const demoCases = [
     id: "low-risk",
     number: "场景 03",
     title: "合规对照案例",
-    riskLevel: "low",
+    caseLabel: "合规对照",
     riskPosition: "合同说明、责任免除与审慎提示",
     materialType: "product_introduction",
     rawText: "本材料仅作产品信息说明，保险责任、等待期、责任免除及退保安排以正式保险合同为准。投保前请阅读条款并按需咨询持证人员。",
@@ -130,6 +130,13 @@ function riskClass(level) {
   return `risk-${level}`;
 }
 
+function officialRiskLevel(value) {
+  if (!["high", "medium", "low"].includes(value)) {
+    throw new Error("platform_risk_level_invalid");
+  }
+  return value;
+}
+
 function displayCategory(value) {
   return categoryLabels[value] || value || "风险 Finding";
 }
@@ -155,7 +162,7 @@ function showToast(message, error = false) {
 
 function scenarioCard(item) {
   return `<button class="scenario-card" type="button" data-run-case="${escapeHtml(item.id)}">
-    <header><span class="scenario-number">${escapeHtml(item.number)}</span><span class="risk-pill ${riskClass(item.riskLevel)}">${riskLabel(item.riskLevel)}</span></header>
+    <header><span class="scenario-number">${escapeHtml(item.number)}</span><span class="case-label">${escapeHtml(item.caseLabel)}</span></header>
     <h3>${escapeHtml(item.title)}</h3>
     <p>${escapeHtml(item.summary)}</p>
     <footer><span>${escapeHtml(item.riskPosition)}</span><strong>开始演示 →</strong></footer>
@@ -477,9 +484,7 @@ async function runLiveReview() {
       consumerArtifact,
       citationResult.citations,
     ));
-    const riskLevel = findings.some((item) => item.severity === "high")
-      ? "high"
-      : findings.some((item) => item.severity === "medium") ? "medium" : "low";
+    const riskLevel = officialRiskLevel(created.risk_level);
     setCurrentResult({
       id: `platform-${created.platform_result_id}`,
       number: `审核编号 ${created.platform_result_id.slice(0, 12)}`,
@@ -532,6 +537,22 @@ function boundaryNotice(result) {
     return "当前后端运行在隔离构造赛事数据环境；相关引用仅用于演示交互，不代表正式监管结论。";
   }
   return "结果来自当前后端 API，仅提供风险信号、可信证据与复核辅助，不构成违法认定或最终法律意见。";
+}
+
+function riskBasisNotice(result) {
+  const findings = result.findings || [];
+  if (result.riskLevel === "high") {
+    const count = findings.filter((item) => item.severity === "high").length;
+    return `存在 ${count} 项高严重度风险，因此综合等级为高风险。`;
+  }
+  if (result.riskLevel === "medium") {
+    const count = findings.filter((item) => item.severity === "medium").length;
+    return `未发现高严重度风险，存在 ${count} 项中严重度风险，因此综合等级为中风险。`;
+  }
+  if (!findings.length) {
+    return "当前材料未形成有效风险 Finding。";
+  }
+  return "当前审核未形成高或中严重度风险 Finding。";
 }
 
 function countValue(value) {
@@ -711,6 +732,7 @@ function renderResult() {
         <article class="overview-card"><span>EvidenceLinks</span><strong>${evidenceCount} 条</strong></article>
         <article class="overview-card"><span>监管来源</span><strong>${sourceCount} 个</strong></article>
       </div>
+      <p class="risk-basis"><strong>等级依据：</strong>${escapeHtml(riskBasisNotice(result))}</p>
     </section>
     <details class="runtime-panel">
       <summary>运行信息（默认折叠）</summary>
@@ -721,7 +743,7 @@ function renderResult() {
       <header><h2>原始审核材料</h2><span>${findings.length ? "点击风险卡片查看对应原文位置" : "完整原文"}</span></header>
       <div class="material-content" id="material-content"></div>
     </section>
-    ${lowRisk ? `<section class="low-risk-banner"><span>✓</span><div><strong>当前未形成有效风险 Finding</strong><p>系统未形成通过确定性校验的风险 Finding，因此未触发下游监管知识 RAG 与解释生成。</p></div></section>` : `
+    ${lowRisk ? `<section class="low-risk-banner"><span>✓</span><div><strong>当前材料未形成有效风险 Finding</strong><p>当前自动审核未发现已定义的有效风险项，因此未触发下游监管知识 RAG 与解释生成。自动审核结果不等同于完整法律合规结论。</p></div></section>` : `
       <section class="result-layout">
         <aside class="findings-panel">
           <header class="panel-heading"><h2>发现的风险</h2><p>选择一项 Finding，查看原文位置、双端解释与监管证据。</p></header>

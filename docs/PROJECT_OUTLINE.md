@@ -49,6 +49,23 @@ severity/Finding/quote ownership、可信检索、Controlled RAG、Citation/Clai
 83.93%、Quote integrity 100%、Hallucinated quote accepted 0。该指标只对应 V1 核心，
 不代表文件接入、批量审核或长文档编排已用同一数据集重新评测。
 
+## 风险等级语义
+
+### 案例类型
+
+预置的“显式多风险案例”、“语境边界案例”和“合规对照案例”用于演示不同表达类型与识别难度，
+不参与审核结果计算。“语境边界”不等于“中风险”。
+
+### Finding Severity
+
+Finding severity 由系统按冻结 taxonomy/rule mapping 固定赋值。Semantic Parser 仅生成候选，不能决定
+或修改 severity。
+
+### 综合风险等级
+
+综合等级取当前材料所有有效 Finding 的最高 severity：存在 High 则为高风险；否则存在 Medium 则为
+中风险；无有效 Finding 则为低风险。`0 Finding` / 低风险不等于法律意义上的完全合规确认。
+
 ## 平台扩展
 
 - 粘贴文本、UTF-8/BOM TXT、MD、DOCX 段落与表格、文本型 PDF。

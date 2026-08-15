@@ -56,6 +56,24 @@ Raw marketing material
 实验路径，不是当前 `Semantic Parser`。Semantic Parser 只生成候选，最终 Finding、severity、
 原文 span、EvidenceLink 和 Citation 均由系统控制。
 
+## 风险等级口径
+
+### 案例类型
+
+“显式多风险案例”、“语境边界案例”和“合规对照案例”只用于演示不同表达类型与识别难度，
+不是审核结果。“语境边界”表示风险表达与限定说明并存，不等于“中风险”。
+
+### Finding Severity
+
+单条 Finding 的 `high` / `medium` severity 由系统按冻结 taxonomy/rule mapping 固定赋值。LLM 只能生成
+候选 Claim，不能决定或修改 severity。
+
+### 综合风险等级
+
+综合等级取当前材料所有有效 Finding 的最高 severity：存在 High Finding 则为高风险；否则存在
+Medium Finding 则为中风险；无有效 Finding 则为低风险。`0 Finding` / 低风险只表示当前自动审核
+未形成已定义的有效风险项，不等于法律意义上的完全合规确认。
+
 ## 技术栈
 
 - Python 3.12+

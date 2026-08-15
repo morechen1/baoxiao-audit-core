@@ -20,7 +20,9 @@ from app.services.platform.ingestion import MaterialIngestionService, MaterialIn
 from app.services.platform.long_document import segment_long_document, spans_are_duplicates
 from app.services.platform.reports import PlatformReportService
 from app.services.platform.store import BatchItem, ChunkRun, PlatformScreeningResult, RuntimeStore
+from app.services.screening.engine import DeterministicComplianceRuleEngine
 from app.services.screening.rules import load_ruleset
+from app.services.screening.segmenter import segment_marketing_text
 from app.services.screening.semantic_parser import SemanticParserOutcome
 
 ROOT = Path(__file__).parents[2]
@@ -243,6 +245,125 @@ def test_document_report_remaps_offsets_and_deduplicates_overlap() -> None:
     assert material.raw_text[2:6] == detail["findings"][0]["matched_text"]
 
 
+def test_boundary_and_zero_finding_use_backend_overall_risk_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_text = "资金使用灵活，如有需要可随时退保没有损失。具体权益和现金价值请以合同约定为准。"
+    candidates = DeterministicComplianceRuleEngine(load_ruleset()).run(
+        raw_text=raw_text,
+        material_sha256="a" * 64,
+        segments=segment_marketing_text(raw_text, "a" * 64),
+    )
+    assert [(item.rule_id, item.severity) for item in candidates] == [
+        ("surrender_or_cash_value_misstatement", "high")
+    ]
+
+    result = PlatformScreeningResult(
+        result_id="boundary",
+        material=MaterialInput("语境边界案例", "sales_script", raw_text, "粘贴文本", "text"),
+        chunks=(ChunkRun(0, 0, len(raw_text), 1),),
+        runtime={
+            "parser_calls": 0,
+            "cache_hits": 0,
+            "latency_ms": 1,
+            "provider_fail_closed": False,
+        },
+        created_at="now",
+    )
+    rows = [
+        {
+            "rule_id": candidates[0].rule_id,
+            "severity": candidates[0].severity,
+            "evidence_status": "supported",
+            "evidence": [],
+        }
+    ]
+    reports = PlatformReportService()
+    monkeypatch.setattr(reports, "_findings", lambda _session, _result: rows)
+    boundary_summary = reports.summary(cast(Any, None), result)
+    assert boundary_summary["risk_level"] == "high"
+
+    monkeypatch.setattr(reports, "_findings", lambda _session, _result: [])
+    low_summary = reports.summary(cast(Any, None), result)
+    assert low_summary["risk_level"] == "low"
+
+
+def test_batch_and_exports_reuse_backend_risk_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    material = MaterialInput("语境边界案例", "sales_script", "随时退保没有损失", "材料.txt", "txt")
+    runtime = {
+        "document_chunks": 1,
+        "parser_calls": 0,
+        "cache_hits": 0,
+        "latency_ms": 1,
+        "provider_fail_closed": False,
+    }
+    local_store = RuntimeStore()
+    result = local_store.add_result(material, [ChunkRun(0, 0, len(material.raw_text), 1)], runtime)
+    backend_summary = {
+        "platform_result_id": result.result_id,
+        "risk_level": "high",
+        "finding_count": 1,
+    }
+
+    class _BackendSummaryReports:
+        def summary(self, _session: Any, _result: Any) -> dict[str, Any]:
+            return backend_summary
+
+    record = local_store.create_batch([BatchItem(0, material, "材料.txt")])
+    record.items[0].status = "success"
+    record.items[0].result_id = result.result_id
+    record.status = "completed"
+    monkeypatch.setattr("app.services.platform.batch.RUNTIME_STORE", local_store)
+    monkeypatch.setattr("app.services.platform.batch.PlatformReportService", _BackendSummaryReports)
+    batch = BatchReviewService.payload(record)
+    assert batch["items"][0]["risk_level"] == backend_summary["risk_level"]
+
+    finding = {
+        "finding_key": "F001",
+        "rule_id": "surrender_or_cash_value_misstatement",
+        "severity": "high",
+        "matched_text": "随时退保没有损失",
+        "raw_start_offset": 0,
+        "raw_end_offset": 8,
+        "explanation": "风险说明",
+        "evidence": [],
+    }
+
+    class _ExportReports:
+        def detail(self, _session: Any, _result: Any) -> dict[str, Any]:
+            return {
+                "screening_run_ids": [1],
+                "status": "completed",
+                "finding_count": 1,
+                "runtime": runtime,
+            }
+
+        def institution(self, _session: Any, _result: Any) -> dict[str, Any]:
+            return {"findings": [finding], "evidence_summary": {}}
+
+        def consumer(self, _session: Any, _result: Any) -> dict[str, Any]:
+            return {}
+
+        def summary(self, _session: Any, _result: Any) -> dict[str, Any]:
+            return backend_summary
+
+    exporter = PlatformAuditExportService()
+    exporter.reports = cast(Any, _ExportReports())
+    monkeypatch.setattr(
+        exporter,
+        "_artifacts",
+        lambda _session, _run_ids: {"institution": [], "consumer": []},
+    )
+    report = exporter.build(cast(Any, None), result)
+    assert report["screening"]["risk_level"] == backend_summary["risk_level"]
+    assert report["screening"]["risk_level_label_zh"] == "高风险"
+    exported_html = exporter.html(report)
+    assert "<b>风险：</b>高风险" in exported_html
+    assert "<b>风险等级：</b>高风险" in exported_html
+
+
 def test_batch_state_tracks_partial_failure_without_aborting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -275,6 +396,7 @@ def test_html_report_escapes_material_and_exposes_no_secret() -> None:
         },
         "screening": {
             "risk_level": "high",
+            "risk_level_label_zh": "高风险",
             "finding_count": 1,
             "runtime": {
                 "document_chunks": 1,
@@ -301,6 +423,8 @@ def test_html_report_escapes_material_and_exposes_no_secret() -> None:
     exported = PlatformAuditExportService().html(report)
     assert "&lt;script&gt;" in exported
     assert "guaranteed_return_or_principal" in exported
+    assert "<b>风险：</b>高风险" in exported
+    assert "<b>风险等级：</b>高风险" in exported
     assert "LLM_API_KEY" not in exported
     assert "prompt_snapshot" not in exported
 

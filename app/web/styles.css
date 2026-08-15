@@ -191,6 +191,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .scenario-card:hover { transform: translateY(-3px); border-color: #b8ddc9; box-shadow: var(--shadow-hover); }
 .scenario-card header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .scenario-number { color: var(--subtle); font-size: 12px; font-weight: 700; letter-spacing: 0.08em; }
+.case-label { padding: 5px 9px; border: 1px solid #dfe8e3; border-radius: 999px; color: var(--muted); background: #f4f7f5; font-size: 12px; font-weight: 700; }
 .scenario-card h3 { margin: 22px 0 9px; font-size: 19px; }
 .scenario-card p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.65; }
 .scenario-card footer { margin-top: auto; padding-top: 20px; display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 13px; }
@@ -304,6 +305,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .overview-card span { color: var(--muted); font-size: 12px; }
 .overview-card strong { display: block; margin-top: 12px; font-size: 24px; line-height: 1.15; overflow-wrap: anywhere; }
 .overview-card strong.status-value { color: var(--green-dark); font-size: 19px; }
+.risk-basis { margin: 14px 0 0; padding: 11px 13px; border-radius: 9px; color: var(--muted); background: #f4f7f5; font-size: 12px; line-height: 1.65; }
+.risk-basis strong { margin-right: 5px; color: var(--text); }
 .audit-pipeline { margin-top: 16px; padding: 21px 22px; border: 1px solid var(--border); border-radius: 15px; background: #fff; }
 .pipeline-heading { margin-bottom: 16px; display: flex; align-items: end; justify-content: space-between; gap: 18px; }
 .pipeline-heading h2 { margin: 5px 0 0; font-size: 19px; }

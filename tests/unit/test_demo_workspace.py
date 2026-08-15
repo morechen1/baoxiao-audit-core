@@ -29,6 +29,65 @@ def test_contest_demo_workspace_and_assets_are_served() -> None:
     assert "demoCases" in script.text
 
 
+def test_preset_labels_are_separate_from_official_risk_levels() -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is required for the risk terminology contract test")
+    script_path = Path(__file__).parents[2] / "app" / "web" / "app.js"
+    probe = r"""
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const vm = require("node:vm");
+let source = fs.readFileSync(process.argv[1], "utf8");
+const bootstrap = "renderDashboard(); renderCaseSelector(); bindEvents(); "
+  + "loadProviderStatus(); loadEvaluationCenter();";
+source = source.replace(bootstrap, "");
+source += "\nglobalThis.__riskSemantics = { demoCases, scenarioCard, "
+  + "officialRiskLevel, riskBasisNotice };";
+const sandbox = { console, Object, String, Array, Error, Set, globalThis: null };
+sandbox.globalThis = sandbox;
+vm.runInNewContext(source, sandbox);
+const { demoCases, scenarioCard, officialRiskLevel, riskBasisNotice } = sandbox.__riskSemantics;
+const explicit = demoCases.find((item) => item.id === "high-risk");
+const boundary = demoCases.find((item) => item.id === "boundary-risk");
+const compliant = demoCases.find((item) => item.id === "low-risk");
+assert.equal(explicit.title, "显式多风险案例");
+assert.equal(boundary.title, "语境边界案例");
+assert.equal(compliant.title, "合规对照案例");
+assert.equal(boundary.caseLabel, "语境边界");
+assert.equal(Object.hasOwn(boundary, "riskLevel"), false);
+assert.equal(Object.hasOwn(explicit, "riskLevel"), false);
+assert.equal(Object.hasOwn(compliant, "riskLevel"), false);
+const presetHtml = scenarioCard(boundary);
+assert(presetHtml.includes('class="case-label"'));
+assert(!presetHtml.includes("risk-pill"));
+assert(!presetHtml.includes("中风险"));
+assert.equal(officialRiskLevel("high"), "high");
+assert.throws(() => officialRiskLevel("boundary"), /platform_risk_level_invalid/);
+assert.equal(
+  riskBasisNotice({riskLevel:"high", findings:[{severity:"high"}]}),
+  "存在 1 项高严重度风险，因此综合等级为高风险。",
+);
+assert.equal(
+  riskBasisNotice({riskLevel:"medium", findings:[{severity:"medium"}]}),
+  "未发现高严重度风险，存在 1 项中严重度风险，因此综合等级为中风险。",
+);
+assert.equal(
+  riskBasisNotice({riskLevel:"low", findings:[]}),
+  "当前材料未形成有效风险 Finding。",
+);
+assert(source.includes("officialRiskLevel(created.risk_level)"));
+assert(!source.includes("const riskLevel = findings.some"));
+"""
+    completed = subprocess.run(
+        [node, "-e", probe, str(script_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
 def test_explanation_ui_uses_finding_keys_and_keeps_partial_audience_artifacts() -> None:
     node = shutil.which("node")
     if node is None:
