@@ -88,7 +88,7 @@ evidence_quality_bonus: A=0.10, B=0.07, C=0.03, D/NULL=0
 ## API 和 CLI
 
 ```bash
-curl 'http://localhost:8000/api/v1/knowledge/search?query=销售误导&record_types=penalty'
+curl 'http://localhost:8888/api/v1/knowledge/search?query=销售误导&record_types=penalty'
 python -m app.cli.main knowledge rebuild
 python -m app.cli.main knowledge rebuild --document-id 123
 python -m app.cli.main knowledge verify

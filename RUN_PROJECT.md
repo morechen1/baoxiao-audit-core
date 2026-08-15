@@ -72,7 +72,7 @@ macOS Finder 双击：
 一键启动.command
 ```
 
-启动成功后访问 `http://127.0.0.1:8000/`。运行日志仅写入本机 `runtime/logs/`，该目录不在
+启动成功后访问 `http://127.0.0.1:8888/`。运行日志仅写入本机 `runtime/logs/`，该目录不在
 提交 ZIP 中。
 
 启动后可在“新建审核”中粘贴文本或上传 TXT、MD、DOCX、文本型 PDF；“批量审核”支持
@@ -134,12 +134,12 @@ Parser 仍可能执行。
 - `依赖安装失败`：检查网络、证书和磁盘空间后重新运行；启动器不会无限重试。
 - `数据库处于不完整状态`：不要删除用户数据，先核对数据库名和可信知识统计。
 - `Provider unavailable`：检查 key、HTTPS endpoint、model、外网和 timeout。
-- `端口 8000 被占用`：停止旧进程或修改 `FINAL_DEMO_PORT`。
+- `端口 8888 被占用`：停止旧进程或修改 `FINAL_DEMO_PORT`。
 
 ## 12. 验证系统状态
 
 ```bash
-curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8888/health
 python3 scripts/verify_final_validation.py
 ./检查完整性.command
 python3 scripts/verify_v1_core_integrity.py

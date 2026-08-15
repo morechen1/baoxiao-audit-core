@@ -1,6 +1,6 @@
 # API
 
-服务默认监听 `:8000`，交互文档位于 `/docs`，OpenAPI JSON 位于 `/openapi.json`。
+平台增强候选版默认监听 `:8888`，交互文档位于 `/docs`，OpenAPI JSON 位于 `/openapi.json`。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|

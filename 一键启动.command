@@ -7,14 +7,14 @@ cd "$ROOT_DIR"
 LOG_DIR="$ROOT_DIR/runtime/logs"
 LOG_FILE="$LOG_DIR/project.log"
 PID_FILE="$ROOT_DIR/runtime/project.pid"
-PORT="${FINAL_DEMO_PORT:-8000}"
+PORT="${FINAL_DEMO_PORT:-8888}"
 
 if [[ -f "$ROOT_DIR/config/local.env" ]]; then
   set -a
   # shellcheck disable=SC1091
   source "$ROOT_DIR/config/local.env"
   set +a
-  PORT="${FINAL_DEMO_PORT:-8000}"
+  PORT="${FINAL_DEMO_PORT:-8888}"
 fi
 
 health_ok() {
