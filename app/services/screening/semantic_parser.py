@@ -28,7 +28,7 @@ from app.services.screening.semantic_v2 import (
     spans_overlap,
 )
 
-SEMANTIC_PARSER_VERSION = "semantic_claim_parser_v2"
+SEMANTIC_PARSER_VERSION = "semantic_claim_parser_v2_1"
 SEMANTIC_SCHEMA_VERSION = "semantic_claim_schema_v2"
 SEMANTIC_PARSER_CONFIDENCE_THRESHOLD = 0.72
 
@@ -276,7 +276,9 @@ class OpenAICompatibleSemanticParserProvider:
             "Citation、EvidenceLink、Finding ID、severity 或最终合规结论。"
             "对每个可能相关的语义主张输出 claim。source_quote 必须从"
             " original_marketing_text 逐字复制为连续片段，不得改写、补字、纠错或规范化；"
-            "若同一短语重复，应扩展为能唯一定位的完整原文片段，无法唯一定位则不要输出。"
+            "source_quote 先选最短但语义完整的原文子串；若同一短语重复，应扩展为能"
+            "唯一定位的完整原文片段，无法唯一定位则不要输出。输出前必须自检"
+            " original_marketing_text.find(source_quote) 能找到且仅找到一处。"
             "actor/audience/beneficiary/speaker_role 必须按实际角色填写。"
             "面向消费者的投保赠品 beneficiary=consumer；"
             "销售人员业绩奖励 beneficiary=salesperson；无法判断受益人时 beneficiary=unknown 且"
@@ -287,7 +289,14 @@ class OpenAICompatibleSemanticParserProvider:
             "conditional、conditionality、guarantee_strength 与 risk_strength，"
             "绝不能改写为肯定营销主张。比较或排名候选必须填写 comparison_target 并包含"
             " comparison semantic feature；收益保证与无风险候选必须按原文强度填写"
-            " guarantee_strength 或 risk_strength。"
+            " guarantee_strength 或 risk_strength。negated 表示叙述者在否定该营销主张，"
+            "不是只要句子有‘不’就设为 true；例如‘不会亏’是肯定的无损失主张，"
+            "‘否认存在等待期’是肯定的等待期误导，均不得设为 negated。"
+            "销售人员通过间接引语当前向客户作出的表述仍是 DIRECT_MARKETING，不是"
+            " QUOTED_MARKETING。仅当材料是转述、批评、教育、禁止或历史记录时才标注非直接模式。"
+            "不要因同一句话泛化生成多个类别；只有每个类别都有独立的直接语义证据时"
+            "才可多标签。产品性质混淆、监管背书、退保/现金价值和等待/犹豫期等专业类别"
+            "优先于从同一句话泛化出保证收益、无风险或收益误导。"
             "confidence 表示 candidate_rule 与原文主张语义的把握，不表示违法概率。"
         )
         return {
@@ -671,9 +680,7 @@ def _statement_mode_reject_reason(claim: SemanticClaim) -> str | None:
 
 
 def _semantic_contract_reject_reason(claim: SemanticClaim) -> str | None:
-    if claim.candidate_rule == "improper_comparison_or_ranking" and not (
-        claim.comparison_target and "comparison" in claim.semantic_features
-    ):
+    if claim.candidate_rule == "improper_comparison_or_ranking" and not claim.comparison_target:
         return "semantic_ambiguity"
     if (
         claim.candidate_rule == "guaranteed_return_or_principal"
@@ -709,18 +716,32 @@ def _arbitrate_semantic_candidates(
     )
     kept: list[FindingCandidate] = []
     rejected = 0
+    specialized_rules = {
+        "product_nature_confusion",
+        "regulatory_endorsement",
+        "surrender_or_cash_value_misstatement",
+        "waiting_or_cooling_period_misstatement",
+    }
     for candidate in ordered:
         if candidate.rule_id not in ARBITRATION_RULES:
             kept.append(candidate)
             continue
         span = (candidate.raw_start_offset, candidate.raw_end_offset)
+        specialized_overlap = any(
+            item.rule_id in specialized_rules
+            and spans_overlap(span, (item.raw_start_offset, item.raw_end_offset))
+            for item in candidates
+        )
+        if specialized_overlap:
+            rejected += 1
+            continue
         deterministic_overlap = [
             item
             for item in deterministic
             if item.rule_id in ARBITRATION_RULES
             and spans_overlap(span, (item.raw_start_offset, item.raw_end_offset))
         ]
-        if candidate.rule_id == "misleading_interest_or_yield" and deterministic_overlap:
+        if deterministic_overlap:
             rejected += 1
             continue
         semantic_overlap = [

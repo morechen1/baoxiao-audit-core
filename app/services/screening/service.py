@@ -26,6 +26,7 @@ from app.services.screening.reports import ScreeningReportService
 from app.services.screening.rules import MarketingRuleSet, load_ruleset
 from app.services.screening.segmenter import SEGMENTER_VERSION, segment_marketing_text
 from app.services.screening.semantic_parser import SemanticClaimParser
+from app.services.screening.semantic_v2 import deterministic_context_reject_reason
 
 MAX_RAW_TEXT_LENGTH = 100_000
 MAX_TITLE_LENGTH = 300
@@ -155,11 +156,31 @@ class DeterministicScreeningService:
                     segments=candidates,
                     deterministic=deterministic_candidates,
                 )
+                effective_deterministic_candidates = deterministic_candidates
+                deterministic_context_suppressions: dict[str, int] = {}
+                if semantic_outcome.diagnostics.get("status") in {"completed", "partial"}:
+                    effective_deterministic_candidates = []
+                    for candidate in deterministic_candidates:
+                        reason = deterministic_context_reject_reason(
+                            raw_text,
+                            start=candidate.raw_start_offset,
+                            end=candidate.raw_end_offset,
+                            rule_id=candidate.rule_id,
+                        )
+                        if reason is None:
+                            effective_deterministic_candidates.append(candidate)
+                            continue
+                        deterministic_context_suppressions[reason] = (
+                            deterministic_context_suppressions.get(reason, 0) + 1
+                        )
+                semantic_outcome.diagnostics["deterministic_context_suppressions"] = dict(
+                    sorted(deterministic_context_suppressions.items())
+                )
                 semantic_finding_shas = {
                     candidate.finding_sha256 for candidate in semantic_outcome.candidates
                 }
                 finding_candidates = sorted(
-                    [*deterministic_candidates, *semantic_outcome.candidates],
+                    [*effective_deterministic_candidates, *semantic_outcome.candidates],
                     key=lambda value: (
                         value.raw_start_offset,
                         value.raw_end_offset,

@@ -104,9 +104,29 @@ class SemanticParserCache:
 
 PARSER_CACHE = SemanticParserCache()
 
-EDUCATIONAL_MARKERS = ("请勿相信", "风险提示", "错误话术", "违规话术", "培训材料", "警惕所谓")
+EDUCATIONAL_MARKERS = (
+    "请勿相信",
+    "请先核对",
+    "不要相信",
+    "遇到声称",
+    "风险提示",
+    "错误话术",
+    "违规话术",
+    "培训材料",
+    "培训课件",
+    "警惕所谓",
+)
 PROHIBITIVE_MARKERS = ("不得宣传", "禁止宣称", "严禁承诺", "监管部门明确禁止", "不得承诺")
-HISTORICAL_MARKERS = ("历史案例", "曾因", "处罚案例", "以往案件", "案例中")
+HISTORICAL_MARKERS = (
+    "历史案例",
+    "曾因",
+    "处罚案例",
+    "以往案件",
+    "案例中",
+    "历史上",
+    "多年前",
+    "新闻回顾",
+)
 INTERNAL_MARKERS = (
     "销售人员",
     "业务员",
@@ -119,7 +139,26 @@ INTERNAL_MARKERS = (
     "季度任务",
     "月度任务",
 )
-QUOTE_INTRO_MARKERS = ("所谓", "例如", "列举", "话术", "宣称", "声称")
+QUOTE_INTRO_MARKERS = (
+    "所谓",
+    "例如",
+    "列举",
+    "列出",
+    "展示",
+    "摘录",
+    "引用",
+    "话术",
+    "宣称",
+    "声称",
+)
+NEGATED_OFFER_MARKERS = (
+    "不提供",
+    "不承诺",
+    "不保证",
+    "并非",
+    "不存在",
+    "不包含",
+)
 
 
 def deterministic_context_reject_reason(
@@ -143,7 +182,10 @@ def deterministic_context_reject_reason(
         marker in context for marker in INTERNAL_MARKERS
     ):
         return "internal_incentive_context"
-    before = raw_text[max(0, start - 28) : start]
+    before = raw_text[max(context_start, start - 24) : start]
+    if any(marker in before for marker in NEGATED_OFFER_MARKERS):
+        return "negated_context"
+    before = raw_text[max(0, start - 36) : start]
     if any(marker in before for marker in QUOTE_INTRO_MARKERS) and (
         "“" in before or "‘" in before or '"' in before
     ):
@@ -161,7 +203,17 @@ ARBITRATION_RULES = {
     "no_risk_or_no_loss",
 }
 GUARANTEE_MARKERS = ("保证", "保本", "保息", "稳赚", "固定赚", "收益锁定", "本金安全")
-RISK_MARKERS = ("无风险", "零风险", "不亏", "不会损失", "绝对安全", "本金绝对安全")
+RISK_MARKERS = (
+    "无风险",
+    "零风险",
+    "不亏",
+    "不可能亏",
+    "不会亏",
+    "不会损失",
+    "不会有损失",
+    "绝对安全",
+    "本金绝对安全",
+)
 
 
 def arbitration_priority(rule_id: str, quote: str) -> int:

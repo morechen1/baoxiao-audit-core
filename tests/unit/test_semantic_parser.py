@@ -331,6 +331,56 @@ def test_existing_deterministic_behavior_survives_empty_semantic_output(session)
     assert session.query(RiskFinding).one().rule_id == "guaranteed_return_or_principal"
 
 
+def test_v2_context_guard_suppresses_deterministic_quoted_claim_after_parser_success(
+    session,
+) -> None:
+    raw = "培训课件展示错误话术：“这款产品保证收益”。"
+    parser = SemanticClaimParser(
+        settings=Settings(semantic_parser_enabled=True),
+        provider=QueueProvider([_payload()]),
+    )
+    run = DeterministicScreeningService(
+        settings=Settings(semantic_parser_enabled=True),
+        semantic_parser=parser,
+    ).run(
+        session,
+        title="引用话术",
+        material_type="advertisement",
+        raw_text=raw,
+        source_label="unit_test",
+    )
+    assert run.finding_count == 0
+    assert session.query(RiskFinding).count() == 0
+    diagnostics = run.evidence_evaluation_summary_json["semantic_parser"]
+    assert diagnostics["deterministic_context_suppressions"] == {"educational_context": 1}
+
+
+def test_v2_context_guard_keeps_deterministic_claim_when_parser_fails(session) -> None:
+    raw = "培训课件展示错误话术：“这款产品保证收益”。"
+    parser = SemanticClaimParser(
+        settings=Settings(
+            semantic_parser_enabled=True,
+            semantic_parser_cache_enabled=False,
+        ),
+        provider=QueueProvider([SemanticParserError("provider_not_configured")]),
+    )
+    run = DeterministicScreeningService(
+        settings=Settings(
+            semantic_parser_enabled=True,
+            semantic_parser_cache_enabled=False,
+        ),
+        semantic_parser=parser,
+    ).run(
+        session,
+        title="失败保底",
+        material_type="advertisement",
+        raw_text=raw,
+        source_label="unit_test",
+    )
+    assert run.finding_count == 1
+    assert session.query(RiskFinding).one().rule_id == "guaranteed_return_or_principal"
+
+
 def test_openai_compatible_payload_contains_no_rag_or_client_secret() -> None:
     captured: dict[str, object] = {}
 
@@ -470,6 +520,29 @@ def test_v2_semantic_contract_rejects_unknown_mode_and_weak_risk_strength() -> N
     assert weak.diagnostics["reject_reasons"] == {"semantic_ambiguity": 1}
 
 
+def test_comparison_contract_uses_explicit_target_as_authoritative_structure() -> None:
+    quote = "这款产品的保障水平稳居行业第一"
+    outcome = _run(
+        quote,
+        QueueProvider(
+            [
+                _payload(
+                    _claim(
+                        "improper_comparison_or_ranking",
+                        quote,
+                        claim_type="comparison_or_ranking",
+                        semantic_features=[],
+                        comparison_target="行业同类产品",
+                    )
+                )
+            ]
+        ),
+    )
+    assert [item.rule_id for item in outcome.candidates] == [
+        "improper_comparison_or_ranking"
+    ]
+
+
 def test_long_text_chunks_keep_document_offsets_and_fuse_overlap() -> None:
     quote = "购买本保险即可额外获赠手机"
     raw = "甲" * 440 + quote + "乙" * 360
@@ -531,6 +604,34 @@ def test_taxonomy_arbitration_reduces_semantic_over_labeling() -> None:
         ),
     )
     assert [item.rule_id for item in outcome.candidates] == ["guaranteed_return_or_principal"]
+    assert outcome.diagnostics["reject_reasons"] == {"taxonomy_arbitration": 1}
+
+
+def test_specialized_taxonomy_prevents_generic_financial_over_labeling() -> None:
+    quote = "购买本保单等同于把钱存进普通储蓄账户"
+    outcome = _run(
+        quote,
+        QueueProvider(
+            [
+                _payload(
+                    _claim(
+                        "guaranteed_return_or_principal",
+                        quote,
+                        claim_type="return_or_principal_guarantee",
+                        semantic_features=["guarantee", "principal_preservation"],
+                        guarantee_strength="explicit",
+                    ),
+                    _claim(
+                        "product_nature_confusion",
+                        quote,
+                        claim_type="product_nature",
+                        semantic_features=["product_nature"],
+                    ),
+                )
+            ]
+        ),
+    )
+    assert [item.rule_id for item in outcome.candidates] == ["product_nature_confusion"]
     assert outcome.diagnostics["reject_reasons"] == {"taxonomy_arbitration": 1}
 
 
