@@ -33,6 +33,8 @@ const demoCases = [
 
 const state = {
   current: null,
+  pendingFile: null,
+  batchResults: [],
   audience: "institution",
   selectedFinding: 0,
   expandedPipelineStage: null,
@@ -48,6 +50,7 @@ const state = {
 const viewTitles = {
   dashboard: "工作台",
   review: "新建审核",
+  batch: "批量审核",
   processing: "审核处理中",
   result: "当前审核结果",
   validation: "检测效果",
@@ -85,6 +88,16 @@ const rejectionReasonLabels = {
   semantic_ambiguity: "语义歧义",
   confidence: "置信度门禁",
   duplicate: "重复候选融合",
+};
+
+const apiErrorLabels = {
+  upload_pdf_no_extractable_text: "未检测到可提取文本，该文件可能为扫描型 PDF；当前版本暂不提供 OCR。",
+  upload_extension_not_allowed: "不支持该文件类型，请选择 TXT、MD、DOCX 或 PDF。",
+  upload_content_type_not_allowed: "文件扩展名与浏览器识别类型不一致，已安全拒绝。",
+  upload_size_invalid: "文件为空或超过当前 10MB 大小限制。",
+  upload_document_empty: "材料中没有可供审核的文本。",
+  upload_text_encoding_invalid: "文本不是有效 UTF-8 编码，未执行审核。",
+  long_document_chunk_limit_exceeded: "文档超过当前安全处理上限，请拆分后重新审核。",
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -147,12 +160,19 @@ function renderCaseSelector() {
 }
 
 function fetchJson(path, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (!(options.body instanceof FormData) && options.body !== undefined) {
+    headers["Content-Type"] = headers["Content-Type"] || "application/json";
+  }
   return fetch(path, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
     ...options,
+    headers,
   }).then(async (response) => {
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload?.error?.code || payload?.detail || `HTTP ${response.status}`);
+    if (!response.ok) {
+      const code = payload?.error?.code || payload?.detail || `HTTP ${response.status}`;
+      throw new Error(apiErrorLabels[code] || code);
+    }
     return payload;
   });
 }
@@ -312,6 +332,8 @@ async function loadProviderStatus() {
 }
 
 async function playDemo(caseItem) {
+  state.pendingFile = null;
+  $("#file-input").value = "";
   $("#material-title").value = caseItem.title;
   $("#material-type").value = caseItem.materialType;
   $("#material-text").value = caseItem.rawText;
@@ -322,7 +344,7 @@ async function playDemo(caseItem) {
 async function runLiveReview() {
   const title = $("#material-title").value.trim();
   const rawText = $("#material-text").value.trim();
-  if (!title || !rawText) {
+  if (!title || (!rawText && !state.pendingFile)) {
     showToast("请填写材料标题和待审材料。", true);
     return;
   }
@@ -333,27 +355,44 @@ async function runLiveReview() {
   $("#processing-title").textContent = "正在进行风险识别…";
   $("#processing-copy").textContent = "系统正在通过规则与语义两个通道形成候选风险，并执行确定性校验。";
   try {
-    const created = await fetchJson("/api/v1/screenings", {
-      method: "POST",
-      body: JSON.stringify({
-        title,
-        material_type: $("#material-type").value,
-        raw_text: rawText,
-        source_label: "contest_demo_workspace",
-      }),
-    });
+    let created;
+    if (state.pendingFile) {
+      const form = new FormData();
+      form.append("file", state.pendingFile);
+      form.append("material_type", $("#material-type").value);
+      created = await fetchJson("/api/platform/screenings/upload", { method: "POST", body: form });
+    } else {
+      created = await fetchJson("/api/platform/screenings/text", {
+        method: "POST",
+        body: JSON.stringify({
+          title,
+          material_type: $("#material-type").value,
+          raw_text: rawText,
+          source_label: "platform_workspace",
+        }),
+      });
+    }
     $("#processing-title").textContent = "正在形成可信证据链…";
     $("#processing-copy").textContent = "风险 Finding 已完成确定性校验，系统正在读取可信 Evidence 与双端基础报告。";
     const [screening, institutionReport, consumerReport] = await Promise.all([
-      fetchJson(created.report_endpoints.screening),
-      fetchJson(created.report_endpoints.institution_report),
-      fetchJson(created.report_endpoints.consumer_notice),
+      fetchJson(created.report_endpoints.detail),
+      fetchJson(created.report_endpoints.institution),
+      fetchJson(created.report_endpoints.consumer),
     ]);
+
+    const semanticStatus = screening.evidence_evaluation_summary?.semantic_parser?.status;
+    if (semanticStatus === "failed") {
+      showToast("语义增强服务暂不可用，当前结果基于可用确定性审查路径生成。", true);
+    }
 
     let institutionArtifact = null;
     let consumerArtifact = null;
     let explanationStatus = { ...state.provider, status: screening.findings.length ? "pending" : "not_required" };
-    if (screening.findings.length) {
+    const hasGroundedFinding = screening.findings.some(
+      (finding) => finding.evidence_status !== "evidence_insufficient" && (finding.evidence || []).length,
+    );
+    const shortText = Boolean(created.runtime?.short_text_direct_v1);
+    if (screening.findings.length && hasGroundedFinding && shortText) {
       $("#processing-copy").textContent = "Finding 与监管 Evidence 已锁定，正在生成并验证机构端与消费者端受控解释。";
       const audienceResult = await requestAudienceArtifacts(created.screening_run_id);
       institutionArtifact = audienceResult.artifacts.institution || null;
@@ -366,6 +405,12 @@ async function runLiveReview() {
           .join("；");
         showToast(`筛查已完成；受控解释${explanationStatus.status === "partial" ? "部分成功" : "不可用"}：${detail}`, true);
       }
+    } else if (screening.findings.length && !shortText) {
+      explanationStatus = { ...state.provider, status: "not_requested_long_document", audiences: {} };
+      showToast("长文档已完成 V1 分块筛查；本次未自动追加多分块解释调用。", false);
+    } else if (screening.findings.length) {
+      explanationStatus = { ...state.provider, status: "not_required_without_evidence", audiences: {} };
+      showToast("风险 Finding 已保留，但未绑定充分可信证据，因此未生成受控解释。", true);
     }
 
     const citationResult = await requestAudienceCitations({
@@ -385,21 +430,25 @@ async function runLiveReview() {
       ? "high"
       : findings.some((item) => item.severity === "medium") ? "medium" : "low";
     setCurrentResult({
-      id: `live-${created.screening_run_id}`,
-      number: `审核编号 ${created.screening_run_id}`,
-      title,
-      rawText,
+      id: `platform-${created.platform_result_id}`,
+      number: `审核编号 ${created.platform_result_id.slice(0, 12)}`,
+      title: created.title || title,
+      rawText: created.raw_text,
       materialType: $("#material-type").value,
       riskLevel,
       findings,
-      mode: constructedRuntime ? "在线 API 审核 · 隔离构造赛事数据" : "在线 API 审核 · 当前后端结果",
+      mode: constructedRuntime ? "V1 核心审核 · 隔离构造赛事数据" : "V1 检测核心 + 平台能力",
       status: created.status,
       institutionReport,
       consumerReport,
       evidenceSummary: institutionReport.evidence_summary || {},
       explanationStatus,
       screeningDiagnostics: screening.evidence_evaluation_summary || {},
+      runtimeInfo: screening.runtime || created.runtime || {},
+      reportEndpoints: created.report_endpoints,
     });
+    state.pendingFile = null;
+    $("#file-input").value = "";
     showView("result");
   } catch (error) {
     showView("review");
@@ -444,7 +493,9 @@ function pipelineSnapshot(result) {
   const semanticAccepted = countValue(semantic.semantic_supplements);
   const modelCandidates = countValue(semantic.model_candidates);
   const rejectedCandidates = countValue(semantic.rejected_candidates);
-  const deterministicCandidates = Math.max(0, findings.length - semanticAccepted);
+  const deterministicCandidates = Number.isFinite(Number(diagnostics.deterministic_candidates))
+    ? countValue(diagnostics.deterministic_candidates)
+    : Math.max(0, findings.length - semanticAccepted);
   const candidateTotal = deterministicCandidates + modelCandidates;
   const severity = findings.reduce((counts, finding) => {
     counts[finding.severity] = (counts[finding.severity] || 0) + 1;
@@ -517,7 +568,7 @@ function renderAuditPipeline() {
     {
       key: "discovery", step: "02", title: "风险发现", subtitle: "规则识别 + AI 语义解析",
       value: `候选 ${data.candidateTotal}`,
-      detail: `<div class="pipeline-detail-grid"><span><b>AI 语义候选</b><strong>${data.modelCandidates}</strong></span><span><b>规则 / 系统候选</b><strong>${data.deterministicCandidates}</strong></span><span><b>候选总数</b><strong>${data.candidateTotal}</strong></span></div><p class="pipeline-detail-note">规则识别与语义解析协同产生风险候选；AI 语义解析只产生候选，不能直接形成最终风险结论。</p>`,
+      detail: `<div class="pipeline-detail-grid"><span><b>AI 语义候选</b><strong>${data.modelCandidates}</strong></span><span><b>规则 / 系统候选</b><strong>${data.deterministicCandidates}</strong></span><span><b>文档分块</b><strong>${countValue(result.runtimeInfo?.document_chunks) || 1}</strong></span><span><b>Parser calls</b><strong>${countValue(result.runtimeInfo?.parser_calls)}</strong></span><span><b>Cache hits</b><strong>${countValue(result.runtimeInfo?.cache_hits)}</strong></span><span><b>处理耗时</b><strong>${countValue(result.runtimeInfo?.latency_ms)} ms</strong></span><span><b>检测基线</b><strong>${escapeHtml(result.runtimeInfo?.detection_baseline || "V1")}</strong></span><span><b>候选总数</b><strong>${data.candidateTotal}</strong></span></div><p class="pipeline-detail-note">规则识别与 V1 Semantic Parser 协同产生候选；平台层只负责接入与编排，不能改变最终风险结论。</p>`,
     },
     {
       key: "validation", step: "03", title: "确定性校验", subtitle: "证据、语境、角色与置信度门禁",
@@ -573,7 +624,11 @@ function renderResult() {
     <section class="result-header">
       <div class="result-heading">
         <div><span class="section-kicker">审核结果</span><h1>${escapeHtml(result.title)}</h1><p>${escapeHtml(result.number)} · 风险输出已完成确定性校验</p></div>
-        <div class="result-actions"><button class="secondary-button" id="result-new-review" type="button">审核新材料</button></div>
+        <div class="result-actions">
+          <a class="secondary-button report-link" href="${escapeHtml(result.reportEndpoints?.html || "#")}" target="_blank" rel="noreferrer">导出 HTML</a>
+          <a class="secondary-button report-link" href="${escapeHtml(result.reportEndpoints?.json || "#")}" download>导出 JSON</a>
+          <button class="secondary-button" id="result-new-review" type="button">审核新材料</button>
+        </div>
       </div>
       <div class="overview-grid">
         <article class="overview-card"><span>风险等级</span><strong class="${riskClass(result.riskLevel)}">${riskLabel(result.riskLevel)}</strong></article>
@@ -582,6 +637,10 @@ function renderResult() {
         <article class="overview-card"><span>监管来源</span><strong>${sourceCount} 个</strong></article>
       </div>
     </section>
+    <details class="runtime-panel">
+      <summary>运行信息（默认折叠）</summary>
+      <div><span>检测基线<strong>${escapeHtml(result.runtimeInfo?.detection_baseline || "V1")}</strong></span><span>文档字符<strong>${result.rawText.length}</strong></span><span>文档分块<strong>${countValue(result.runtimeInfo?.document_chunks) || 1}</strong></span><span>Parser calls<strong>${countValue(result.runtimeInfo?.parser_calls)}</strong></span><span>Cache hits<strong>${countValue(result.runtimeInfo?.cache_hits)}</strong></span><span>RAG calls<strong>${countValue(result.runtimeInfo?.rag_calls)}</strong></span><span>审核耗时<strong>${countValue(result.runtimeInfo?.latency_ms)} ms</strong></span></div>
+    </details>
     <section class="audit-pipeline" id="audit-pipeline"></section>
     <section class="material-card">
       <header><h2>原始审核材料</h2><span>${findings.length ? "点击风险卡片查看对应原文位置" : "完整原文"}</span></header>
@@ -742,6 +801,100 @@ function renderDetail() {
   });
 }
 
+function renderBatchResults(payload) {
+  state.batchResults = payload.items || [];
+  const target = $("#batch-results");
+  target.classList.remove("is-hidden");
+  const finished = ["completed", "partial"].includes(payload.status);
+  const statusLabel = payload.status === "completed"
+    ? "全部完成" : payload.status === "partial" ? "部分完成" : payload.status === "processing" ? "处理中" : "排队中";
+  target.innerHTML = `<header class="batch-result-heading"><div><span class="section-kicker">批量执行</span><h2>${countValue(payload.completed)} / ${countValue(payload.total)} 已完成</h2></div><span class="batch-status ${payload.status === "completed" ? "ok" : payload.status === "partial" ? "partial" : "running"}">${statusLabel}</span></header>
+    <div class="batch-progress"><i style="width:${Math.min(100, countValue(payload.progress))}%"></i></div>
+    <div class="batch-table">${state.batchResults.map((item, index) => {
+      const succeeded = item.status === "completed";
+      return `<article class="batch-row"><div><strong>${escapeHtml(item.title || item.material || `材料 ${index + 1}`)}</strong><small>${escapeHtml(item.source_type || "待解析")} · ${succeeded ? `${countValue(item.finding_count)} Findings` : item.status === "failed" ? escapeHtml(apiErrorLabels[item.error] || item.error || "处理失败") : "正在执行 V1 审核"}</small></div><span class="risk-pill ${succeeded ? riskClass(item.risk_level) : item.status === "failed" ? "risk-high" : "risk-low"}">${succeeded ? riskLabel(item.risk_level) : item.status === "failed" ? "失败" : "处理中"}</span>${succeeded ? `<button class="secondary-button" type="button" data-batch-index="${index}">查看结果</button>` : ""}</article>`;
+    }).join("")}</div>${finished ? "" : '<p class="batch-polling">后台正在以最多 3 个并发任务处理；页面只展示真实状态。</p>'}`;
+  target.querySelectorAll("[data-batch-index]").forEach((button) => {
+    button.addEventListener("click", () => openBatchResult(Number(button.dataset.batchIndex)));
+  });
+}
+
+function wait(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+async function pollBatch(batchId) {
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    const payload = await fetchJson(`/api/platform/batches/${batchId}`);
+    renderBatchResults(payload);
+    if (["completed", "partial"].includes(payload.status)) return payload;
+    await wait(800);
+  }
+  throw new Error("批量审核等待超时，可稍后重新进入批量页查看状态。");
+}
+
+async function runBatchReview() {
+  const files = [...($("#batch-file-input").files || [])];
+  if (!files.length || files.length > 20) {
+    showToast("请选择 1 至 20 份材料。", true);
+    return;
+  }
+  const button = $("#batch-review-form button[type='submit']");
+  button.disabled = true;
+  button.textContent = "提交批量任务中…";
+  try {
+    const form = new FormData();
+    files.forEach((file) => form.append("files", file));
+    form.append("material_type", $("#batch-material-type").value);
+    const created = await fetchJson("/api/platform/batches", { method: "POST", body: form });
+    renderBatchResults(created);
+    await pollBatch(created.batch_id);
+  } catch (error) {
+    showToast(`批量审核未完成：${error.message}`, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = "开始批量审核";
+  }
+}
+
+async function openBatchResult(index) {
+  const item = state.batchResults[index];
+  if (!item?.report_endpoints) return;
+  showView("processing");
+  $("#processing-title").textContent = "正在读取已完成结果…";
+  $("#processing-copy").textContent = "仅读取已保存的 V1 Finding 与 EvidenceLink，不触发新的解释调用。";
+  try {
+    const [screening, institutionReport, consumerReport] = await Promise.all([
+      fetchJson(item.report_endpoints.detail),
+      fetchJson(item.report_endpoints.institution),
+      fetchJson(item.report_endpoints.consumer),
+    ]);
+    const findings = screening.findings.map((row) => apiFinding(row, null, null));
+    setCurrentResult({
+      id: `batch-${item.platform_result_id}`,
+      number: `审核编号 ${item.platform_result_id.slice(0, 12)}`,
+      title: item.title,
+      rawText: screening.material.raw_text,
+      materialType: screening.material.material_type,
+      riskLevel: item.risk_level,
+      findings,
+      mode: "V1 检测核心 + 批量平台任务",
+      status: item.status,
+      institutionReport,
+      consumerReport,
+      evidenceSummary: institutionReport.evidence_summary || {},
+      explanationStatus: { status: "not_requested", audiences: {} },
+      screeningDiagnostics: screening.evidence_evaluation_summary || {},
+      runtimeInfo: screening.runtime || {},
+      reportEndpoints: item.report_endpoints,
+    });
+    showView("result");
+  } catch (error) {
+    showView("batch");
+    showToast(`批量结果读取失败：${error.message}`, true);
+  }
+}
+
 function updateTextCount() {
   const target = $("#text-count");
   if (target) target.textContent = String($("#material-text").value.length);
@@ -758,18 +911,33 @@ function bindEvents() {
     const item = demoCases.find((value) => value.id === caseButton.dataset.runCase);
     if (item) playDemo(item);
   });
-  $("#material-text").addEventListener("input", updateTextCount);
+  $("#material-text").addEventListener("input", () => {
+    if (state.pendingFile) {
+      state.pendingFile = null;
+      $("#file-input").value = "";
+    }
+    updateTextCount();
+  });
   $("#file-input").addEventListener("change", async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    $("#material-text").value = await file.text();
-    $("#material-title").value = file.name.replace(/\.txt$/i, "") || "导入文本材料";
+    state.pendingFile = file;
+    const textPreview = /\.(txt|md)$/i.test(file.name) ? await file.text() : "";
+    $("#material-text").value = textPreview;
+    $("#material-text").placeholder = textPreview
+      ? "已读取文本预览，可直接提交。"
+      : `已选择 ${file.name}；文档内容将在服务器内存中安全解析。`;
+    $("#material-title").value = file.name.replace(/\.(txt|md|docx|pdf)$/i, "") || "导入材料";
     updateTextCount();
-    showToast("TXT 文本已载入，尚未提交审核。请确认内容后点击开始智能审核。");
+    showToast(`${file.name} 已选择，尚未提交审核。`);
   });
   $("#live-review-form").addEventListener("submit", (event) => {
     event.preventDefault();
     runLiveReview();
+  });
+  $("#batch-review-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    runBatchReview();
   });
 }
 

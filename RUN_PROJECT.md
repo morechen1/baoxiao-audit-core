@@ -75,6 +75,10 @@ macOS Finder 双击：
 启动成功后访问 `http://127.0.0.1:8000/`。运行日志仅写入本机 `runtime/logs/`，该目录不在
 提交 ZIP 中。
 
+启动后可在“新建审核”中粘贴文本或上传 TXT、MD、DOCX、文本型 PDF；“批量审核”支持
+单批最多 20 份文件。结果页可导出真实后端生成的 HTML / JSON 报告。扫描型 PDF 会提示
+当前不支持 OCR，不会进入伪审核流程。
+
 ## 7. 手动启动
 
 通用终端：
@@ -138,6 +142,7 @@ Parser 仍可能执行。
 curl http://127.0.0.1:8000/health
 python3 scripts/verify_final_validation.py
 ./检查完整性.command
+python3 scripts/verify_v1_core_integrity.py
 ```
 
 完整开发质量检查：
@@ -147,6 +152,9 @@ make lint
 make typecheck
 make test
 ```
+
+平台整合硬门槛是 `V1 CORE INTEGRITY VERIFIED`。它会递归比较当前受保护 detector、RAG、
+migrations 和可信知识资产与 `16ebd6b` 的字节内容。
 
 ## 13. 最终项目版本
 

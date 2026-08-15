@@ -9,6 +9,7 @@ from app.api.routes import (
     explanations_router,
     health_router,
     knowledge_router,
+    platform_router,
     screenings_router,
     sources_router,
     workflow_router,
@@ -30,6 +31,7 @@ app.include_router(sources_router)
 app.include_router(workflow_router)
 app.include_router(knowledge_router)
 app.include_router(screenings_router)
+app.include_router(platform_router)
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")

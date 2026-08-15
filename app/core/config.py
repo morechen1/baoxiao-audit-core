@@ -24,6 +24,14 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = Field(default=30, gt=0, le=120)
     semantic_parser_enabled: bool = False
     semantic_screening_enabled: bool = False
+    max_upload_bytes: int = Field(default=10 * 1024 * 1024, ge=1024, le=50 * 1024 * 1024)
+    max_batch_items: int = Field(default=20, ge=1, le=20)
+    platform_batch_concurrency: int = Field(default=3, ge=2, le=4)
+    platform_long_chunk_chars: int = Field(default=90_000, ge=10_000, le=99_000)
+    platform_long_chunk_overlap: int = Field(default=240, ge=0, le=2_000)
+    platform_max_document_chunks: int = Field(default=32, ge=1, le=64)
+    semantic_parser_cache_enabled: bool = True
+    semantic_parser_cache_entries: int = Field(default=256, ge=1, le=4096)
     embedding_enabled: bool = False
     embedding_provider: str = "disabled"
     embedding_model: str = ""

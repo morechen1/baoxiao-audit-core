@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#f7faf8" />
     <title>保销智审｜保险营销智能合规审核</title>
     <link rel="icon" href="/static/favicon.svg?v=pipeline-validation-20260809" type="image/svg+xml" />
-    <link rel="stylesheet" href="/static/styles.css?v=extended-validation-20260809" />
+    <link rel="stylesheet" href="/static/styles.css?v=v1-core-platform-integration-20260815" />
   </head>
   <body>
     <main class="app-shell">
@@ -24,6 +24,9 @@
           </button>
           <button class="nav-item" data-view-target="review">
             <span class="nav-icon" aria-hidden="true">＋</span><span>新建审核</span>
+          </button>
+          <button class="nav-item" data-view-target="batch">
+            <span class="nav-icon" aria-hidden="true">▦</span><span>批量审核</span>
           </button>
           <button class="nav-item is-hidden" id="result-nav" data-view-target="result">
             <span class="nav-icon" aria-hidden="true">✓</span><span>当前审核结果</span>
@@ -53,9 +56,9 @@
             <div class="welcome-copy">
               <span class="section-kicker">保险营销合规审查</span>
               <h1>保险营销材料智能审核</h1>
-              <p>通过规则识别、语义解析与可信监管知识，形成可追溯的风险 Finding 与合规解释。</p>
+              <p>接入文本与常用文档，通过 V1 可信检测核心形成可追溯的风险 Finding、监管证据与双端解释。</p>
               <div class="capability-tags" aria-label="系统能力">
-                <span>规则筛查</span><span>语义解析</span><span>可信知识</span><span>证据溯源</span>
+                <span>文本 / 文档接入</span><span>V1 双通道检测</span><span>可信知识</span><span>批量审核</span><span>报告导出</span>
               </div>
               <button class="primary-button" id="dashboard-start">
                 <span class="button-shield" aria-hidden="true">✓</span>开始一次审核
@@ -131,8 +134,8 @@
 
               <div class="form-tools">
                 <label class="file-picker">
-                  <input id="file-input" type="file" accept="text/plain,.txt" />
-                  <span aria-hidden="true">⇧</span>导入 TXT 文本
+                  <input id="file-input" type="file" accept=".txt,.md,.docx,.pdf,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+                  <span aria-hidden="true">⇧</span>导入 TXT / MD / DOCX / PDF
                 </label>
                 <span id="provider-status" class="provider-status">正在读取解释 Provider…</span>
               </div>
@@ -151,6 +154,35 @@
               </div>
             </aside>
           </div>
+        </section>
+
+        <section id="batch" class="view">
+          <header class="page-heading">
+            <span class="section-kicker">平台能力</span>
+            <h1>批量材料审核</h1>
+            <p>一次提交 1–20 份 TXT、MD、DOCX 或文本型 PDF；单项失败不会影响其他材料。</p>
+          </header>
+          <form class="batch-form surface-card" id="batch-review-form">
+            <div class="field-row">
+              <label class="field">统一材料类型
+                <select id="batch-material-type">
+                  <option value="advertisement">宣传广告</option>
+                  <option value="sales_script">销售话术</option>
+                  <option value="social_media">社交媒体</option>
+                  <option value="product_introduction">产品介绍</option>
+                  <option value="other">其他文本</option>
+                </select>
+              </label>
+              <label class="field">选择材料（最多 20 份）
+                <input id="batch-file-input" type="file" multiple required accept=".txt,.md,.docx,.pdf,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+              </label>
+            </div>
+            <div class="batch-submit-row">
+              <p>批量任务保留 queued / processing / success / failed 状态；查看详情不会自动触发解释 Provider。</p>
+              <button class="primary-button" type="submit">开始批量审核</button>
+            </div>
+          </form>
+          <section class="batch-results surface-card is-hidden" id="batch-results" aria-live="polite"></section>
         </section>
 
         <section id="processing" class="view processing-view" aria-live="polite">
@@ -178,7 +210,7 @@
             </div>
           </header>
 
-          <p class="validation-intro">以下结果来自系统冻结后一次性执行的 156 条扩展验证样本，用于评估当前风险发现、确定性校验与可信证据链的表现。该验证集为项目内部构建并冻结，不等同于独立第三方 Benchmark。</p>
+          <p class="validation-intro">以下结果来自系统冻结后一次性执行的 156 条扩展验证样本，用于评估当前风险发现、确定性校验与可信证据链的表现。该验证集为项目内部构建并冻结，不等同于独立第三方 Benchmark。以上指标对应 V1 核心风险识别冻结验证；文件接入、批量审核和长文本编排属于平台能力扩展。</p>
 
           <section class="validation-metrics" aria-label="核心验证指标">
             <article><span>Micro Precision</span><strong>79.50%</strong><small>128 TP / 33 FP</small></article>
@@ -250,6 +282,6 @@
     </main>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script src="/static/app.js?v=extended-validation-20260809"></script>
+    <script src="/static/app.js?v=v1-core-platform-integration-20260815"></script>
   </body>
 </html>

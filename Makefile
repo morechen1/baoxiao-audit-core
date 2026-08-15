@@ -1,4 +1,4 @@
-.PHONY: install format lint typecheck test up down migrate seed review-demo demo demo-smoke final-demo final-demo-smoke start-project verify-validation
+.PHONY: install format lint typecheck test up down migrate seed review-demo demo demo-smoke final-demo final-demo-smoke start-project verify-validation verify-core build-platform-candidate
 
 install:
 	python3 -m venv .venv
@@ -49,4 +49,10 @@ start-project:
 	./scripts/start_project.sh
 
 verify-validation:
-	python3 scripts/verify_final_validation.py
+	.venv/bin/python scripts/verify_final_validation.py
+
+verify-core:
+	.venv/bin/python scripts/verify_v1_core_integrity.py
+
+build-platform-candidate:
+	.venv/bin/python scripts/build_platform_candidate.py

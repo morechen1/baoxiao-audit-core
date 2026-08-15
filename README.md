@@ -15,6 +15,11 @@
 - 机构/消费者双端解释：两个 audience 的 Artifact 与 Citation 独立绑定。
 - Citation / Claim / Uncertainty validation：非法输出失败关闭，不降级为自由文本。
 - 完整审核流程可视化：工作台、材料审核、原文高亮、Finding 切换、双端视图和检测效果页。
+- 多格式材料接入：支持粘贴文本、UTF-8 TXT、MD、DOCX（段落与表格）及文本型 PDF。
+- 文档级 V1 编排：超长文本在外围确定性分块，Finding span 映射回完整原文。
+- 批量审核：单批最多 20 份材料，2–4 并发，单项失败隔离并显示真实进度。
+- 审核报告：从已完成的后端结果导出 HTML / JSON，不由浏览器伪造 Finding 或证据。
+- 运行信息：默认折叠展示 Parser calls、缓存、文档分块、RAG calls 和耗时。
 - 冻结验证资产：156 条逐 case 数据、预测、汇总指标和离线复核命令完整保留。
 
 ## 系统架构
@@ -22,6 +27,12 @@
 ```text
 Raw marketing material
         │
+        ├── Text / TXT / MD / DOCX / text PDF
+        │              │
+        │       Material normalization
+        │              │
+        │    short direct V1 / long V1 orchestration
+        │              │
         ├── Deterministic rules ── rule context gates ──┐
         │                                                │
         └── Semantic Parser ── semantic safety gates ────┤
@@ -129,6 +140,10 @@ Provider 不可用时 fail closed，确定性规则、可信知识、基础报�
 Truth。逐 case 预测、数据 SHA、RAG smoke 和统计定义位于
 `data/evaluations/final_extended_frozen_validation_v1/`。无需调用 Provider 即可复核：
 
+当前正式风险识别核心沿用 V1 冻结检测基线。156 条项目内部冻结验证中，Micro Precision
+79.50%、Micro Recall 88.89%、Micro F1 83.93%。文件接入、批量审核和长文档编排属于
+平台功能扩展，不等同于该 156 条基准重新验证。
+
 ```bash
 make verify-validation
 ```
@@ -151,6 +166,7 @@ LLM 不能：
 
 ```text
 app/                    API、模型、业务服务、Provider、规则、Prompt 与前端
+app/services/platform/  文件接入、V1兼容编排、精确缓存、批量状态与报告导出
 scripts/                启动、数据库恢复、验证复核、秘密扫描与发布构建
 migrations/             Alembic 数据库迁移
 tests/                  单元、集成与前端契约测试
@@ -174,6 +190,7 @@ make verify-validation
 ## 明确限制
 
 - 不提供 OCR 生产服务、Embedding、向量数据库或自动法律结论。
+- PDF 仅支持可提取文本；扫描型 PDF 会明确拒绝，不会假装执行 OCR。
 - 可信检索使用受控的 PostgreSQL 中文词法排序，不宣称标准 BM25。
 - 当前发布未包含生产级身份认证、密钥托管或多租户隔离。
 - 审核结果是风险信号和复核辅助，不构成违法认定或最终法律意见。
