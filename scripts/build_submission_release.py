@@ -16,6 +16,9 @@ from pathlib import Path
 
 PROJECT_NAME = "保销智审"
 PACKAGE_NAME = "保销智审_完整一键启动版"
+RELEASE_TYPE = "FULL SOURCE PLATFORM-ENHANCED SUBMISSION"
+DETECTION_BASE = "16ebd6b2dece09a66f9d130ee9e87c669ca2305e"
+PLATFORM_INTEGRATION = "44ad1e64f1ad5b9d5e5d1a4f8457d75202d7c33d"
 SYSTEM_FREEZE = "1176d10e1fd62b7778324157e585b1f22b3cb035"
 EVALUATION_CHECKPOINT = "b6bdd4c15d6795106341104400d13b7b8b2e3184"
 DATASET_SHA = "fb67cb12f5e44f5c55d74794856a4beb0616cd74e3d5bf656da6013e6b3736ed"
@@ -65,14 +68,22 @@ def remove_forbidden(root: Path) -> None:
 
 def package_info(commit: str, created_at: str) -> str:
     return f"""Project: {PROJECT_NAME}
-Release type: FULL SOURCE SUBMISSION PACKAGE
-Source HEAD: {commit}
-System freeze: {SYSTEM_FREEZE}
-Evaluation: {EVALUATION_CHECKPOINT}
-Release checkpoint: {commit}
+Release type: {RELEASE_TYPE}
+Detection baseline: V1 frozen core
+Detection base commit: {DETECTION_BASE}
+Platform integration commit: {PLATFORM_INTEGRATION}
+Current release commit: {commit}
 Trusted sources: 15
 Knowledge chunks: 73
-Frozen validation cases: 156
+Frozen validation: 156
+Micro Precision: 79.50%
+Micro Recall: 88.89%
+Micro F1: 83.93%
+Input: Text / TXT / MD / DOCX / PDF
+Batch review: YES
+Long document: YES
+Report: HTML / JSON
+One-click: YES
 Secrets included: NO
 Local virtualenv included: NO
 Git history included: NO
@@ -94,8 +105,12 @@ def sha256(path: Path) -> str:
 def write_manifest(root: Path, commit: str, created_at: str) -> None:
     manifest = {
         "project_name": PROJECT_NAME,
-        "release_version": "final-submission-2026.08.09",
+        "release_type": RELEASE_TYPE,
+        "release_version": "platform-enhanced-submission-v1",
         "source_commit": commit,
+        "detection_base_commit": DETECTION_BASE,
+        "platform_integration_commit": PLATFORM_INTEGRATION,
+        "current_release_commit": commit,
         "system_freeze_commit": SYSTEM_FREEZE,
         "evaluation_commit": EVALUATION_CHECKPOINT,
         "release_commit": commit,
@@ -107,7 +122,23 @@ def write_manifest(root: Path, commit: str, created_at: str) -> None:
         "trusted_source_count": 15,
         "knowledge_chunk_count": 73,
         "validation_case_count": 156,
+        "validation_sha": DATASET_SHA,
         "validation_dataset_sha256": DATASET_SHA,
+        "platform_capabilities": [
+            "text_input",
+            "txt_input",
+            "markdown_input",
+            "docx_input",
+            "text_pdf_input",
+            "long_document_orchestration",
+            "batch_review",
+            "evidence_link",
+            "institution_explanation",
+            "consumer_explanation",
+            "html_report",
+            "json_report",
+            "fail_closed",
+        ],
         "files_sha256_manifest": "SHA256SUMS",
         "secrets_included": False,
     }

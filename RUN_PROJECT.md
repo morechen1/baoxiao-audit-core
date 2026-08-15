@@ -158,8 +158,8 @@ migrations 和可信知识资产与 `16ebd6b` 的字节内容。
 
 ## 13. 最终项目版本
 
-- 算法系统冻结：`1176d10e1fd62b7778324157e585b1f22b3cb035`
-- 156 条评测 checkpoint：`b6bdd4c15d6795106341104400d13b7b8b2e3184`
-- 发布前展示 checkpoint：`e1be3eb895afc20eade576177f70fc915f4792cd`
+- 检测基线：`16ebd6b2dece09a66f9d130ee9e87c669ca2305e`
+- 平台整合：`44ad1e64f1ad5b9d5e5d1a4f8457d75202d7c33d`
+- 156 条冻结验证 checkpoint：`b6bdd4c15d6795106341104400d13b7b8b2e3184`
 - 最终发布 checkpoint、文件 SHA 和构建时间：见交付包根目录 `RELEASE_MANIFEST.json` 与
   `SHA256SUMS`。

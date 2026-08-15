@@ -18,12 +18,13 @@
 V2 未通过替换 V1 的预设 Recall/F1 门槛。V2 unseen holdout 已完成唯一一次冻结评测，
 不得重跑、用于调参或作为本候选的开发数据。
 
-## V1 Platform Integration Candidate
+## PLATFORM ENHANCED SUBMISSION RELEASE
 
-- Base: `submission-v1` / `16ebd6b2dece09a66f9d130ee9e87c669ca2305e`
-- Detector: V1 unchanged
+- Detection base: `16ebd6b2dece09a66f9d130ee9e87c669ca2305e`
+- Platform integration: `44ad1e64f1ad5b9d5e5d1a4f8457d75202d7c33d`
+- Detector: V1 frozen detection core, unchanged
 - Branch: `upgrade/v1-core-v2-platform`
-- Status: **INTEGRATION CANDIDATE**
+- Status: **SUBMISSION RELEASE**
 
 Platform capabilities:
 
@@ -34,4 +35,5 @@ Platform capabilities:
 - exact Semantic Parser result cache and runtime diagnostics;
 - Provider fail-closed user experience.
 
-This candidate does not rerun or relabel the V1 156-case evaluation and is not named V2 Release.
+检测核心未改变。V1 156 条项目内部冻结验证仍是当前正式检测核心对应指标；
+文件接入、批量审核、长文档编排和报告导出属于平台能力扩展，未重跑或重标该验证集。
