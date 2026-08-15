@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
+import shutil
 import subprocess
+import sys
+import zipfile
 from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
@@ -43,6 +47,139 @@ def test_secret_scanner_never_prints_secret_value(tmp_path: Path) -> None:
     assert secret not in completed.stderr
 
 
+def test_competition_runtime_secret_policy_allows_exact_credential_file(
+    tmp_path: Path,
+) -> None:
+    secret = "sk-" + "c0ffee12" * 4
+    config = tmp_path / "config"
+    config.mkdir()
+    (config / "local.env").write_text(
+        "\n".join(
+            (
+                "LLM_ENABLED=true",
+                "LLM_PROVIDER=openai_compatible",
+                "LLM_BASE_URL=https://api.deepseek.com",
+                "LLM_MODEL=deepseek-v4-flash",
+                f"LLM_API_KEY={secret}",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [
+            "python3",
+            str(ROOT / "scripts/scan_release_secrets.py"),
+            str(tmp_path),
+            "--mode",
+            "competition-runtime",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stdout
+    assert "COMPETITION_RUNTIME_CHECK=PASS" in completed.stdout
+    assert "Actual credential files: 1" in completed.stdout
+    assert "Unexpected secret files: 0" in completed.stdout
+    assert secret not in completed.stdout
+    assert secret not in completed.stderr
+
+
+def test_competition_runtime_secret_policy_rejects_other_locations(
+    tmp_path: Path,
+) -> None:
+    secret = "sk-" + "deadbeef" * 4
+    config = tmp_path / "config"
+    config.mkdir()
+    (config / "local.env").write_text(f"LLM_API_KEY={secret}\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text(f"do not leak {secret}\n", encoding="utf-8")
+    completed = subprocess.run(
+        [
+            "python3",
+            str(ROOT / "scripts/scan_release_secrets.py"),
+            str(tmp_path),
+            "--mode",
+            "competition-runtime",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 1
+    assert "COMPETITION_RUNTIME_CHECK=FAIL" in completed.stdout
+    assert "Unexpected secret files: 1" in completed.stdout
+    assert secret not in completed.stdout
+    assert secret not in completed.stderr
+
+
+def test_competition_runtime_builder_places_credential_once_without_printing_it(
+    tmp_path: Path,
+) -> None:
+    secret = "sk-" + "1234abcd" * 4
+    source = tmp_path / "source" / "保销智审_完整一键启动版"
+    (source / "config").mkdir(parents=True)
+    (source / "scripts").mkdir()
+    shutil.copy2(ROOT / "scripts/scan_release_secrets.py", source / "scripts")
+    (source / "config/local.env.example").write_text("LLM_API_KEY=\n", encoding="utf-8")
+    (source / "一键启动.command").write_text("#!/bin/sh\n", encoding="utf-8")
+    (source / "scripts/start_project.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    (source / "PACKAGE_INFO.txt").write_text("source\n", encoding="utf-8")
+    (source / "RELEASE_MANIFEST.json").write_text(
+        json.dumps(
+            {
+                "current_release_commit": "a4b139cf64757cf52f292107eb1c7aac3f7f7e75",
+                "source_commit": "a4b139cf64757cf52f292107eb1c7aac3f7f7e75",
+                "secrets_included": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (source / "SHA256SUMS").write_text("", encoding="utf-8")
+    credential = tmp_path / "local.env"
+    credential.write_text(
+        "\n".join(
+            (
+                "LLM_BASE_URL=https://api.deepseek.com",
+                "LLM_MODEL=deepseek-v4-flash",
+                f"LLM_API_KEY={secret}",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    output_zip = tmp_path / "runtime.zip"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/build_competition_runtime_package.py"),
+            "--source-package-dir",
+            str(source),
+            "--staging-root",
+            str(tmp_path / "runtime"),
+            "--runtime-config",
+            str(credential),
+            "--zip-path",
+            str(output_zip),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "COMPETITION_RUNTIME_CHECK=PASS" in completed.stdout
+    assert secret not in completed.stdout
+    assert secret not in completed.stderr
+    with zipfile.ZipFile(output_zip) as archive:
+        names = archive.namelist()
+        credential_name = "保销智审_完整一键启动版/config/local.env"
+        assert names.count(credential_name) == 1
+        manifest = json.loads(archive.read("保销智审_完整一键启动版/RELEASE_MANIFEST.json"))
+        assert manifest["runtime_provider_credential_included"] is True
+        assert manifest["runtime_provider"] == "DeepSeek"
+        assert manifest["runtime_model"] == "deepseek-v4-flash"
+
+
 def test_release_config_and_launchers_are_safe() -> None:
     template = (ROOT / "config/local.env.example").read_text(encoding="utf-8")
     assert "LLM_API_KEY=\n" in template
@@ -57,6 +194,12 @@ def test_release_config_and_launchers_are_safe() -> None:
     ):
         assert path.exists()
         assert os.access(path, os.X_OK)
+    integrity = (ROOT / "检查完整性.command").read_text(encoding="utf-8")
+    assert 'SCAN_MODE="competition-runtime"' in integrity
+    assert 'scripts/scan_release_secrets.py "$ROOT_DIR" --mode "$SCAN_MODE"' in integrity
+    assert "程序完整性：PASS" in integrity
+    assert "运行凭据：已配置" in integrity
+    assert "Provider：READY" in integrity
 
 
 def test_release_contains_complete_trusted_restore_assets() -> None:

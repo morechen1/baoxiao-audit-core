@@ -37,11 +37,43 @@ PARSED_COUNT="$(find release_assets/trusted_data/parsed_artifacts -type f | wc -
 PYTHON="$ROOT_DIR/.venv/bin/python"
 [[ -x "$PYTHON" ]] || { echo "缺少 .venv，请先双击一键启动完成依赖安装。" >&2; exit 1; }
 "$PYTHON" scripts/verify_final_validation.py
-"$PYTHON" scripts/verify_v1_core_integrity.py
-"$PYTHON" scripts/scan_release_secrets.py "$ROOT_DIR"
+if [[ -d .git ]]; then
+  "$PYTHON" scripts/verify_v1_core_integrity.py
+fi
+
+SCAN_MODE="source-release"
+RUNTIME_CREDENTIAL_READY=false
+if [[ -f config/local.env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source config/local.env
+  set +a
+  if [[ -n "${LLM_API_KEY:-}" ]] \
+    && [[ -n "${LLM_BASE_URL:-}" ]] \
+    && [[ -n "${LLM_MODEL:-}" ]]; then
+    SCAN_MODE="competition-runtime"
+    RUNTIME_CREDENTIAL_READY=true
+  fi
+fi
+"$PYTHON" scripts/scan_release_secrets.py "$ROOT_DIR" --mode "$SCAN_MODE"
 
 if [[ -f SHA256SUMS ]]; then
   shasum -a 256 -c SHA256SUMS
 fi
 
-echo "完整性检查通过：V1 核心、平台源码、可信知识、冻结验证资产与秘密扫描均通过。"
+if [[ "$RUNTIME_CREDENTIAL_READY" == true ]]; then
+  PROVIDER_READY="$($PYTHON - <<'PY'
+from app.services.explanation import configured_provider_status
+
+print("true" if configured_provider_status().get("ready") else "false")
+PY
+)"
+  [[ "$PROVIDER_READY" == "true" ]] || { echo "Provider：NOT READY" >&2; exit 1; }
+  echo "程序完整性：PASS"
+  echo "运行凭据：已配置"
+  echo "Provider：READY"
+else
+  echo "程序完整性：PASS"
+  echo "运行凭据：未配置（源码发布模式）"
+  echo "Provider：NOT CONFIGURED"
+fi
