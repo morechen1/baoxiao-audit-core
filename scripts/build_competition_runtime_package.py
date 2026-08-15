@@ -92,7 +92,7 @@ def write_manifest(root: Path, manifest: dict[str, object], build_id: str) -> No
     manifest.update(
         {
             "release_type": RUNTIME_RELEASE_TYPE,
-            "release_version": "platform-enhanced-submission-v1.1-competition-runtime",
+            "release_version": "platform-enhanced-submission-v1.2-competition-runtime",
             "runtime_provider_credential_included": True,
             "runtime_provider": RUNTIME_PROVIDER,
             "runtime_model": RUNTIME_MODEL,
